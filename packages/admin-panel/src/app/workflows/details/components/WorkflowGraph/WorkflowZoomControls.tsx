@@ -11,13 +11,13 @@ const PERCENT = 100;
 /** Share of the canvas Fit leaves empty around the graph. */
 const FIT_PADDING = 0.1;
 
-/** Zoom out, the current zoom, zoom in and fit-to-view for the graph in the same provider. */
+/** Zoom out, the current zoom, zoom in and fit-to-view, floating on the graph's canvas. */
 export function WorkflowZoomControls(): ReactElement {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const { zoom } = useViewport();
 
   return (
-    <div className="flex items-center gap-2 **:leading-natural">
+    <div className="flex items-center gap-2 border border-border-rule bg-tsh-white px-3 py-2 **:leading-natural">
       <Typography variant="caps-tiny" className="text-fg-3">
         Zoom
       </Typography>

@@ -23,9 +23,9 @@ import { AdminRoute } from '../auth/admin-route.decorator';
 import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
 import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-responses.decorator';
 import { API_TAGS, WORKFLOW_DOCUMENT_SCHEMA, schemaRef } from '../openapi/openapi.constants';
-import { AdminWorkflowDraftDocumentResponseDto } from './dto/admin-workflow-draft-document.response.dto';
 import { AdminWorkflowDraftResponseDto } from './dto/admin-workflow-draft.response.dto';
 import { AdminWorkflowPublicationResponseDto } from './dto/admin-workflow-publication.response.dto';
+import { AdminWorkflowVersionDocumentResponseDto } from './dto/admin-workflow-version-document.response.dto';
 import { ListAdminWorkflowVersionsResponseDto } from './dto/list-admin-workflow-versions.response.dto';
 import { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import { ListAdminWorkflowsResponseDto } from './dto/list-admin-workflows.response.dto';
@@ -268,23 +268,22 @@ export class WorkflowsController {
   @Get(':workflowId/versions/:version/document')
   @AdminRoute()
   @ApiOperation({
-    operationId: 'getWorkflowDraftDocument',
-    summary: "Read a draft's document",
+    operationId: 'getWorkflowVersionDocument',
+    summary: "Read a version's document",
     description:
-      'The stored document of a draft, verbatim. Published and retired revisions answer ' +
-      '`409 WORKFLOW_VERSION_NOT_DRAFT` without any document: only drafts, which an admin typed ' +
-      'through this API, are served raw.',
+      'The stored document of a version, verbatim, whatever its status: draft, published or ' +
+      'retired. It includes connector `config` as written, so the route is admin-only.',
   })
   @ApiParam(WORKFLOW_ID_PARAM)
   @ApiParam(VERSION_PARAM)
   @ApiOkResponse({
-    type: AdminWorkflowDraftDocumentResponseDto,
-    description: 'The draft and its document.',
+    type: AdminWorkflowVersionDocumentResponseDto,
+    description: 'The version and its document.',
   })
-  @ApiErrorResponses(VALIDATION_ERROR, WorkflowNotFoundException, WorkflowVersionNotDraftException)
-  getDocument(
+  @ApiErrorResponses(VALIDATION_ERROR, WorkflowNotFoundException)
+  getVersionDocument(
     @Param() { workflowId, version }: WorkflowVersionParamsDto,
-  ): Promise<AdminWorkflowDraftDocumentResponseDto> {
+  ): Promise<AdminWorkflowVersionDocumentResponseDto> {
     return this.workflowDraftsService.getDocument(workflowId, version);
   }
 

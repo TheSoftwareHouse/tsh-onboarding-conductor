@@ -1,9 +1,11 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { Fragment, StrictMode } from 'react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/services/api/api-error';
 import { createQueryClient } from '@/services/query-client/create-query-client';
+import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -13,8 +15,9 @@ import {
   publishWorkflowDraft,
   updateWorkflowDraft,
   type WorkflowDraft,
-  type WorkflowDraftDocument,
+  type WorkflowVersionDocument,
 } from '@/api/workflows/workflow-drafts';
+import type { WorkflowDefinition } from '@/api/workflows/workflow-definitions';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
 import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
 import { ADMIN_ROUTES } from '@/constants/routes';
@@ -38,7 +41,7 @@ vi.mock('@/components/ui/Toast/toast-manager', () => ({
   showErrorToast: vi.fn(),
 }));
 
-vi.mock('./JsonEditor', () => ({
+vi.mock('../JsonEditor', () => ({
   JsonEditor: ({
     value,
     onChange,
@@ -61,7 +64,31 @@ const VERSION = 2;
 const DOCUMENT = { id: WORKFLOW_ID, version: VERSION, steps: [] };
 const SAVED_TEXT = JSON.stringify(DOCUMENT, null, 2);
 
-const DRAFT: WorkflowDraftDocument = {
+function stepOf(name: string): WorkflowDefinition['steps'][number] {
+  return {
+    name,
+    status: 'awaiting_user',
+    terminal: false,
+    transitions: [],
+    source: null,
+    fields: [],
+    connectors: [],
+  };
+}
+
+const WORKFLOW: WorkflowDefinition = {
+  workflowId: WORKFLOW_ID,
+  workflowVersion: VERSION,
+  name: null,
+  initialStep: 'collect',
+  scores: {},
+  webhook: null,
+  steps: [stepOf('collect'), stepOf('verify')],
+};
+
+const COMPILATION = { stepCount: 2, workflow: WORKFLOW };
+
+const DRAFT: WorkflowVersionDocument = {
   workflowId: WORKFLOW_ID,
   version: VERSION,
   status: 'draft',
@@ -75,7 +102,7 @@ function summary(overrides: Partial<WorkflowDraft> = {}): WorkflowDraft {
   return {
     workflowId: DRAFT.workflowId,
     version: DRAFT.version,
-    status: DRAFT.status,
+    status: 'draft',
     name: DRAFT.name,
     createdAt: DRAFT.createdAt,
     updatedAt: DRAFT.updatedAt,
@@ -99,38 +126,45 @@ function AtStartingUrl({
   gated: boolean;
 }): React.ReactElement | null {
   const { pathname, search } = useLocation();
-  return !gated || `${pathname}${search}` === STARTING_URL ? children : null;
+  return !gated || `${pathname}${search}` === startingUrl ? children : null;
 }
 
 let client: QueryClient;
+let startingUrl = STARTING_URL;
 
-function renderEditor({ staysMounted = false } = {}): void {
-  window.history.replaceState({}, '', STARTING_URL);
+function renderEditor({ staysMounted = false, search = '', strict = false } = {}): void {
+  startingUrl = `${STARTING_URL}${search}`;
+  window.history.replaceState({}, '', startingUrl);
+  const Root = strict ? StrictMode : Fragment;
   render(
-    <BrowserRouter>
-      <QueryClientProvider client={client}>
-        <Location />
-        <Routes>
-          <Route
-            path={ADMIN_ROUTES.workflows.detailsPattern}
-            element={
-              <AtStartingUrl gated={!staysMounted}>
-                <DraftEditor
-                  workflowId={WORKFLOW_ID}
-                  version={VERSION}
-                  renderHeader={({ actions, note }) => (
-                    <header>
-                      {note}
-                      {actions}
-                    </header>
-                  )}
-                />
-              </AtStartingUrl>
-            }
-          />
-        </Routes>
-      </QueryClientProvider>
-    </BrowserRouter>,
+    <Root>
+      <BrowserRouter>
+        <NuqsAdapter>
+          <QueryClientProvider client={client}>
+            <Location />
+            <Routes>
+              <Route
+                path={ADMIN_ROUTES.workflows.detailsPattern}
+                element={
+                  <AtStartingUrl gated={!staysMounted}>
+                    <DraftEditor
+                      workflowId={WORKFLOW_ID}
+                      version={VERSION}
+                      renderHeader={({ actions, note }) => (
+                        <header>
+                          {note}
+                          {actions}
+                        </header>
+                      )}
+                    />
+                  </AtStartingUrl>
+                }
+              />
+            </Routes>
+          </QueryClientProvider>
+        </NuqsAdapter>
+      </BrowserRouter>
+    </Root>,
   );
 }
 
@@ -189,7 +223,7 @@ describe('DraftEditor', () => {
     });
 
     it('shows how many steps a valid document has', async () => {
-      mockedCompile.mockResolvedValue({ stepCount: 3 });
+      mockedCompile.mockResolvedValue({ ...COMPILATION, stepCount: 3 });
       renderEditor();
       await editorText();
       await userEvent.click(screen.getByRole('button', { name: 'Validate' }));
@@ -222,6 +256,209 @@ describe('DraftEditor', () => {
       type(textarea, `${SAVED_TEXT} `);
 
       expect(screen.queryByText('WORKFLOW_INVALID')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Graph tab', () => {
+    const SYNTAX_ERROR_TEXT = '{"id":';
+
+    async function openGraph(): Promise<void> {
+      await userEvent.click(screen.getByRole('tab', { name: 'Graph' }));
+    }
+
+    async function openJson(): Promise<void> {
+      await userEvent.click(screen.getByRole('tab', { name: 'JSON' }));
+    }
+
+    function compileFailure(): ApiError {
+      return new ApiError('WORKFLOW_INVALID', {
+        status: 400,
+        code: 'WORKFLOW_INVALID',
+        body: { code: 'WORKFLOW_INVALID', message: 'WORKFLOW_INVALID', reason: 'DUPLICATE_STEP' },
+      });
+    }
+
+    beforeEach(() => {
+      mockedCompile.mockResolvedValue(COMPILATION);
+    });
+
+    it('selects JSON by default', async () => {
+      renderEditor({ staysMounted: true });
+      await editorText();
+
+      expect(screen.getByRole('tab', { name: 'JSON' })).toHaveAttribute('aria-selected', 'true');
+      expect(mockedCompile).not.toHaveBeenCalled();
+    });
+
+    it('compiles the current text once on opening and renders the inspector without stats', async () => {
+      renderEditor({ staysMounted: true });
+      await editorText();
+      await openGraph();
+
+      expect(
+        await within(await screen.findByRole('complementary')).findByRole('heading', {
+          name: 'collect',
+        }),
+      ).toBeInTheDocument();
+      expect(mockedCompile).toHaveBeenCalledTimes(1);
+      expect(mockedCompile).toHaveBeenCalledWith(DOCUMENT);
+      expect(screen.queryByText('Stats')).not.toBeInTheDocument();
+    });
+
+    it('shows the zoom controls on the draft graph canvas', async () => {
+      renderEditor({ staysMounted: true });
+      await editorText();
+      await openGraph();
+      await screen.findByRole('complementary');
+
+      const canvas = document.querySelector('.react-flow') as HTMLElement;
+      for (const name of ['Zoom out', 'Zoom in', 'Fit']) {
+        expect(within(canvas).getByRole('button', { name })).toBeInTheDocument();
+      }
+    });
+
+    it('sends no second compile for Graph, JSON, Graph without an edit', async () => {
+      renderEditor({ staysMounted: true });
+      await editorText();
+      await openGraph();
+      await screen.findByRole('complementary');
+      await openJson();
+      await openGraph();
+
+      expect(await screen.findByRole('complementary')).toBeInTheDocument();
+      expect(mockedCompile).toHaveBeenCalledTimes(1);
+    });
+
+    it('compiles again after an edit', async () => {
+      renderEditor({ staysMounted: true });
+      const textarea = await editorText();
+      await openGraph();
+      await screen.findByRole('complementary');
+      await openJson();
+      type(textarea, `${SAVED_TEXT} `);
+      await openGraph();
+
+      await waitFor(() => expect(mockedCompile).toHaveBeenCalledTimes(2));
+    });
+
+    it('sends no second compile after Validate', async () => {
+      renderEditor({ staysMounted: true });
+      await editorText();
+      await userEvent.click(screen.getByRole('button', { name: 'Validate' }));
+      await screen.findByText('Valid · 2 steps');
+      await openGraph();
+
+      expect(await screen.findByRole('complementary')).toBeInTheDocument();
+      expect(mockedCompile).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the error state on a failed compile, with the details above the tabs and a way back to JSON', async () => {
+      mockedCompile.mockRejectedValue(compileFailure());
+      renderEditor({ staysMounted: true });
+      await editorText();
+      await openGraph();
+
+      expect(
+        await screen.findByText('This draft does not compile. Fix it on the JSON tab.'),
+      ).toBeInTheDocument();
+      const details = screen.getByText('DUPLICATE_STEP');
+      expect(details.compareDocumentPosition(screen.getByRole('tablist'))).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'Show JSON' }));
+
+      expect(screen.getByRole('tab', { name: 'JSON' })).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('offers a Retry, not the compile error state, when the compile request fails', async () => {
+      mockedCompile.mockRejectedValueOnce(new ApiError('boom', { status: 500 }));
+      renderEditor({ staysMounted: true });
+      await editorText();
+      await openGraph();
+
+      expect(await screen.findByText('Unable to compile this draft: boom')).toBeInTheDocument();
+      expect(
+        screen.queryByText('This draft does not compile. Fix it on the JSON tab.'),
+      ).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+      expect(await screen.findByRole('complementary')).toBeInTheDocument();
+      expect(mockedCompile).toHaveBeenCalledTimes(2);
+    });
+
+    it('shows the error state for a syntax error and sends no request', async () => {
+      renderEditor({ staysMounted: true });
+      type(await editorText(), SYNTAX_ERROR_TEXT);
+      await openGraph();
+
+      expect(
+        await screen.findByText('This draft does not compile. Fix it on the JSON tab.'),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Invalid JSON:/)).toBeInTheDocument();
+      expect(mockedCompile).not.toHaveBeenCalled();
+    });
+
+    it('compiles straight away when mounted with ?view=graph', async () => {
+      renderEditor({ staysMounted: true, search: '&view=graph' });
+
+      expect(await screen.findByRole('complementary')).toBeInTheDocument();
+      expect(mockedCompile).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends one compile under StrictMode when mounted with ?view=graph', async () => {
+      renderEditor({ staysMounted: true, search: '&view=graph', strict: true });
+
+      expect(await screen.findByRole('complementary')).toBeInTheDocument();
+      expect(mockedCompile).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps unsaved text across Graph and back to JSON', async () => {
+      renderEditor({ staysMounted: true });
+      const textarea = await editorText();
+      type(textarea, `${SAVED_TEXT} `);
+      await openGraph();
+      await screen.findByRole('complementary');
+      await openJson();
+
+      expect((await editorText()).value).toBe(`${SAVED_TEXT} `);
+    });
+
+    it('shows the header actions on both tabs', async () => {
+      renderEditor({ staysMounted: true });
+      await editorText();
+      await openGraph();
+      await screen.findByRole('complementary');
+
+      for (const name of ['Discard', 'Validate', 'Save draft', 'Publish', 'Delete draft']) {
+        expect(screen.getByRole('button', { name })).toBeInTheDocument();
+      }
+      await openJson();
+      expect(screen.getByRole('button', { name: 'Validate' })).toBeInTheDocument();
+    });
+
+    it('shows the initial step when ?step names a step the edit removed', async () => {
+      renderEditor({ staysMounted: true, search: '&view=graph&step=gone' });
+
+      expect(
+        await within(await screen.findByRole('complementary')).findByRole('heading', {
+          name: 'collect',
+        }),
+      ).toBeInTheDocument();
+    });
+
+    it('ignores a result that arrives after a further edit', async () => {
+      let resolveCompile: (value: typeof COMPILATION) => void = () => undefined;
+      mockedCompile.mockReturnValueOnce(new Promise((resolve) => (resolveCompile = resolve)));
+      renderEditor({ staysMounted: true });
+      const textarea = await editorText();
+      await userEvent.click(screen.getByRole('button', { name: 'Validate' }));
+      type(textarea, `${SAVED_TEXT} `);
+      resolveCompile(COMPILATION);
+
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Validate' })).toBeEnabled());
+      expect(screen.queryByText(/^Valid ·/)).not.toBeInTheDocument();
     });
   });
 
@@ -443,7 +680,7 @@ describe('DraftEditor', () => {
             },
           }),
         )
-        .mockResolvedValueOnce({ stepCount: 3 });
+        .mockResolvedValueOnce({ ...COMPILATION, stepCount: 3 });
       renderEditor();
       await editorText();
       await clickPublish();
@@ -460,7 +697,7 @@ describe('DraftEditor', () => {
     });
 
     it('opens the dialog on a valid compile', async () => {
-      mockedCompile.mockResolvedValue({ stepCount: 3 });
+      mockedCompile.mockResolvedValue({ ...COMPILATION, stepCount: 3 });
       renderEditor();
       await editorText();
       await clickPublish();
@@ -470,7 +707,7 @@ describe('DraftEditor', () => {
     });
 
     it('publishes the bound draft on confirm, never saves, then toasts and lands on its version', async () => {
-      mockedCompile.mockResolvedValue({ stepCount: 3 });
+      mockedCompile.mockResolvedValue({ ...COMPILATION, stepCount: 3 });
       mockedPublish.mockResolvedValue(PUBLICATION);
       renderEditor();
       await editorText();
@@ -491,7 +728,7 @@ describe('DraftEditor', () => {
     });
 
     it('raises the error toast and closes the dialog when publishing fails', async () => {
-      mockedCompile.mockResolvedValue({ stepCount: 3 });
+      mockedCompile.mockResolvedValue({ ...COMPILATION, stepCount: 3 });
       mockedPublish.mockRejectedValue(
         new ApiError('WORKFLOW_VERSION_NOT_LATEST', {
           status: 409,
@@ -590,23 +827,18 @@ describe('DraftEditor', () => {
       expect(await screen.findByText('This draft no longer exists.')).toBeInTheDocument();
     });
 
-    it('says the version is no longer a draft on a 409', async () => {
-      mockedFetch.mockRejectedValue(
-        new ApiError('published', {
-          status: 409,
-          code: 'WORKFLOW_VERSION_NOT_DRAFT',
-          body: {
-            code: 'WORKFLOW_VERSION_NOT_DRAFT',
-            message: 'WORKFLOW_VERSION_NOT_DRAFT',
-            workflowId: 'kyc',
-            version: 2,
-            status: 'published',
-          },
-        }),
-      );
-      renderEditor();
+    it('refetches the versions instead of opening the editor when the version is no longer a draft', async () => {
+      mockedFetch.mockResolvedValue({ ...DRAFT, status: 'published' });
+      renderEditor({ staysMounted: true });
+      const invalidate = vi.spyOn(client, 'invalidateQueries');
 
-      expect(await screen.findByText('This version is no longer a draft.')).toBeInTheDocument();
+      expect(
+        await screen.findByText('This version is no longer a draft. Opening it…'),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: workflowQueries.versions(WORKFLOW_ID).queryKey,
+      });
     });
 
     it('offers a Retry on any other failure', async () => {

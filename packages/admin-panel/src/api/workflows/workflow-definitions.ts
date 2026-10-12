@@ -76,7 +76,7 @@ const workflowScoreSchema = z.object({
   max: z.number(),
 });
 
-const workflowDefinitionSchema = z.object({
+export const workflowDefinitionSchema = z.object({
   workflowId: z.string().min(1),
   workflowVersion: z.number().int().positive(),
   // Absent on a response from an engine build that predates the label; null then, as when no

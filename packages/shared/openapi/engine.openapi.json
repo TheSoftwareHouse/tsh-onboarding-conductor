@@ -1823,8 +1823,8 @@
     },
     "/v1/admin/workflows/{workflowId}/versions/{version}/document": {
       "get": {
-        "description": "The stored document of a draft, verbatim. Published and retired revisions answer `409 WORKFLOW_VERSION_NOT_DRAFT` without any document: only drafts, which an admin typed through this API, are served raw.",
-        "operationId": "getWorkflowDraftDocument",
+        "description": "The stored document of a version, verbatim, whatever its status: draft, published or retired. It includes connector `config` as written, so the route is admin-only.",
+        "operationId": "getWorkflowVersionDocument",
         "parameters": [
           {
             "name": "workflowId",
@@ -1851,11 +1851,11 @@
         ],
         "responses": {
           "200": {
-            "description": "The draft and its document.",
+            "description": "The version and its document.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminWorkflowDraftDocumentResponseDto"
+                  "$ref": "#/components/schemas/AdminWorkflowVersionDocumentResponseDto"
                 }
               }
             }
@@ -1915,31 +1915,6 @@
               }
             }
           },
-          "409": {
-            "description": "`WORKFLOW_VERSION_NOT_DRAFT`: The revision is not a draft; carries `workflowId`, `version` and `status`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "WORKFLOW_VERSION_NOT_DRAFT"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
           "503": {
             "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
             "content": {
@@ -1956,7 +1931,7 @@
             "entraBearer": []
           }
         ],
-        "summary": "Read a draft's document",
+        "summary": "Read a version's document",
         "tags": [
           "Admin: workflows"
         ]
@@ -6280,7 +6255,7 @@
           "items"
         ]
       },
-      "AdminWorkflowDraftDocumentResponseDto": {
+      "AdminWorkflowVersionDocumentResponseDto": {
         "type": "object",
         "properties": {
           "workflowId": {
@@ -6320,7 +6295,7 @@
           "document": {
             "type": "object",
             "additionalProperties": true,
-            "description": "The authored document as stored, verbatim. It may not compile: a draft is saved unchecked."
+            "description": "The authored document as stored, verbatim, including connector `config`. A draft may not compile: it is saved unchecked."
           }
         },
         "required": [

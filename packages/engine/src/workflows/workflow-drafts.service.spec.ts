@@ -270,20 +270,22 @@ describe('WorkflowDraftsService', () => {
       await expect(service.getDocument('flow', 1)).rejects.toThrow(WorkflowNotFoundException);
     });
 
-    it('answers 409 for a published revision and names its status', async () => {
-      const { service, repository } = createService();
+    it.each(['published', 'retired'] as const)(
+      'serves the stored document of a %s revision without locking',
+      async (status) => {
+        const { service, repository } = createService();
+        const definition = { id: 'flow', version: 1, anything: 'goes' };
 
-      repository.findRevision.mockResolvedValue(createRow({ status: 'published' }));
+        repository.findRevision.mockResolvedValue(createRow({ status, definition }));
 
-      const failure = await service.getDocument('flow', 1).catch((error: unknown) => error);
-
-      expect(failure).toBeInstanceOf(WorkflowVersionNotDraftException);
-      expect((failure as WorkflowVersionNotDraftException).getResponse()).toMatchObject({
-        workflowId: 'flow',
-        version: 1,
-        status: 'published',
-      });
-    });
+        await expect(service.getDocument('flow', 1)).resolves.toMatchObject({
+          workflowId: 'flow',
+          status,
+          document: definition,
+        });
+        expect(repository.lockRevision).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('update', () => {

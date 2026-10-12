@@ -37,6 +37,12 @@ const DRAFT = {
   updatedAt: '2026-10-06T09:00:00.000Z',
 };
 const DOCUMENT = { id: 'kyc', version: 2, steps: [] };
+const WORKFLOW = {
+  workflowId: 'kyc',
+  workflowVersion: 2,
+  initialStep: 'start',
+  steps: [{ name: 'start', status: 'start', terminal: true, transitions: [] }],
+};
 
 function axiosFailure(status: number, data?: unknown): AxiosError {
   const axiosError = new AxiosError(`Request failed with status code ${status}`);
@@ -107,12 +113,21 @@ describe('workflow draft requests', () => {
     expect(error.message).toBe('Response contains a malformed workflow draft.');
   });
 
-  it('compiles a document and reports its authored step count', async () => {
+  it.each(['published', 'retired'])('reads a %s version document', async (status) => {
+    mockedGet.mockResolvedValueOnce({ data: { ...DRAFT, status, document: DOCUMENT } });
+
+    await expect(fetchWorkflowDocument('kyc', 2)).resolves.toMatchObject({ status });
+  });
+
+  it('compiles a document and returns its step count and parsed workflow', async () => {
     mockedPost.mockResolvedValueOnce({
-      data: { definition: {}, steps: [{}, {}], workflow: {} },
+      data: { definition: {}, steps: [{}, {}], workflow: WORKFLOW },
     });
 
-    await expect(compileWorkflowDocument(DOCUMENT)).resolves.toEqual({ stepCount: 2 });
+    const result = await compileWorkflowDocument(DOCUMENT);
+
+    expect(result.stepCount).toBe(2);
+    expect(result.workflow).toMatchObject({ workflowId: 'kyc', initialStep: 'start' });
     expect(mockedPost).toHaveBeenCalledWith('/v1/admin/workflows/compile', DOCUMENT);
   });
 });
@@ -215,5 +230,13 @@ describe('draft ApiError', () => {
     mockedPost.mockResolvedValueOnce({ data: { definition: {} } });
 
     await catchError(compileWorkflowDocument(DOCUMENT));
+  });
+
+  it('rejects a compile payload whose workflow is malformed', async () => {
+    mockedPost.mockResolvedValueOnce({ data: { steps: [], workflow: {} } });
+
+    const error = await catchError(compileWorkflowDocument(DOCUMENT));
+
+    expect(error.kind).toBe('invalid-payload');
   });
 });

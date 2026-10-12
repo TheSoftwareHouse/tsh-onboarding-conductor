@@ -256,7 +256,7 @@ describe('WorkflowsController', () => {
     it('reads the document of the addressed version', async () => {
       const { controller, service } = createDraftController();
 
-      await controller.getDocument({ workflowId: 'flow', version: 2 });
+      await controller.getVersionDocument({ workflowId: 'flow', version: 2 });
 
       expect(service.getDocument).toHaveBeenCalledWith('flow', 2);
     });

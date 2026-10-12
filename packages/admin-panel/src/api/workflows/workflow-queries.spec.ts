@@ -7,7 +7,7 @@ import {
   type AdminWorkflowsPage,
 } from './admin-workflows';
 import { fetchWorkflowDefinition, type WorkflowDefinition } from './workflow-definitions';
-import { fetchWorkflowDocument, type WorkflowDraftDocument } from './workflow-drafts';
+import { fetchWorkflowDocument, type WorkflowVersionDocument } from './workflow-drafts';
 import { fetchWorkflowVersions, type WorkflowVersion } from './workflow-versions';
 
 vi.mock('./admin-workflows', async (importOriginal) => ({
@@ -121,7 +121,7 @@ describe('workflowQueries', () => {
     const client = new QueryClient();
     client.setQueryData(workflowQueries.detail('kyc').queryKey, {} as WorkflowDefinition);
     client.setQueryData(workflowQueries.detail('kyc', 3).queryKey, {} as WorkflowDefinition);
-    client.setQueryData(workflowQueries.document('kyc', 3).queryKey, {} as WorkflowDraftDocument);
+    client.setQueryData(workflowQueries.document('kyc', 3).queryKey, {} as WorkflowVersionDocument);
     client.setQueryData(workflowQueries.versions('kyc').queryKey, [] as WorkflowVersion[]);
     client.setQueryData(workflowQueries.versions('other').queryKey, [] as WorkflowVersion[]);
 
@@ -137,7 +137,7 @@ describe('workflowQueries', () => {
   it("lets one invalidation of a version's definition reach its document, and none of its family's other reads", async () => {
     const client = new QueryClient();
     client.setQueryData(workflowQueries.detail('kyc', 3).queryKey, {} as WorkflowDefinition);
-    client.setQueryData(workflowQueries.document('kyc', 3).queryKey, {} as WorkflowDraftDocument);
+    client.setQueryData(workflowQueries.document('kyc', 3).queryKey, {} as WorkflowVersionDocument);
     client.setQueryData(workflowQueries.detail('kyc', 2).queryKey, {} as WorkflowDefinition);
     client.setQueryData(workflowQueries.detail('kyc').queryKey, {} as WorkflowDefinition);
     client.setQueryData(workflowQueries.versions('kyc').queryKey, [] as WorkflowVersion[]);

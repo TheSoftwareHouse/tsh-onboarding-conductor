@@ -856,9 +856,10 @@ Operators create, replace, delete and publish `draft` rows through the admin API
   versions is deleted.
 - Update and delete are refused while an onboarding references the row (`WORKFLOW_DRAFT_IN_USE`),
   because `fk_onboardings_workflow_version` is `ON DELETE RESTRICT`.
-- `GET .../versions/:version/document` returns the stored document and is served only for a draft; a
-  `published` or `retired` version answers `409 WORKFLOW_VERSION_NOT_DRAFT` with no document, so the
-  `config` exclusion on the admin definition read still holds for everything that can run.
+- `GET .../versions/:version/document` returns the stored document verbatim for a version of any
+  status, connector `config` included ([0041](decisions/0041-admin-workflow-documents-for-every-status.md)),
+  so the route is admin-only; the definition read still omits `config`. An unknown version is
+  `404 WORKFLOW_NOT_FOUND`; there is no 409.
 - Each write is audited in its own transaction (§8) with identifiers only. Last write wins: there is
   no optimistic lock.
 
@@ -2700,7 +2701,7 @@ values; it renders them into the panel's `/config.js` (§12).
 | GET    | `/v1/admin/workflows/:workflowId/versions` — every stored version, `{ items: [{ version, status, createdAt, updatedAt }] }`, highest first, unpaginated; `404 WORKFLOW_NOT_FOUND` for an unknown or out-of-scope family                                                                                                                                                                                                                                                                   |
 | POST   | `/v1/admin/workflows/compile` — an authored workflow; a dry run of every startup check, storing nothing; `200 { definition, steps, workflow }`                                                                                                                                                                                                                                                                                                                                            |
 | POST   | `/v1/admin/workflows` — a raw workflow document as the body; stores a draft in `users` scope without compiling it; `201` with the draft summary (`workflowId`, `version`, `status`, `name`, `createdAt`, `updatedAt`); `400 WORKFLOW_INVALID` for a body without a string `id` or a positive integer `version` of at most 2147483647; `409` `WORKFLOW_VERSION_EXISTS`, `WORKFLOW_DRAFT_EXISTS` or `WORKFLOW_SCOPE_CONFLICT`                                                               |
-| GET    | `/v1/admin/workflows/:workflowId/versions/:version/document` — the draft summary plus the stored `document` verbatim; `409 WORKFLOW_VERSION_NOT_DRAFT` for a `published` or `retired` version                                                                                                                                                                                                                                                                                             |
+| GET    | `/v1/admin/workflows/:workflowId/versions/:version/document` — the version summary (`status` of any value) plus the stored `document` verbatim, connector `config` included; `404 WORKFLOW_NOT_FOUND`                                                                                                                                                                                                                                                                                     |
 | PUT    | `/v1/admin/workflows/:workflowId/versions/:version` — replaces a draft with the raw document in the body, which may change its `id` and `version`; `200` with the draft summary; `409` `WORKFLOW_VERSION_NOT_DRAFT`, `WORKFLOW_DRAFT_IN_USE` and the three create codes                                                                                                                                                                                                                   |
 | POST   | `/v1/admin/workflows/:workflowId/versions/:version/publish` — no body; compiles the stored draft and makes it `published`; `200` with the draft summary, `status: 'published'`, and no document; `409` `WORKFLOW_VERSION_NOT_DRAFT`, `WORKFLOW_VERSION_NOT_LATEST` and `WORKFLOW_VERSION_EXISTS` (a workflow file declares the same id and version), plus the compile route's `400 WORKFLOW_INVALID`, `400 WORKFLOW_CONNECTOR_DECLARATION_INVALID` and `409 WORKFLOW_SOURCE_KEY_CONFLICT` |
 | DELETE | `/v1/admin/workflows/:workflowId/versions/:version` — deletes a draft; `204`; `409 WORKFLOW_VERSION_NOT_DRAFT` or `WORKFLOW_DRAFT_IN_USE`                                                                                                                                                                                                                                                                                                                                                 |
@@ -3232,27 +3233,39 @@ row link below). The details route it points at, `/workflows/:workflowId`
 sidebar keeps Workflows active while it is open. It reads `workflowQueries.versions`
 (`src/api/workflows/workflow-versions.ts`) for the picker and the status chip, and, in parallel,
 `workflowQueries.detail` pinned to `?version=` or unpinned without it, so the engine serves the
-highest `published` version. Without `?version=`, a family with no published version opens its draft, if it has one. A 404 on the definition — nothing published or drafted, or a `?version=` the family
-does not hold — keeps the picker and asks for a version; a `retired` version is listed and
-selectable. `version` and `step` live in the URL (nuqs, `history: 'replace'`, `shallow: false`); an
-unknown `step` falls back to the definition's `initialStep`, and switching version clears `step`,
-so every version opens on its initial step. Under the title, a "View onboardings →" line, the
+highest `published` version. Without `?version=`, a family with no published version opens its draft, if it has one. Once the versions list has settled, a `?version=` the family
+does not hold, or no `?version=` with nothing published or drafted, replaces the tabs with "Version N does not exist." or
+"This workflow has no published version." and keeps the picker; neither tab renders, and no pinned definition or document
+is read. A 404 on the definition read itself, the list being stale, gives the same message inside the Graph tab. A
+`retired` version is listed and selectable. `version`, `step` and `view` live in the URL (nuqs, `history: 'replace'`, `shallow: false`); an
+unknown `step` falls back to the definition's `initialStep`, and switching version clears `step`
+and `view`, so every version opens on its initial step and its default tab. `?view=graph|json` picks
+the tab (`VersionTabs`, Base UI `Tabs`, Graph | JSON); a published or retired version defaults to
+Graph and a draft to JSON, and any other value falls back to that default. Under the title, a "View onboardings →" line, the
 onboarding details header's Workflow line mirrored, links to `/onboardings?workflowId=<id>` through
 the same shared serializer — the workflow only, never the shown version, and only once the versions
-have loaded. It sits there rather than among the header's controls, which the design reserves for the
-picker, View JSON and Edit as draft. The graph is
-`WorkflowGraph` under `src/app/workflows/details/components/` (dagre, top to bottom), with selection
-controlled by intercepting React Flow's node `select` changes; the page mounts the `ReactFlowProvider` so
-`WorkflowZoomControls` share it. Every edge except a plain, unguarded `success` carries a label
+have loaded. It is hidden on a draft, which cannot start an onboarding. It sits there rather than among the header's controls, which the design reserves for the
+picker and Edit as draft. The graph, with the
+inspector, is `VersionGraph`, which draws `WorkflowGraph` under `src/app/workflows/details/components/` (dagre, top to bottom), with selection
+controlled by intercepting React Flow's node `select` changes. `WorkflowZoomControls` (zoom out, zoom level, zoom in,
+Fit) float in a React Flow `Panel` at the canvas's top right, so the draft graph has them too and the stats band above
+holds only the counts. Every edge except a plain, unguarded `success` carries a label
 (the condition, the `manual.*` action, the status with its reasons, or `<status> · fallback`),
 capped at 22 characters and expanded in place on hover or focus while kept inside the canvas; the
 selected node is drawn with an outline, so its content never shifts. From the `xl` breakpoint the
 graph and inspector sit side by side and only the inspector scrolls; below it they stack and the
-area scrolls as a whole. App-wide, the `--font-display` and `--font-body` stacks in
+area scrolls as a whole. On the JSON tab of a published or retired version, `VersionDocument`
+(`components/VersionDocument/`) reads `workflowQueries.document` only once the tab mounts and shows
+the stored document in a read-only `JsonEditor` (`components/JsonEditor.tsx`, shared with the draft
+editor; read-only is CodeMirror's `EditorState.readOnly`, so Backspace and Delete change nothing), with
+a **Copy JSON** button that toasts "JSON copied." or the clipboard's failure, including a missing
+`navigator.clipboard` outside a secure context. While the unpinned
+definition is still loading the JSON tab shows "Loading version…", and a failure of that read the Graph tab's failure
+with Retry. App-wide, the `--font-display` and `--font-body` stacks in
 `tailwind.css` name `Inter Tight Variable` ahead of `Inter Tight`, the family the self-hosted
 variable font registers. The inspector beside it shows the selected step's fields,
-connectors (identity and field mapping) and outgoing transitions. It deliberately omits connector
-`config` and a View JSON action. Its one editing control is the connector binding. For a step's
+connectors (identity and field mapping) and outgoing transitions. The inspector omits connector
+`config`; the JSON tab shows the stored document, `config` included (0041). Its one editing control is the connector binding. For a step's
 primary connector `StepConnectors` renders a native `<select>` of `selectableIds` — only when more
 than one adapter can serve the slot — showing the effective `id`, with `(authored)` after the id the
 document wrote, disabled while a write is in flight. Changing it calls
@@ -3273,9 +3286,9 @@ actions is dropped too, since the footer's "Showing x–y of n" already states i
 Drafts are authored in the panel. The temporary banner that said the section was read-only is gone
 from `WorkflowsPage`; the `Callout` component stays. The drafts API is `src/api/workflows/workflow-drafts.ts`:
 `createWorkflowDraft` (`POST /v1/admin/workflows`), `fetchWorkflowDocument`
-(`GET .../versions/{v}/document`), `updateWorkflowDraft` and `deleteWorkflowDraft`
+(`GET .../versions/{v}/document`, returning a `WorkflowVersionDocument` of any status), `updateWorkflowDraft` and `deleteWorkflowDraft`
 (`PUT` / `DELETE .../versions/{v}`) and `compileWorkflowDocument`
-(`POST /v1/admin/workflows/compile`). A failure is an `ApiError` carrying `status`, `code` and the
+(`POST /v1/admin/workflows/compile`, returning `stepCount` and the compiled `workflow`, which the draft's graph renders). A failure is an `ApiError` carrying `status`, `code` and the
 raw `body`; `readDraftError` parses the body's `code`, `reason` and `path` for a code the engine
 names, and returns `null` for any other failure. The user-facing text per code is
 built in the routes (`utils/describe-draft-error.ts`), not in `src/api/`. Each workflow key is its parent key plus its own params, so invalidating
@@ -3304,11 +3317,15 @@ invalidates `workflowQueries.lists()`, `versions(id)` and `detail(id, v)`, close
 
 When the selected version is a `draft` (a pinned `?version=`, or the draft a family with no published
 version opens on), `WorkflowDetailsPage` renders `DraftEditor`
-(`src/app/workflows/details/components/DraftEditor/`) in place of the graph, stats and inspector.
+(`src/app/workflows/details/components/DraftEditor/`) in place of the read-only tabs; it has the same
+Graph | JSON `VersionTabs`, defaulting to JSON, with the JSON panel kept mounted while hidden so the
+editor's undo history survives.
 The page's `detail` query is disabled while the pinned status is `draft` or still unknown behind a
 loading versions list, so an invalid draft is never compiled for the page. `DraftEditor` reads
-`workflowQueries.document` and handles pending, error with Retry, 404 ("This draft no longer
-exists.") and 409 `WORKFLOW_VERSION_NOT_DRAFT`. The text is edited in `JsonEditor`, CodeMirror 6
+`workflowQueries.document` and handles pending, error with Retry and 404 ("This draft no longer
+exists."). A document whose `status` is no longer `draft` (published or retired after the versions
+list was read) opens no editor: it says so and invalidates `workflowQueries.versions`, and the
+refetched list moves the page to the read-only tabs. The text is edited in `JsonEditor`, CodeMirror 6
 (`codemirror` `basicSetup`, `@codemirror/lang-json` with `jsonParseLinter`, `@codemirror/lint`),
 themed from `@theme` variables. The header's `actions` slot holds, for a draft:
 
@@ -3334,6 +3351,18 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
   both versions lists, navigates with `replace` to the new `?version=`, and removes what no longer
   exists: the old `detail(id, v)`, or the whole old family when the rename emptied it (the engine
   deleted it).
+- **Graph tab** (`DraftGraph`) draws the compiled `workflow` of the shared compile result, with
+  `?step` selecting a step as on a published version. Its inspector is wholly read-only:
+  `StepConnectors` gets `readOnly`, so no connector `<select>` or "Use authored connector" is
+  offered, since a selection binds the family's stored versions, not the draft's text; the
+  header reads "Read-only here — edit the draft, connectors included, on the JSON tab". It never compiles while typing: when the tab
+  opens with no result held it runs the same compile as Validate, and shows "Compiling…" meanwhile;
+  a syntax error or an engine refusal shows "This draft does not compile. Fix it on the JSON tab."
+  with a Show JSON button, while a failed request (auth, network, 5xx) shows "Unable to compile
+  this draft" with a Retry that drops the held failure and compiles again. The result is shared with Validate, Publish and `ValidationResult`, kept
+  only while the text is unchanged, so an edit or Discard clears it and drops a compile still in
+  flight. The graph is never stored
+  ([0041](decisions/0041-admin-workflow-documents-for-every-status.md)).
 - **Delete draft** (`DeleteDraftAction`) is the two-click inline confirm of `ReencryptAction`
   ("Delete draft" then "Confirm delete"). It navigates to `/workflows/<id>` when the family has
   other versions, and to `/workflows` otherwise, then removes the deleted `detail(id, v)` — or the

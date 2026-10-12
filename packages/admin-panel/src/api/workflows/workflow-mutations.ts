@@ -66,7 +66,7 @@ export const workflowMutations = {
       meta: {
         // Awaited so the page swaps the editor for the graph before the caller navigates.
         awaits: [workflowQueries.versions(workflowId).queryKey],
-        // Never `detailsFor`: it would refetch the mounted editor's document into a 409.
+        // Never `detailsFor`: it would refetch the mounted editor's document.
         invalidates: [workflowQueries.lists(), workflowQueries.detail(workflowId).queryKey],
       },
     }),

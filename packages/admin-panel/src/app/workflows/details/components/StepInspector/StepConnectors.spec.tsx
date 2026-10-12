@@ -53,11 +53,19 @@ function connector(
   };
 }
 
-function renderConnectors(connectors: WorkflowStepConnectorWithFallbacks[]): ReactElement {
+function renderConnectors(
+  connectors: WorkflowStepConnectorWithFallbacks[],
+  readOnly = false,
+): ReactElement {
   const view = (
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter>
-        <StepConnectors workflowId="kyc" stepName="verify" connectors={connectors} />
+        <StepConnectors
+          workflowId="kyc"
+          stepName="verify"
+          connectors={connectors}
+          readOnly={readOnly}
+        />
       </MemoryRouter>
     </QueryClientProvider>
   );
@@ -82,6 +90,16 @@ describe('StepConnectors', () => {
     expect(
       screen.queryByRole('button', { name: 'Use authored connector' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('offers no choice on a draft, even when several adapters could serve the slot', () => {
+    renderConnectors([connector({ selected: true })], true);
+
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Use authored connector' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('sumsub_kyc')).toBeInTheDocument();
   });
 
   it('lists the selectable adapters, marks the authored one and shows the effective one', () => {

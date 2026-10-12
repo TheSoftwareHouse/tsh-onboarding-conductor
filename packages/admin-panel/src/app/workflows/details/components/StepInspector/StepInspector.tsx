@@ -18,12 +18,13 @@ export interface StepInspectorProps {
   versionStatus: WorkflowVersionStatus | null;
 }
 
-/** The right rail for the selected step, read-only apart from its connector binding: its kind and status, fields, connectors and transitions. */
+/** The right rail for the selected step, read-only apart from a stored version's connector binding: its kind and status, fields, connectors and transitions. */
 export function StepInspector({
   workflowId,
   step,
   versionStatus,
 }: StepInspectorProps): ReactElement {
+  const isDraft = versionStatus === WORKFLOW_VERSION_STATUS.draft;
   const revisions =
     versionStatus === WORKFLOW_VERSION_STATUS.published || versionStatus === null
       ? 'published'
@@ -58,13 +59,19 @@ export function StepInspector({
           className="flex items-center gap-1.5 leading-natural font-normal tracking-normal"
         >
           <Lock aria-hidden="true" className="size-4" />
-          Shape is read-only — {revisions} revisions never change shape; the connector binding is
-          editable
+          {isDraft
+            ? 'Read-only here — edit the draft, connectors included, on the JSON tab'
+            : `Shape is read-only — ${revisions} revisions never change shape; the connector binding is editable`}
         </Typography>
       </header>
       <StepRequirements step={step} />
       {step.connectors.length > 0 && (
-        <StepConnectors workflowId={workflowId} stepName={step.name} connectors={step.connectors} />
+        <StepConnectors
+          workflowId={workflowId}
+          stepName={step.name}
+          connectors={step.connectors}
+          readOnly={isDraft}
+        />
       )}
       <StepTransitions step={step} />
     </aside>

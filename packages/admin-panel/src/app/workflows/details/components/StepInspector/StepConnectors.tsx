@@ -15,6 +15,8 @@ export interface StepConnectorsProps {
   workflowId: string;
   stepName: string;
   connectors: WorkflowStepConnectorWithFallbacks[];
+  /** A draft's inspector: the selection binds the family's stored versions, so it is not offered here. */
+  readOnly?: boolean;
 }
 
 function describeFlags(connector: WorkflowStepConnector): string {
@@ -88,6 +90,7 @@ export function StepConnectors({
   workflowId,
   stepName,
   connectors,
+  readOnly = false,
 }: StepConnectorsProps): ReactElement {
   const { select, clear, isPending } = useConnectorSelection(workflowId);
 
@@ -125,7 +128,7 @@ export function StepConnectors({
               {describeFlags(connector)}
             </span>
           </div>
-          {connector.selectableIds.length > 1 && (
+          {!readOnly && connector.selectableIds.length > 1 && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
                 <select

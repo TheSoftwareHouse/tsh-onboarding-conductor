@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, type ReactElement } from 'react';
 import {
+  Panel,
   ReactFlow,
   useReactFlow,
   useStore,
@@ -18,6 +19,7 @@ import {
 } from '../../utils/workflow-graph-layout';
 import { WorkflowGraphEdge } from './WorkflowGraphEdge';
 import { WorkflowGraphNode } from './WorkflowGraphNode';
+import { WorkflowZoomControls } from './WorkflowZoomControls';
 import type { WorkflowStepNode } from '../../utils/workflow-graph-layout';
 
 export interface WorkflowGraphProps {
@@ -152,7 +154,11 @@ export function WorkflowGraph({
         onInit={openAtInitialStep}
         onMove={handleMove}
         minZoom={0.1}
-      />
+      >
+        <Panel position="top-right">
+          <WorkflowZoomControls />
+        </Panel>
+      </ReactFlow>
     </div>
   );
 }
