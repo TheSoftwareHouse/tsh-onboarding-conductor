@@ -136,10 +136,11 @@ export async function buildKycSubmission(
     }
 
     const source = input.payloadFieldSources[document.payloadField];
+    const sourceField = typeof source === 'string' ? source : document.payloadField;
     const resolved = await documentResolver.resolve({
       documentId,
       onboardingId: input.execution.onboardingId,
-      sourceField: typeof source === 'string' ? source : document.payloadField,
+      sourceField,
     });
 
     if (!resolved) {
@@ -154,6 +155,7 @@ export async function buildKycSubmission(
 
     documents.push({
       documentId,
+      sourceField,
       docSet: document.idDocSetType,
       docType: document.idDocType,
       side: document.idDocSubType,

@@ -16,7 +16,7 @@ import type {
 } from '../../connectors/ports/connector-execution.port';
 import { ConnectorSelectionRules, type WorkflowConnectorSelection } from './connector-selection';
 import { normalizeUntypedSteps } from '../testing/untyped-steps.helper';
-import { Workflow } from './workflow';
+import { Workflow, type WorkflowEvaluationInput } from './workflow';
 
 const baseWorkflowConfigPath = resolve(
   __dirname,
@@ -703,6 +703,108 @@ describe('Workflow', () => {
         target: 'approved',
       }),
     ).toBeUndefined();
+  });
+
+  describe('callback-only fields', () => {
+    const VERDICT_FIELD = 'providerVerdict';
+    const guarded = normalizeUntypedSteps({
+      id: 'guarded',
+      version: 1,
+      initial: 'await_provider',
+      steps: [
+        {
+          name: 'await_provider',
+          status: 'awaiting_user',
+          data: {
+            note: { type: 'text', required: false },
+            [VERDICT_FIELD]: { type: 'text', required: false },
+          },
+          connectors: [
+            {
+              name: 'provider',
+              id: 'mock_async_callback_2',
+              type: 'custom',
+              async: true,
+              order: 1,
+              fieldMapping: {},
+            },
+          ],
+          transitions: [{ status: 'success', target: 'approved' }],
+        },
+        { name: 'approved', status: 'approved', data: {}, transitions: [] },
+      ],
+    });
+    const adapters: ConnectorAdapterSummary[] = [
+      {
+        id: 'mock_async_callback_2',
+        type: 'custom',
+        supportsAsyncCallback: true,
+        scope: 'fixtures',
+        callbackFields: [VERDICT_FIELD],
+      },
+    ];
+    const createGuarded = () => {
+      const port: ConnectorExecutionPort = {
+        execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+        resume: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+        listAdapters: () => adapters,
+      };
+
+      return { port, workflow: new Workflow(guarded, port) };
+    };
+    const evaluation = (
+      submittedData: unknown,
+      continuation?: WorkflowEvaluationInput['continuation'],
+    ) => ({
+      currentStep: 'await_provider',
+      submittedData,
+      onboardingContext: {},
+      onboardingId: 'onboarding-123',
+      onboardingScores: {},
+      continuation,
+    });
+
+    it('refuses a client submit carrying a field the step binds to an async callback, before any connector runs', async () => {
+      const { port, workflow: guardedWorkflow } = createGuarded();
+
+      const result = await guardedWorkflow.evaluate(
+        evaluation({ note: 'hello', [VERDICT_FIELD]: 'approved' }),
+      );
+
+      expect(result.isRetryableInvalidData()).toBe(true);
+      expect(result.getErrors()).toEqual({ [VERDICT_FIELD]: ['CALLBACK_ONLY'] });
+      expect(port.execute).not.toHaveBeenCalled();
+    });
+
+    it('lets the continuation carry the same field', async () => {
+      const { port, workflow: guardedWorkflow } = createGuarded();
+
+      const result = await guardedWorkflow.evaluate(
+        evaluation(
+          { [VERDICT_FIELD]: 'approved' },
+          { resolvedConnector: { connectorOrder: 1, result: ConnectorExecutionResult.accepted() } },
+        ),
+      );
+
+      expect(result.isAccepted()).toBe(true);
+      expect(result.getNextState()?.context).toEqual({ [VERDICT_FIELD]: 'approved' });
+      expect(port.resume).toHaveBeenCalled();
+    });
+
+    it('accepts a client submit without the field, and guards nothing when the port lists no adapters', async () => {
+      const { workflow: guardedWorkflow } = createGuarded();
+      const unguarded = new Workflow(guarded, {
+        execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+        resume: jest.fn(),
+      });
+
+      await expect(
+        guardedWorkflow.evaluate(evaluation({ note: 'hello' })).then((r) => r.isAccepted()),
+      ).resolves.toBe(true);
+      await expect(
+        unguarded.evaluate(evaluation({ [VERDICT_FIELD]: 'approved' })).then((r) => r.isAccepted()),
+      ).resolves.toBe(true);
+    });
   });
 
   it('validates fields, runs connector execution, and resolves the declared non-terminal target', async () => {

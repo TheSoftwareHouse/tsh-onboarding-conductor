@@ -161,7 +161,8 @@ export class OnboardingsController {
       "The current step's data: exactly the fields `GET /v1/onboardings/{id}/state` lists as " +
       'active, validated against its `step.schema`. There is no fixed shape; the workflow decides, ' +
       'so the body is passed to the step validator untouched and an unknown field is refused ' +
-      'rather than dropped.',
+      'rather than dropped. A field an asynchronous connector writes on its callback (a KYC ' +
+      'verdict, its attempt count) is refused as `CALLBACK_ONLY`: only the provider decides it.',
     schema: { type: 'object', additionalProperties: true },
   })
   @ApiCreatedResponse({

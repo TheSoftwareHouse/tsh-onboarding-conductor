@@ -3,23 +3,18 @@ import sharp from 'sharp';
 import type { KycDocument } from '../kyc/kyc-provider.port';
 import { VERIFF_MEDIA_MAX_SIDE_PX } from './veriff-contract';
 
-const IMAGE_CONTENT_TYPE_PREFIX = 'image/';
-
 /**
  * Brings a captured image within Veriff's longer-side limit before upload, because the engine's
  * own upload cap is in bytes and a phone photo well under it is still refused by
- * `POST /v1/sessions/{id}/media` on its pixel dimensions. PDFs and images already within the
- * limit pass through as the same object.
+ * `POST /v1/sessions/{id}/media` on its pixel dimensions. An image already within the limit
+ * passes through as the same object. Only images reach it: `VeriffKycProvider.submit` refuses
+ * anything else before a session exists.
  */
 @Injectable()
 export class VeriffMediaFitter {
   private readonly logger = new Logger(VeriffMediaFitter.name);
 
   async fit(document: KycDocument): Promise<KycDocument> {
-    if (!document.contentType.startsWith(IMAGE_CONTENT_TYPE_PREFIX)) {
-      return document;
-    }
-
     const { width = 0, height = 0 } = await sharp(document.content).metadata();
 
     if (Math.max(width, height) <= VERIFF_MEDIA_MAX_SIDE_PX) {

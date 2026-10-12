@@ -27,6 +27,7 @@ const settings = {
 
 const idDocument = (overrides: Record<string, unknown> = {}) => ({
   documentId: 'document-1',
+  sourceField: 'idCardFront',
   docSet: 'IDENTITY',
   docType: 'ID_CARD',
   side: 'FRONT_SIDE',
@@ -38,6 +39,7 @@ const idDocument = (overrides: Record<string, unknown> = {}) => ({
 
 const SELFIE_DOCUMENT = {
   documentId: 'document-2',
+  sourceField: 'selfieDocument',
   docSet: 'SELFIE',
   docType: 'SELFIE',
   country: 'PL',
@@ -345,6 +347,25 @@ describe('VeriffKycProvider', () => {
       );
       expect(JSON.stringify(log.mock.calls)).not.toMatch(/Kowalski|1990|api-key|secret/);
       log.mockRestore();
+    });
+
+    it('refuses a PDF before creating a session, naming the step field it came from', async () => {
+      const { client, fitter, provider } = createProvider();
+      const pdf = idDocument({ contentType: 'application/pdf', sourceField: 'passportDocument' });
+
+      await expect(provider.submit(settings, submission([SELFIE_DOCUMENT, pdf]))).rejects.toThrow(
+        expect.objectContaining({
+          name: 'KycDocumentUnsupportedError',
+          providerId: 'veriff_kyc',
+          document: expect.objectContaining({
+            documentId: 'document-1',
+            sourceField: 'passportDocument',
+            contentType: 'application/pdf',
+          }),
+        }),
+      );
+      expect(client.createSession).not.toHaveBeenCalled();
+      expect(fitter.fit).not.toHaveBeenCalled();
     });
 
     it('refuses a document with no media context after creating nothing it cannot finish', async () => {

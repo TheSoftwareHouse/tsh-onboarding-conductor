@@ -12,6 +12,7 @@ import type {
   WorkflowTransitionStatus,
 } from '@tsh/ddl-schema';
 import type {
+  ConnectorAdapterSummary,
   ConnectorExecutionPort,
   ConnectorRejectionReason,
 } from '../../connectors/ports/connector-execution.port';
@@ -92,6 +93,42 @@ export type WorkflowNextState = {
 
 export { WorkflowEvaluationResult } from './workflow-evaluation-result';
 
+/** The field error a client submit is refused with for a key only a connector callback may write. */
+export const CALLBACK_ONLY_FIELD_ERROR = 'CALLBACK_ONLY';
+
+/**
+ * Per step, the `data` keys an asynchronous connector's callback writes — every async candidate
+ * of every slot, fallbacks included, as the registry's declaration check counts them. A step with
+ * none is absent.
+ */
+const collectCallbackFields = (
+  definition: NormalizedWorkflowDefinition,
+  adapters: readonly ConnectorAdapterSummary[],
+): ReadonlyMap<string, ReadonlySet<string>> => {
+  const fieldsByAdapterId = new Map(
+    adapters.map((adapter) => [adapter.id, adapter.callbackFields]),
+  );
+  const fieldsByStep = new Map<string, ReadonlySet<string>>();
+
+  for (const step of definition.steps) {
+    const fields = new Set<string>();
+
+    for (const connector of step.connectors) {
+      for (const candidate of [connector, ...connector.fallbacks]) {
+        if (candidate.async) {
+          fieldsByAdapterId.get(candidate.id)?.forEach((field) => fields.add(field));
+        }
+      }
+    }
+
+    if (fields.size > 0) {
+      fieldsByStep.set(step.name, fields);
+    }
+  }
+
+  return fieldsByStep;
+};
+
 const projectConnector = (
   connector: NormalizedWorkflowConnectorDeclaration | NormalizedWorkflowConnectorFallback,
 ): WorkflowStepConnectorResponseDto => ({
@@ -113,6 +150,8 @@ export class Workflow {
   private readonly selectedStepNames: ReadonlySet<string>;
   private readonly stepsByName: Readonly<Record<string, Step>>;
   private readonly scoring: Scoring;
+  /** What a client submit may not carry; the callback path writes these through the same step. */
+  private readonly callbackFieldsByStep: ReadonlyMap<string, ReadonlySet<string>>;
 
   constructor(
     definition: NormalizedWorkflowDefinition,
@@ -139,6 +178,10 @@ export class Workflow {
       Object.values(this.definition.stepsByName).map((step) => [step.name, new Step(step)]),
     );
     this.scoring = new Scoring(this.definition.scores);
+    this.callbackFieldsByStep = collectCallbackFields(
+      this.definition,
+      connectorExecutionPort?.listAdapters?.() ?? [],
+    );
   }
 
   get id(): string {
@@ -332,6 +375,18 @@ export class Workflow {
       });
     }
 
+    // A callback field is the provider's verdict, and on a step whose provider does not count
+    // attempts also the running attempt total: a client writing either would decide its own
+    // verification or reset the cap. Only the continuation — the callback or the operator
+    // reconcile, applied through this same path — may carry one.
+    if (input.continuation === undefined) {
+      const callbackOnlyErrors = this.findCallbackOnlyErrors(currentStep.name, input.submittedData);
+
+      if (callbackOnlyErrors !== undefined) {
+        return WorkflowEvaluationResult.retryableInvalidData(callbackOnlyErrors, currentStep.name);
+      }
+    }
+
     const stepData = currentStep.collectAcceptedData(input.submittedData, input.onboardingContext);
     if (stepData.acceptedData === null || stepData.connectorData === null) {
       return WorkflowEvaluationResult.retryableInvalidData(stepData.fieldErrors, currentStep.name);
@@ -398,6 +453,29 @@ export class Workflow {
   /** The step an onboarding is on, by name — `undefined` when there is none or it names no step. */
   findStep(currentStep: string | null | undefined): Step | undefined {
     return typeof currentStep === 'string' ? this.stepsByName[currentStep] : undefined;
+  }
+
+  /** The step's callback-only keys a submit carries, as field errors; `undefined` when none. */
+  private findCallbackOnlyErrors(
+    stepName: string,
+    submittedData: unknown,
+  ): Readonly<Record<string, readonly string[]>> | undefined {
+    const callbackFields = this.callbackFieldsByStep.get(stepName);
+
+    if (
+      callbackFields === undefined ||
+      typeof submittedData !== 'object' ||
+      submittedData === null ||
+      Array.isArray(submittedData)
+    ) {
+      return undefined;
+    }
+
+    const refused = Object.keys(submittedData).filter((field) => callbackFields.has(field));
+
+    return refused.length === 0
+      ? undefined
+      : Object.fromEntries(refused.map((field) => [field, [CALLBACK_ONLY_FIELD_ERROR]]));
   }
 
   private async evaluateTransition(

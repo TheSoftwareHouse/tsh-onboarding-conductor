@@ -122,11 +122,14 @@ const refusalsWorkflow = {
  */
 const SELECTABLE_FOR_PLAIN_KYC_SLOT = ['mock_kyc_1', 'mock_kyc_2', 'mock_sumsub_file_upload'];
 
+/** `mock_async_callback_2` declares one callback field, so a step it can be switched to declares it. */
+const asyncCallbackFields = { providerVerdict: { type: 'text', required: false } };
+
 const asyncWorkflow = {
   id: ASYNC_WORKFLOW_ID,
   version: 1,
   initial: 'await_provider',
-  steps: [customStep('await_provider', 'done', {}, [asyncSlot()]), doneStep],
+  steps: [customStep('await_provider', 'done', asyncCallbackFields, [asyncSlot()]), doneStep],
 };
 
 const writeWorkflows = (directory: string) => {

@@ -2870,7 +2870,7 @@
             "description": "The result was applied to the onboarding, had already been applied by an earlier delivery of the same callback, or named a park the onboarding has since left and was dropped."
           },
           "400": {
-            "description": "`ASYNC_CALLBACK_RAW_BODY_REQUIRED`: The callback arrived without a body the signature could be verified over.\n\n`ASYNC_CALLBACK_PROVIDER_KEY_INVALID`: The provider key is not made of lower-case letters, digits and underscores.\n\n`ASYNC_CALLBACK_AUTHENTICATION_FAILED`: No connector adapter that accepts callbacks is registered under this provider key.\n\n`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons, and the onboarding stays where it was.",
+            "description": "`ASYNC_CALLBACK_RAW_BODY_REQUIRED`: The callback arrived without a body the signature could be verified over.\n\n`ASYNC_CALLBACK_PROVIDER_KEY_INVALID`: The provider key is not made of lower-case letters, digits and underscores.\n\n`ASYNC_CALLBACK_AUTHENTICATION_FAILED`: No connector adapter that accepts callbacks is registered under this provider key.\n\n`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons (`UNKNOWN`, `REQUIRED`, `INVALID`, `CALLBACK_ONLY`, or a connector's own), and the onboarding stays where it was.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3356,7 +3356,7 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "The current step's data: exactly the fields `GET /v1/onboardings/{id}/state` lists as active, validated against its `step.schema`. There is no fixed shape; the workflow decides, so the body is passed to the step validator untouched and an unknown field is refused rather than dropped.",
+          "description": "The current step's data: exactly the fields `GET /v1/onboardings/{id}/state` lists as active, validated against its `step.schema`. There is no fixed shape; the workflow decides, so the body is passed to the step validator untouched and an unknown field is refused rather than dropped. A field an asynchronous connector writes on its callback (a KYC verdict, its attempt count) is refused as `CALLBACK_ONLY`: only the provider decides it.",
           "content": {
             "application/json": {
               "schema": {
@@ -3378,7 +3378,7 @@
             }
           },
           "400": {
-            "description": "`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons, and the onboarding stays where it was.",
+            "description": "`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons (`UNKNOWN`, `REQUIRED`, `INVALID`, `CALLBACK_ONLY`, or a connector's own), and the onboarding stays where it was.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4503,7 +4503,7 @@
             }
           },
           "400": {
-            "description": "`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons, and the onboarding stays where it was.",
+            "description": "`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons (`UNKNOWN`, `REQUIRED`, `INVALID`, `CALLBACK_ONLY`, or a connector's own), and the onboarding stays where it was.",
             "content": {
               "application/json": {
                 "schema": {

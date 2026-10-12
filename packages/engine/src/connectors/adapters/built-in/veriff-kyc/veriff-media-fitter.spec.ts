@@ -10,6 +10,7 @@ const image = async (width: number, height: number, format: 'png' | 'jpeg' = 'pn
 
 const document = (content: Buffer, contentType: string): KycDocument => ({
   documentId: 'document-1',
+  sourceField: 'idCardFront',
   docSet: 'IDENTITY',
   docType: 'ID_CARD',
   side: 'FRONT_SIDE',
@@ -62,12 +63,6 @@ describe('VeriffMediaFitter', () => {
     [100, 100],
   ])('returns the same object for a %dx%d image', async (width, height) => {
     const original = document(await image(width, height), 'image/png');
-
-    await expect(fitter.fit(original)).resolves.toBe(original);
-  });
-
-  it('returns the same object for a PDF without reading it', async () => {
-    const original = document(Buffer.from('%PDF-1.4 not an image'), 'application/pdf');
 
     await expect(fitter.fit(original)).resolves.toBe(original);
   });

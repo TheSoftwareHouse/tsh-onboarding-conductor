@@ -19,6 +19,7 @@ import type {
   ConnectorSettingsSchema,
 } from '../../../ports/connector-adapter.port';
 import {
+  ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
   type ConnectorCallbackResult,
 } from '../../../ports/connector-execution-result';
@@ -30,6 +31,7 @@ import type { CompletedOnboardingDocumentResolver } from '../../../resolvers/com
 import {
   KYC_ATTEMPT_COUNT_FIELD,
   KYC_CUSTOMER_MESSAGE_FIELD,
+  KYC_DOCUMENT_UNSUPPORTED_ERROR,
   KYC_OUTCOME_FIELD,
   KYC_REASON_CODES_FIELD,
   KYC_RETRY_STEP_FIELD,
@@ -42,7 +44,12 @@ import {
   evaluateKycOutcome,
   type KycAppliedEvaluation,
 } from './kyc-outcome';
-import type { KycCallbackEvent, KycProvider, KycVerifiedIdentity } from './kyc-provider.port';
+import {
+  type KycCallbackEvent,
+  KycDocumentUnsupportedError,
+  type KycProvider,
+  type KycVerifiedIdentity,
+} from './kyc-provider.port';
 import { buildKycApplicant, buildKycSubmission } from './kyc-submission';
 
 const NO_VERIFIED_DATA: KycIdentityComparison = { result: 'no-verified-data', divergedFields: [] };
@@ -128,10 +135,28 @@ export abstract class KycConnector<
       return ConnectorExecutionResult.invalid();
     }
 
-    const receipt = await this.provider.submit(settings, submission);
+    try {
+      const receipt = await this.provider.submit(settings, submission);
 
-    // The executor copies the reference into the persisted pending connector.
-    return ConnectorExecutionResult.accepted({ providerReference: receipt.providerReference });
+      // The executor copies the reference into the persisted pending connector.
+      return ConnectorExecutionResult.accepted({ providerReference: receipt.providerReference });
+    } catch (error: unknown) {
+      if (!(error instanceof KycDocumentUnsupportedError)) {
+        throw error;
+      }
+
+      // The client's to fix: the step stays, the field names the document to upload again.
+      this.logger.log(
+        `KYC_DOCUMENT_UNSUPPORTED connectorId=${this.id} ` +
+          `onboardingId=${input.execution.onboardingId} field=${error.document.sourceField} ` +
+          `contentType=${error.document.contentType}`,
+      );
+
+      return ConnectorExecutionResult.invalidData(
+        { [error.document.sourceField]: [KYC_DOCUMENT_UNSUPPORTED_ERROR] },
+        { [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true },
+      );
+    }
   }
 
   /**

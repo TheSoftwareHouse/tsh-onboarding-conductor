@@ -1,7 +1,9 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `feat/veriff-kyc-connector` at `04578e3` (2026-10-05), plus the phase-2 documentation
-of runtime connector selection and the persisted parked connector (§2, §4, §5, §8, §9, §11, §12;
+**Status:** describes `feat/veriff-kyc-connector` at `e2b12b2` (2026-10-12) with the pull-request
+review fixes on top of it — the callback-only submit guard (§2 "The callback-fields guard", §3) and
+images-only uploads at Veriff (§4) — plus the phase-2 documentation of runtime connector selection
+and the persisted parked connector (§2, §4, §5, §8, §9, §11, §12;
 [0038](decisions/0038-runtime-connector-selection.md)) on top of the KYC connector kernel and the
 `veriff_kyc` provider (§4). Bump this when that work lands. Typed steps as the only authored form (§2.1,
 [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
@@ -307,6 +309,16 @@ fails the boot as a `WorkflowConnectorDeclarationInvalidError`; the selection se
 check per version (`callback_fields_missing`). It is what keeps the stored Sumsub revision 1, which
 does not declare `kycAttemptCount`, from being switched to Veriff and losing a retry verdict; a typed
 KYC step always passes.
+
+The same list guards the other direction. The step declares a callback field as ordinary `data`,
+so a client could post it: `kycOutcome: 'verified'` would be overwritten by the verdict the park
+waits on, but `kycAttemptCount: 0` on the resubmission after each retry would reset the cap and buy
+the applicant unlimited provider sessions. `Workflow.evaluate` therefore refuses a client submit
+(`continuation` absent) that carries any key an async candidate of the step's slots — fallbacks
+included — lists in `callbackFields`: `400 INVALID_STEP_DATA` with `{field: ['CALLBACK_ONLY']}`,
+before any connector runs. The continuation — the provider's callback and the operator reconcile,
+applied through the same submit path — carries them freely. `GET …/state` still lists the fields in
+`step.schema`, since they are the step's; a client should not send them.
 
 **The shipped Veriff family carries Sumsub's keys.** A selection keeps the authored `config`, and
 `sumsub_kyc`'s `validateDeclaration` requires `levelName` and `questionnaireDefinitionId`, so both
@@ -876,11 +888,13 @@ selfie → `submit_kyc` → manual review → account provisioning → `userId` 
 
 **The Veriff family.** `eu-b2c-individual-kyc-eea-veriff` is the Sumsub family under an id, a name and
 a `sourceKey` of its own (`eu_b2c_individual_kyc_eea_veriff_v1`), and its two revisions are authored
-exactly as the Sumsub ones are. The only difference from the Sumsub family is the KYC step's
+exactly as the Sumsub ones are. The difference from the Sumsub family is the KYC step's
 connector binding: `veriff_kyc` in place of `sumsub_kyc`, without the Sumsub-specific `levelName` and
-`questionnaireDefinitionId`. The one other difference is a consequence: the Sumsub revision 1 predates
+`questionnaireDefinitionId`. Two others are consequences: the Sumsub revision 1 predates
 `kycAttemptCount`, whereas the Veriff revision 1, written after it, declares the field in
-`submit_kyc.data` itself, because a provider that does not count attempts writes it. Both families
+`submit_kyc.data` itself, because a provider that does not count attempts writes it; and the identity
+document uploads accept `image/png` and `image/jpeg` only (revision 2 narrows `document-capture`'s
+default with `contentTypes`), because Veriff takes a PDF only once enabled on the account (§4). Both families
 declare the same two agreement families (`eu-b2c-terms`, `eu-b2c-privacy-notice`), the same retry arms
 and the same ports. The two `-veriff-local` forks are the fork pattern for it.
 
@@ -962,7 +976,9 @@ Four further details are consequences of engine behaviour rather than of the bus
   `retry` and `refused` verdict, so a document that omits them loses exactly the verdicts that carry
   a reason; likewise `kycAttemptCount` on a `retry` from a provider that does not count attempts. The
   Sumsub revision 1 files declare four, because Sumsub counts attempts itself and the kernel never
-  writes the fifth for it; the Veriff files declare all five.
+  writes the fifth for it; the Veriff files declare all five. Declared as `data`, they are still the
+  connector's: a client submit carrying one is refused as `CALLBACK_ONLY` (the callback-fields guard,
+  above), which is what keeps the kernel's running `kycAttemptCount` honest.
 - **Each retry arm returns to a step the reset data can be re-collected from** — `IDENTITY` to
   `select_document_type`, so a customer whose document was refused may also switch to the other one;
   `SELFIE` to `capture_selfie`; `QUESTIONNAIRE` to `collect_purpose` (the questionnaire is
@@ -1020,7 +1036,7 @@ pairs that compile to identical steps; the "Typed twin" column says how the othe
 | `file-upload` | `kyc` | `file` field plus the document reservation flow | Identical: a `connector-call` carrying the `file` field |
 | `http-request` | `custom` | The generic HTTP connector with placeholders, query, and error statuses | Identical: `http-call` including a `form`, `fieldMapping` naming the two payload keys that differ from their fields |
 | `sumsub-kyc` | `kyc` | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter | A two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `POL`, and the field validations are the steps' and the step declares the optional `kycAttemptCount` callback field the hand-written twin predates |
-| `veriff-kyc` | `kyc` | The same shape against `veriff_kyc`: a provider that does not count attempts, so the custom form declares `kycAttemptCount` and the kernel keeps the running total; the document country is `PL` (alpha-2), and no `levelName` or `questionnaireDefinitionId` | The `sumsub-kyc-typed` step graph with the `veriff_kyc` binding: a two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `PL`, and the field validations are the steps' |
+| `veriff-kyc` | `kyc` | The same shape against `veriff_kyc`: a provider that does not count attempts, so the custom form declares `kycAttemptCount` and the kernel keeps the running total; uploads are images only, since Veriff takes a PDF only once enabled on the account; the document country is `PL` (alpha-2), and no `levelName` or `questionnaireDefinitionId` | The `sumsub-kyc-typed` step graph with the `veriff_kyc` binding: a two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `PL`, and the field validations are the steps' |
 | `manual-review` | none | All three manual triggers and a recursive `success` transition | Identical: `manual-review` including a `form` |
 | `connector-fallback` | `email_delivery` | An unconfigured `sendgrid_email` primary retries three times 200 ms apart, falls through a `mock_email_delivery` link told to fail, and is delivered by `smtp` on `send_notification`; `optional_notice` swallows the same failure via `errorHandler: continue_on_error` with no fallback declared | Identical: the whole chain, retry and handler on the `notify` binding, the SMTP entry with its own `fieldMapping` and `config` |
 | `scoring` | `phone_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_verify` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting | Twelve compiled steps through specialized step types: step-level `scoring` on `identity-profile`, on `otp-verify` (landing on `verify_code`) and on `kyc-identity-verification`; the risk band routes through conditional edges on `success` and `verified`; `manual-review`'s `invalid` edge is score-gated with a fallback arm; `submit_kyc` also declares `kycAttemptCount` |
@@ -1080,8 +1096,9 @@ explicit and forcing the caller to handle each.
 7. `workflow.evaluate(...)`:
    - `Step.collectAcceptedData` — unknown fields, inactive-but-submitted fields, missing required
      fields, and per-field schema failures all produce `{field: ['UNKNOWN' | 'REQUIRED' |
-'INVALID']}`. Any error → `400 INVALID_STEP_DATA` with the error map; the state is unchanged
-     and the client retries.
+'INVALID']}`, and a client body carrying a key an async connector of the step writes on its
+     callback produces `{field: ['CALLBACK_ONLY']}` before the step validator runs (§2). Any error →
+     `400 INVALID_STEP_DATA` with the error map; the state is unchanged and the client retries.
    - Connector chain runs (§4) against `connectorData` merged over context.
    - Outcome maps to a trigger: accepted → `success`, rejected → `rejected`, pending → park,
      invalid-data → either retryable (back to the client) or terminal-invalid. A retryable
@@ -1489,20 +1506,20 @@ Every mock's connector id, class name and filename begin with `mock`, so a mock 
 recognisable wherever it appears — in a workflow declaration, an audit row or the
 adapters directory.
 
-| Type                                                 | Kind        | Notes                                                                                                                                   |
-| ---------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `http_request`                                       | **Generic** | Config-driven outbound JSON call. Env-configured secrets; see `packages/engine/docs/http-request-connector.md`.                         |
-| `twilio_verify`                                      | Real        | Twilio Verify start/check; `TwilioVerifyUnavailableException` on provider failure.                                                      |
-| `sendgrid_email`                                     | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                |
-| `smtp`                                               | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`. |
-| `sumsub_kyc`                                         | Real        | KYC via Sumsub; `async: true`-only (park on `execute`, resume on the provider's callback). See "The KYC connector" below.               |
-| `veriff_kyc`                                         | Real        | KYC via Veriff, API-only; the same kernel and the same `async: true`-only contract as `sumsub_kyc`. See "The KYC connector" below.      |
-| `mock_kyc_1`, `mock_kyc_2`                           | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                  |
-| `mock_phone_verification`, `mock_email_verification` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.   |
-| `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                            |
-| `mock_sumsub_file_upload`                            | Mock        | Reads a completed document from object storage.                                                                                         |
-| `mock_async_callback`                                | Mock        | The async/callback reference implementation; declares `callbackAuth: {kind: 'none'}` with a justification.                              |
-| `mock_async_callback_2`                              | Mock        | The same adapter under a second id, each with its own initiations; lets a slot be switched between two callback-capable adapters.       |
+| Type                                                 | Kind        | Notes                                                                                                                                                                                                           |
+| ---------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `http_request`                                       | **Generic** | Config-driven outbound JSON call. Env-configured secrets; see `packages/engine/docs/http-request-connector.md`.                                                                                                 |
+| `twilio_verify`                                      | Real        | Twilio Verify start/check; `TwilioVerifyUnavailableException` on provider failure.                                                                                                                              |
+| `sendgrid_email`                                     | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                                                                                        |
+| `smtp`                                               | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`.                                                                         |
+| `sumsub_kyc`                                         | Real        | KYC via Sumsub; `async: true`-only (park on `execute`, resume on the provider's callback). See "The KYC connector" below.                                                                                       |
+| `veriff_kyc`                                         | Real        | KYC via Veriff, API-only; the same kernel and the same `async: true`-only contract as `sumsub_kyc`. See "The KYC connector" below.                                                                              |
+| `mock_kyc_1`, `mock_kyc_2`                           | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                                                                                          |
+| `mock_phone_verification`, `mock_email_verification` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.                                                                           |
+| `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                                                                                                    |
+| `mock_sumsub_file_upload`                            | Mock        | Reads a completed document from object storage.                                                                                                                                                                 |
+| `mock_async_callback`                                | Mock        | The async/callback reference implementation; declares `callbackAuth: {kind: 'none'}` with a justification.                                                                                                      |
+| `mock_async_callback_2`                              | Mock        | The same adapter under a second id with its own initiations, declaring one callback field (`providerVerdict`); lets a slot be switched between two callback-capable adapters and shows the callback-only guard. |
 
 ### The generic HTTP connector
 
@@ -1539,7 +1556,12 @@ adapter copied from the first was not built.
   eight canonical roles, resolving credentials through `ConnectorSettingsService`, correlating a
   callback, deciding the outcome (`kyc-outcome.ts`), the identity guard
   (`kyc-identity-comparison.ts`), the attempt cap, the closed `submittedData` and the log lines.
-  `id`, `name`, `callbackAuth` and `settingsSchema` come from the provider it is built with.
+  `id`, `name`, `callbackAuth` and `settingsSchema` come from the provider it is built with. A
+  document the provider cannot take — `submit` throws `KycDocumentUnsupportedError` before its
+  first call — is answered as retryable `invalid-data` on the step field the document was uploaded
+  under (`KycDocument.sourceField`), reason `UNSUPPORTED_CONTENT_TYPE`, so the client sees
+  `400 INVALID_STEP_DATA` naming the field and uploads again; logged as `KYC_DOCUMENT_UNSUPPORTED
+connectorId= onboardingId= field= contentType=`.
 - **`KycProvider`** (`kyc-provider.port.ts`) owns the wire half: `id`, `name`, `settingsSchema`,
   `callbackAuth`, `countsAttempts`, `validateConfig(providerConfig, config)`,
   `submit(settings, submission) → {providerReference}`, `parseCallback(input, settings) →
@@ -1778,6 +1800,12 @@ single-use, and a resubmission after a `resubmission_requested` decision is a ne
 country}` prefill is added only when every identity upload agrees on one document type among
    `ID_CARD`, `PASSPORT`, `DRIVERS_LICENSE` and `RESIDENCE_PERMIT` (country alpha-2); a workflow
    offering a choice of document leaves Veriff to detect it. Logged as `VERIFF_SESSION_CREATED`.
+   Before it, every document must be an `image/*`: Veriff accepts a PDF on the media endpoint only
+   once its Solutions Engineer enables it for the account, which no deployment can assume, so a
+   PDF throws `KycDocumentUnsupportedError` with no session created and the kernel sends the
+   applicant back to the upload (above). The shipped Veriff workflows narrow their capture fields to
+   `image/png` and `image/jpeg` for the same reason (§2 fixtures), and the guard covers a
+   user-authored document that does not.
 2. For each document, `POST /v1/sessions/{id}/media` with `image: {context, content}`, where
    `content` is a base64 data URI (`data:<contentType>;base64,…`) with the stored document's content
    type. The context follows the document mapping: docSet `SELFIE` → `face`; docSet `IDENTITY` with
@@ -1785,8 +1813,8 @@ country}` prefill is added only when every identity upload agrees on one documen
    `document-back`. Anything else maps to no context. Before the upload, `VeriffMediaFitter.fit`
    brings an `image/*` document within Veriff's longer-side limit (`VERIFF_MEDIA_MAX_SIDE_PX`,
    1920 px): the engine's own upload cap is in bytes (§7), so a phone photo well under it is still
-   refused by Veriff on its pixel dimensions. An image already within the limit and a PDF pass
-   through as the same object; a larger one is resized with `sharp` to fit inside 1920×1920,
+   refused by Veriff on its pixel dimensions. An image already within the limit passes through as
+   the same object; a larger one is resized with `sharp` to fit inside 1920×1920,
    never enlarged, its EXIF orientation baked in first (resizing drops the tag) and its format and
    content type kept. Logged as `VERIFF_MEDIA_DOWNSCALED from=<w>x<h> to=<w>x<h>`, dimensions only.
 3. `PATCH /v1/sessions/{id}` with `verification: {status: "submitted"}`, closing the upload phase and

@@ -7,14 +7,15 @@ import type {
 } from '../../../ports/connector-adapter.port';
 import { KycConfigInvalidError, type KycConfig } from '../kyc/kyc-config';
 import type { KycRetryTarget } from '../kyc/kyc-contract';
-import type {
-  KycCallbackEvent,
-  KycPendingReference,
-  KycDocument,
-  KycProvider,
-  KycSubmission,
-  KycSubmissionReceipt,
-  KycVerdict,
+import {
+  type KycCallbackEvent,
+  type KycPendingReference,
+  type KycDocument,
+  KycDocumentUnsupportedError,
+  type KycProvider,
+  type KycSubmission,
+  type KycSubmissionReceipt,
+  type KycVerdict,
 } from '../kyc/kyc-provider.port';
 import { VeriffClient, type VeriffDecision } from './veriff-client';
 import { resolveVeriffCredentials, VERIFF_KYC_SETTINGS_SCHEMA } from './veriff-config';
@@ -31,6 +32,7 @@ import {
   VERIFF_HEADER_AUTH_CLIENT,
   VERIFF_HEADER_HMAC_SIGNATURE,
   VERIFF_KYC_CONNECTOR_ID,
+  VERIFF_MEDIA_CONTENT_TYPE_PREFIX,
   VERIFF_MEDIA_CONTEXT_DOCUMENT_BACK,
   VERIFF_MEDIA_CONTEXT_DOCUMENT_FRONT,
   VERIFF_MEDIA_CONTEXT_FACE,
@@ -186,6 +188,14 @@ export class VeriffKycProvider implements KycProvider<VeriffCallbackEvent> {
   ): Promise<KycSubmissionReceipt> {
     const credentials = resolveVeriffCredentials(settings);
     const { applicant } = submission;
+
+    // Before the session exists: a refused upload would otherwise leave a paid, half-filled
+    // session behind, and Veriff refuses a PDF unless the account was enabled for it.
+    for (const document of submission.documents) {
+      if (!document.contentType.startsWith(VERIFF_MEDIA_CONTENT_TYPE_PREFIX)) {
+        throw new KycDocumentUnsupportedError(VERIFF_KYC_CONNECTOR_ID, document);
+      }
+    }
 
     const session = await this.veriffClient.createSession(credentials, {
       vendorData: submission.onboardingId,

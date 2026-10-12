@@ -114,7 +114,11 @@ undeclared key is an `UNKNOWN` field error that loses the verdict. For a KYC con
 last written only for a provider that does not count attempts itself (`veriff_kyc`), which is why the
 Sumsub revision 1 files, written before it existed, declare four. A `kyc-identity-verification` step
 declares all five. Since field names are unique across a whole document, only one step per document
-can declare them — a workflow may therefore contain at most one KYC-parked step.
+can declare them — a workflow may therefore contain at most one KYC-parked step. Declaring them does
+not open them to the client: a submit on the public route that carries a key any async connector of
+the step lists in `callbackFields` is refused as `{field: ['CALLBACK_ONLY']}`, so an applicant can
+neither write a verdict nor reset `kycAttemptCount`; only the callback and the operator reconcile
+carry them through.
 
 Because of that, anything that varies per applicant must vary inside one connector declaration. A
 KYC document mapping may set `countryField` instead of `country`, naming a payload key that
@@ -689,7 +693,11 @@ outcome mapping. The engine-level port stays flat and keyed by `id`; the sharing
    - `validateConfig(providerConfig, config)`, the startup check of the keys no kernel rule consumed
      — `config` is the whole parsed declaration, for a rule that depends on the document list;
    - `submit(settings, submission) → {providerReference}` — the applicant, the already-read
-     documents (countries as alpha-2) and any questionnaire arrive built;
+     documents (countries as alpha-2, each naming the step field it was uploaded under) and any
+     questionnaire arrive built. Throw `KycDocumentUnsupportedError` before the first provider call
+     for a document the provider cannot take — `veriff_kyc` does for anything but an image, since
+     Veriff accepts PDFs only per account — and the kernel answers it as a retryable
+     `UNSUPPORTED_CONTENT_TYPE` error on that field, so the applicant uploads again;
    - `parseCallback(input, settings)`, reducing the webhook to `{onboardingId, providerReference?,
 actionable, hint?}`; set `actionable: false` for a webhook that decides nothing;
    - `fetchVerdict(settings, event, context) → KycVerdict`, which **reads the verdict back from the

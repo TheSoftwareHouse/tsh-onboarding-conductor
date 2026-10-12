@@ -58,6 +58,12 @@ export type VeriffMediaContext = (typeof VERIFF_MEDIA_CONTEXTS)[number];
 /** `POST /v1/sessions/{id}/media` refuses an image whose longer side exceeds this many pixels. */
 export const VERIFF_MEDIA_MAX_SIDE_PX = 1920;
 
+/**
+ * What `POST /v1/sessions/{id}/media` takes from this integration: images only. Veriff accepts a
+ * PDF only once its Solutions Engineer enables it on the account, which no deployment can assume.
+ */
+export const VERIFF_MEDIA_CONTENT_TYPE_PREFIX = 'image/';
+
 export const VERIFF_DOCUMENT_TYPES = [
   'ID_CARD',
   'PASSPORT',

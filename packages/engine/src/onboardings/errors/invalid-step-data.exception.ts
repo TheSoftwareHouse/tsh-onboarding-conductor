@@ -5,7 +5,8 @@ type StepFieldErrors = Readonly<Record<string, readonly string[]>>;
 export class InvalidStepDataException extends BadRequestException {
   static readonly apiDescription =
     'The submitted data violates the current step; `errors` maps each refused field to ' +
-    'its reasons, and the onboarding stays where it was.';
+    "its reasons (`UNKNOWN`, `REQUIRED`, `INVALID`, `CALLBACK_ONLY`, or a connector's own), and " +
+    'the onboarding stays where it was.';
 
   constructor(errors: StepFieldErrors) {
     super({

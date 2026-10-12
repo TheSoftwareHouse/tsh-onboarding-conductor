@@ -102,7 +102,9 @@ produces the `<key>Version` field at all, `acknowledgement` is `accepted` (defau
 | `consent`, and `required: false` makes the acknowledgement optional.
 
 Uploads default to `image/png`, `image/jpeg`, `application/pdf` (a selfie: no PDF) and 10 MiB;
-override per step with `contentTypes` and `maxSizeBytes`.
+override per step with `contentTypes` and `maxSizeBytes`. A capture feeding `veriff_kyc` sets
+`contentTypes` to images only: Veriff takes a PDF only once enabled on the account, and the engine
+refuses one at submit time with `UNSUPPORTED_CONTENT_TYPE` on the field.
 
 **Document type strings are not validated anywhere.** `document-choice`'s `documents[].type` and
 `document-capture`'s `document` are free strings that travel verbatim to the provider as Sumsub's

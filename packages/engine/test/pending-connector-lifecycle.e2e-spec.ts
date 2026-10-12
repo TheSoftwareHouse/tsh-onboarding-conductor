@@ -8,7 +8,11 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type KeyLike } from 'jose';
-import { MockAsyncCallbackConnector } from '../src/connectors/adapters/fixtures/mock-async-callback.connector';
+import {
+  MOCK_ASYNC_CALLBACK_VERDICT_FIELD,
+  MockAsyncCallback2Connector,
+  MockAsyncCallbackConnector,
+} from '../src/connectors/adapters/fixtures/mock-async-callback.connector';
 import { exceptionFactory } from '../src/validation/validation-exception.factory';
 import { startE2eServer } from './e2e-server';
 
@@ -18,7 +22,9 @@ const KEY_ID = 'pending-connector-lifecycle-signing-key';
 const OPERATOR_OBJECT_ID = '9f3c0000-0000-0000-0000-0000000000ef';
 
 const WORKFLOW_ID = 'pending-connector-lifecycle-e2e';
+const GUARDED_WORKFLOW_ID = 'pending-connector-lifecycle-guard-e2e';
 const PROVIDER_ID = 'mock_async_callback';
+const VERDICT_PROVIDER_ID = 'mock_async_callback_2';
 const WEBHOOK_ROUTE_PREFIX = '/v1/webhooks/';
 
 const workflow = {
@@ -36,6 +42,35 @@ const workflow = {
           {
             name: PROVIDER_ID,
             id: PROVIDER_ID,
+            type: 'custom',
+            order: 1,
+            async: true,
+            fieldMapping: {},
+          },
+        ],
+        transitions: [{ status: 'success', target: 'done' }],
+      },
+    },
+    { name: 'done', type: 'custom', config: { status: 'approved', data: {}, transitions: [] } },
+  ],
+};
+
+/** The same shape bound to the mock that declares a callback field, for the submit-side guard. */
+const guardedWorkflow = {
+  id: GUARDED_WORKFLOW_ID,
+  version: 1,
+  initial: 'await_provider',
+  steps: [
+    {
+      name: 'await_provider',
+      type: 'custom',
+      config: {
+        status: 'awaiting_user',
+        data: { [MOCK_ASYNC_CALLBACK_VERDICT_FIELD]: { type: 'text', required: false } },
+        connectors: [
+          {
+            name: VERDICT_PROVIDER_ID,
+            id: VERDICT_PROVIDER_ID,
             type: 'custom',
             order: 1,
             async: true,
@@ -130,11 +165,13 @@ describe('Parked onboarding lifecycle (e2e)', () => {
     return rows[0];
   };
 
-  const postCallback = (rawBody: Uint8Array) =>
+  const postCallbackTo = (providerId: string, rawBody: Uint8Array) =>
     http()
-      .post(`${WEBHOOK_ROUTE_PREFIX}${PROVIDER_ID}/callback`)
+      .post(`${WEBHOOK_ROUTE_PREFIX}${providerId}/callback`)
       .set('content-type', 'application/json')
       .send(Buffer.from(rawBody).toString('utf8'));
+
+  const postCallback = (rawBody: Uint8Array) => postCallbackTo(PROVIDER_ID, rawBody);
 
   const reconcile = (onboardingId: string) =>
     admin(http().post(`/v1/onboardings/${onboardingId}/pending-connector/reconcile`));
@@ -144,6 +181,10 @@ describe('Parked onboarding lifecycle (e2e)', () => {
     writeFileSync(
       path.join(workflowsDir, `${WORKFLOW_ID}.workflow.json`),
       JSON.stringify(workflow),
+    );
+    writeFileSync(
+      path.join(workflowsDir, `${GUARDED_WORKFLOW_ID}.workflow.json`),
+      JSON.stringify(guardedWorkflow),
     );
 
     const keyPair = await generateKeyPair('RS256', { extractable: true });
@@ -215,7 +256,9 @@ describe('Parked onboarding lifecycle (e2e)', () => {
         ]);
       }
 
-      await dataSource.query('DELETE FROM workflows WHERE key = $1', [WORKFLOW_ID]);
+      await dataSource.query('DELETE FROM workflows WHERE key = ANY($1::text[])', [
+        [WORKFLOW_ID, GUARDED_WORKFLOW_ID],
+      ]);
     }
 
     await app?.close();
@@ -274,6 +317,46 @@ describe('Parked onboarding lifecycle (e2e)', () => {
     ).expect(204);
     await expect(readStatus(onboardingId)).resolves.toBe('approved');
     await expect(readPendingConnector(onboardingId)).resolves.toBeNull();
+  });
+
+  it('refuses a client submit carrying a callback field, and applies the same field from the callback', async () => {
+    const verdictProvider = app.get(MockAsyncCallback2Connector);
+    const started = await http()
+      .post('/v1/onboardings')
+      .send({ workflowId: GUARDED_WORKFLOW_ID })
+      .expect(201);
+    const onboardingId = started.body.onboardingId as string;
+    createdOnboardingIds.add(onboardingId);
+
+    const refused = await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ [MOCK_ASYNC_CALLBACK_VERDICT_FIELD]: 'approved' })
+      .expect(400);
+    expect(refused.body).toEqual({
+      code: 'INVALID_STEP_DATA',
+      message: 'INVALID_STEP_DATA',
+      errors: { [MOCK_ASYNC_CALLBACK_VERDICT_FIELD]: ['CALLBACK_ONLY'] },
+    });
+    expect(verdictProvider.getLatestInitiation()?.onboardingId).not.toBe(onboardingId);
+    await expect(readStatus(onboardingId)).resolves.toBe('awaiting_user');
+
+    await http().post(`/v1/onboardings/${onboardingId}/submit`).send({}).expect(201);
+    const initiation = verdictProvider.getLatestInitiation();
+    expect(initiation).toMatchObject({ onboardingId, connectorOrder: 1 });
+
+    await postCallbackTo(
+      VERDICT_PROVIDER_ID,
+      verdictProvider.emitProviderCallback({
+        providerReference: initiation!.providerReference,
+        submittedData: { [MOCK_ASYNC_CALLBACK_VERDICT_FIELD]: 'approved' },
+      }).rawBody,
+    ).expect(204);
+    await expect(readStatus(onboardingId)).resolves.toBe('approved');
+    const rows: Array<{ context: Record<string, unknown> }> = await dataSource.query(
+      'SELECT context FROM onboardings WHERE id = $1',
+      [onboardingId],
+    );
+    expect(rows[0].context).toEqual({ [MOCK_ASYNC_CALLBACK_VERDICT_FIELD]: 'approved' });
   });
 
   it('drops a callback computed for a park the row no longer holds', async () => {

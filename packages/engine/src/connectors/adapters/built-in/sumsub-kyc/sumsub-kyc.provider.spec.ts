@@ -43,6 +43,7 @@ const SUBMISSION: KycSubmission = {
   documents: [
     {
       documentId: 'document-1',
+      sourceField: 'idCardFront',
       docSet: 'IDENTITY',
       docType: 'ID_CARD',
       side: 'FRONT_SIDE',
@@ -52,6 +53,7 @@ const SUBMISSION: KycSubmission = {
     },
     {
       documentId: 'document-2',
+      sourceField: 'selfieDocument',
       docSet: 'SELFIE',
       docType: 'SELFIE',
       country: 'PL',

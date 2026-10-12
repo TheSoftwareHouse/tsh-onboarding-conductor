@@ -150,6 +150,7 @@ describe('buildKycSubmission', () => {
       documents: [
         {
           documentId: 'document-1',
+          sourceField: 'idFrontDocumentId',
           docSet: 'IDENTITY',
           docType: 'ID_CARD',
           side: 'FRONT_SIDE',

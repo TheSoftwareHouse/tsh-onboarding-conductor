@@ -12,6 +12,7 @@
         "back": "capture_identity_back"
       },
       "config": {
+        "contentTypes": ["image/png", "image/jpeg"],
         "document": "ID_CARD",
         "sides": 2
       },

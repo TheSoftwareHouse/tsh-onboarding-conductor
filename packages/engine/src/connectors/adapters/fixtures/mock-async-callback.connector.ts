@@ -41,13 +41,16 @@ export type MockAsyncProviderCallbackFixture = Readonly<{
   headers: Record<string, string | undefined>;
 }>;
 
+/** The one callback field `mock_async_callback_2` declares, so a test can show the engine guarding it. */
+export const MOCK_ASYNC_CALLBACK_VERDICT_FIELD = 'providerVerdict';
+
 /**
  * A callback-capable connector with no provider behind it: it parks every execution and lets a
  * test deliver the provider callback itself.
  *
  * Two are registered rather than one because a step may declare several connectors, and a
  * workflow that parks on one needs a second id to show the next one running. They differ in
- * nothing but their id, and each keeps its own initiations.
+ * their id and in that the second declares a callback field, and each keeps its own initiations.
  */
 abstract class AsyncCallbackMockConnector implements ConnectorAdapter {
   readonly type = 'custom' as const;
@@ -61,6 +64,7 @@ abstract class AsyncCallbackMockConnector implements ConnectorAdapter {
   protected constructor(
     readonly name: string,
     readonly id: string,
+    readonly callbackFields: readonly string[] = [],
   ) {}
 
   private readonly initiatedRequests = new Map<string, StoredInitiation>();
@@ -356,6 +360,6 @@ export class MockAsyncCallbackConnector extends AsyncCallbackMockConnector {
 @Injectable()
 export class MockAsyncCallback2Connector extends AsyncCallbackMockConnector {
   constructor() {
-    super('mock_async_callback_2', 'mock_async_callback_2');
+    super('mock_async_callback_2', 'mock_async_callback_2', [MOCK_ASYNC_CALLBACK_VERDICT_FIELD]);
   }
 }

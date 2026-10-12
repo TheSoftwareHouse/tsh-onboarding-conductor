@@ -132,7 +132,7 @@
             "type": "file",
             "required": true,
             "validation": {
-              "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
+              "contentTypes": ["image/png", "image/jpeg"],
               "maxSizeBytes": 10485760
             }
           }
@@ -155,7 +155,7 @@
             "type": "file",
             "required": true,
             "validation": {
-              "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
+              "contentTypes": ["image/png", "image/jpeg"],
               "maxSizeBytes": 10485760
             }
           }

@@ -6,10 +6,18 @@ import type {
   ConnectorCallbackMappingInput,
   ConnectorExecutionInput,
 } from '../../../ports/connector-adapter.port';
-import { ConnectorExecutionResult } from '../../../ports/connector-execution-result';
+import {
+  ConnectorExecutionMetadataFlag,
+  ConnectorExecutionResult,
+} from '../../../ports/connector-execution-result';
 import { KycConfigInvalidError } from './kyc-config';
 import { KycConnector } from './kyc-connector';
-import type { KycCallbackEvent, KycProvider, KycVerdict } from './kyc-provider.port';
+import {
+  type KycCallbackEvent,
+  KycDocumentUnsupportedError,
+  type KycProvider,
+  type KycVerdict,
+} from './kyc-provider.port';
 
 const CONNECTOR_ID = 'fake_kyc';
 const ONBOARDING_ID = '2d4e1b3c-6f1a-4a39-8f6d-0c2b7a9e5d11';
@@ -313,6 +321,29 @@ describe('KycConnector', () => {
 
       expect(result).toEqual(ConnectorExecutionResult.invalid());
       expect(deps.provider.submit).not.toHaveBeenCalled();
+    });
+
+    it('answers retryable invalid-data on the document field when the provider cannot take the document', async () => {
+      const deps = createDeps();
+      const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      deps.provider.submit.mockImplementation(async (_settings, submission) => {
+        throw new KycDocumentUnsupportedError(CONNECTOR_ID, submission.documents[0]);
+      });
+
+      const result = await createConnector(deps).execute(
+        createInput({ ...PAYLOAD, idFrontDocumentId: 'document-1' }),
+      );
+
+      expect(result).toEqual(
+        ConnectorExecutionResult.invalidData(
+          { idFrontDocumentId: ['UNSUPPORTED_CONTENT_TYPE'] },
+          { [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true },
+        ),
+      );
+      expect(loggedLines(logSpy, 'KYC_DOCUMENT_UNSUPPORTED')).toEqual([
+        `KYC_DOCUMENT_UNSUPPORTED connectorId=${CONNECTOR_ID} onboardingId=${ONBOARDING_ID} ` +
+          'field=idFrontDocumentId contentType=image/png',
+      ]);
     });
 
     it('lets a provider failure propagate', async () => {

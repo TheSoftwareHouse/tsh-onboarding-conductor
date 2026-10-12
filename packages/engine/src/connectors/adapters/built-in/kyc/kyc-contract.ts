@@ -19,6 +19,9 @@ export const KYC_REASON_CODES_FIELD = 'kycReasonCodes';
 export const KYC_CUSTOMER_MESSAGE_FIELD = 'kycCustomerMessage';
 export const KYC_ATTEMPT_COUNT_FIELD = 'kycAttemptCount';
 
+/** The field error a document of a type the provider cannot take is refused with. */
+export const KYC_DOCUMENT_UNSUPPORTED_ERROR = 'UNSUPPORTED_CONTENT_TYPE';
+
 /**
  * What crosses into the engine as `submittedData` on the callback path. `OnboardingsService.submit`
  * writes this verbatim into audit metadata for `webhook.inbound_callback_applied`, so the payload

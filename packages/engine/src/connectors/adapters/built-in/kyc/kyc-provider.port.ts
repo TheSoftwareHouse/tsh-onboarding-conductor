@@ -19,9 +19,13 @@ export type KycApplicant = Readonly<{
   postCode?: string;
 }>;
 
-/** One captured document, already read from object storage. `country` is ISO alpha-2. */
+/**
+ * One captured document, already read from object storage. `country` is ISO alpha-2;
+ * `sourceField` is the step field the client uploaded it under, which a refusal is reported on.
+ */
 export type KycDocument = Readonly<{
   documentId: string;
+  sourceField: string;
   docSet: string;
   docType: string;
   side?: string;
@@ -44,6 +48,24 @@ export type KycSubmission = Readonly<{
 }>;
 
 export type KycSubmissionReceipt = Readonly<{ providerReference: string }>;
+
+/**
+ * Thrown by `KycProvider.submit` before any provider call when a document is of a kind the
+ * provider cannot take — a PDF at a provider that accepts only images. The kernel answers it as
+ * the step's own field error, so the client re-uploads instead of the provider refusing mid-flow.
+ */
+export class KycDocumentUnsupportedError extends Error {
+  constructor(
+    readonly providerId: string,
+    readonly document: Pick<KycDocument, 'documentId' | 'sourceField' | 'contentType'>,
+  ) {
+    super(
+      `${providerId} cannot verify document ${document.documentId} (${document.sourceField}) ` +
+        `of type ${document.contentType}`,
+    );
+    this.name = 'KycDocumentUnsupportedError';
+  }
+}
 
 /**
  * A provider webhook, reduced to what the kernel acts on. `actionable: false` re-parks the step
@@ -114,6 +136,11 @@ export interface KycProvider<TEvent extends KycCallbackEvent = KycCallbackEvent>
    * for a provider whose rules also depend on the document list or the questionnaire.
    */
   validateConfig(providerConfig: Readonly<Record<string, unknown>>, config: KycConfig): void;
+  /**
+   * Opens the verification. A document the provider cannot take throws
+   * `KycDocumentUnsupportedError` before the first side effect; the kernel reports it on the
+   * document's step field.
+   */
   submit(
     settings: ResolvedConnectorSettings,
     submission: KycSubmission,
