@@ -85,14 +85,11 @@ and whatever the adapter's `validateDeclaration` asserts — so a clean run stil
 by a booting engine.
 
 A file is a list of typed steps — see the next section for the vocabulary — and the
-quickest start is to copy the closest example from [workflows/fixtures/](../workflows/fixtures/),
-each of which ships twice: `<name>.workflow.json` written as `custom` steps, one hand-written
-compiled step each, and `<name>-typed.workflow.json` written through the specialized types. The examples are
-`base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`, `http-request`,
-`twilio-verify`, `sendgrid-email`, `manual-smtp`, `connector-fallback`, `sumsub-kyc`, `veriff-kyc` and
-`scoring` — `sumsub-kyc` and `veriff-kyc` are the ones to copy for a provider that answers on a
-callback rather than in the same request (`veriff-kyc` for one that needs no provider-side level or
-questionnaire), `scoring` for named scores and score-conditioned transitions. The production reference
+quickest start is to copy the closest workflow from [workflows/fixtures/](../workflows/fixtures/),
+which holds the flows the e2e suites run against, each written as `custom` steps, one hand-written
+compiled step each: `base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`,
+`twilio-verify`, `sendgrid-email` and `scoring` — `scoring` is the one to copy for named scores and
+score-conditioned transitions. The production reference
 flow is [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), shipped built-in in both forms —
 revision 1 as `custom` steps, revision 2 (`-v2`) through the specialized types: EU B2C individual
 KYC across all 30 EEA states, where the applicant chooses between a passport and a national ID card.
@@ -193,8 +190,8 @@ An arm without `reason` is still required and must still end on a terminal `reje
 genuine refusal is never routed back into the flow by accident. Written as `custom` steps, the
 built-in `eu-b2c-individual-kyc-eea` carries those arms by hand on `verify_phone_code`. Through the
 specialized `otp-verify` type they are generated: the type emits the re-send step itself and routes
-`CHALLENGE_EXPIRED` and `CHALLENGE_NOT_FOUND` to it, so revision 2 and
-`workflows/fixtures/twilio-verify-typed.workflow.json` wire only `verified` and `refused`.
+`CHALLENGE_EXPIRED` and `CHALLENGE_NOT_FOUND` to it, so revision 2 wires only `verified` and
+`refused`.
 
 A workflow may also declare named numeric scores — `scoring: { <name>: { min, max } }` at the root,
 integer bounds, `min < max` — and adjust them from a step's own `scoring: [{ score, when?, add }]`
@@ -204,9 +201,7 @@ transition's `when` may then route on the result with `{ score, gte | gt | lte |
 inside `all` / `any` / `not` like any other condition — but a field's `when` and a scoring rule's
 own `when` may not name a score, since the score leaf only resolves server-side and `/state`
 publishes a field's `when` to the client as-is. `workflows/fixtures/scoring.workflow.json` is the
-worked example as `custom` steps; `scoring-typed.workflow.json` says the same with step-level
-`scoring` on `identity-profile`, `otp-verify` and `kyc-identity-verification`, and score leaves on
-conditional edges.
+worked example, as `custom` steps.
 
 A connector declaration may also name `errorHandler` — the `id` of a registered
 `ConnectorErrorHandler`, defaulting to `fallback_on_error` when omitted — and `fallback`, an
@@ -324,9 +319,8 @@ sends each an `onboarding.agreement_pending` webhook, so
 examples: `base-terms` on `accept_terms` in [`workflows/fixtures/base.workflow.json`](../workflows/fixtures/base.workflow.json),
 and `eu-b2c-terms` plus `eu-b2c-privacy-notice` on `collect_contact` in
 [`eu-b2c-individual-kyc-eea`](../workflows/built-in/). The root is the only place the array is
-accepted, whatever the steps are written as: `base.workflow.json` and `base-typed.workflow.json`
-declare the same family identically, and both revisions of `eu-b2c-individual-kyc-eea` do too —
-revision 1 as `custom` steps, revision 2 as specialized ones whose `consents` member generates the
+accepted, whatever the steps are written as: both revisions of `eu-b2c-individual-kyc-eea` declare
+the same family identically — revision 1 as `custom` steps, revision 2 as specialized ones whose `consents` member generates the
 field `acceptedWhen` names.
 
 **Adding a new agreement type** is one array entry. `AGREEMENT_TYPES` in
@@ -467,8 +461,7 @@ the slot allows, a `connector` block may name `errorHandler`, `retry` and up to 
 entries — each an `id` of the same capability, with its own `retry` and, where the slot allows,
 `fieldMapping` and `config` additions laid under the keys the type derives (an entry declaring none
 inherits the primary's). `otp-verify` entries may carry their own `startConfig` and `checkConfig`.
-`workflows/fixtures/connector-fallback-typed.workflow.json` is the worked example;
-`connector-fallback.workflow.json` is the same chain declared in full on a `custom` step's connector.
+`packages/engine/test/connector-fallback-chain.e2e-spec.ts` writes and runs a worked example.
 
 Reach for `connector-call` when the connector you need has no specialized type — a mock adapter in
 a fixture, a provider integrated by declaration alone. It collects `fields` (and takes `include`
@@ -714,10 +707,10 @@ actionable, hint?}`; set `actionable: false` for a webhook that decides nothing;
    the connector in `BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS` (or `USER_CONNECTOR_ADAPTER_PROVIDERS` for a fork's own provider), and the provider and its client in the module's
    providers. If the provider needs a base URL or timeout, add them to `AppConfig` and `.env.dist`
    beside `SUMSUB_*` / `VERIFF_*`.
-4. **Add a fixture workflow pair**, `<name>-kyc` and `<name>-kyc-typed`, copied from `veriff-kyc`
-   (the `custom` form declares `kycAttemptCount` if your provider does not count attempts), and let
-   `checked-in-workflows.spec.ts` guard the pairing. A built-in family is a copy of an existing one
-   with the connector binding changed.
+4. **Add a workflow family** that binds it: a built-in family is a copy of an existing one, as
+   `eu-b2c-individual-kyc-eea-veriff` is, with the connector binding changed (the `custom` form
+   declares `kycAttemptCount` if your provider does not count attempts).
+   `checked-in-workflows.spec.ts` runs the adapter's load-time config check over it.
 5. **Let it be selected**: nothing to add. A `kyc` connector the kernel builds declares its
    `callbackFields` itself (the `kyc*` fields, plus `kycAttemptCount` when `countsAttempts` is
    `false`), so a typed KYC step can be switched to it from the workflow details page, and a

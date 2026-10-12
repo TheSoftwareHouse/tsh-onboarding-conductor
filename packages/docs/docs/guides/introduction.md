@@ -59,7 +59,7 @@ Manual review, waiting on a slow provider and finishing are the same shape with 
 
 A **specialized** step says the same thing in fewer words. It names what the step is for and the engine derives the rest when the workflow loads: `contact-details` knows how an email field is validated, `connector-call` knows it has a `success` outcome, and `edges` wires that outcome to the next step.
 
-```json title="workflows/fixtures/base-typed.workflow.json — the same step, written as a specialized step"
+```json title="The same step, written as a specialized step"
 {
   "name": "collect_email",
   "type": "connector-call",

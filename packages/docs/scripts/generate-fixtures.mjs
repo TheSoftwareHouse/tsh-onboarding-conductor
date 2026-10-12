@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Writes the fixture pages and the manifest the gallery and the sidebar read. An example in
-// workflows/fixtures ships as two files, `<name>-typed.workflow.json` written with the specialized
-// step types and `<name>.workflow.json` written as `custom` steps, and gets ONE page: the specialized
-// form first, then the same flow as `custom` steps and what to do to write it that way. A built-in
+// workflows/fixtures gets a page of its own; one that also ships a `<name>-typed.workflow.json` twin
+// written with the specialized step types gets ONE page for both: the specialized form first, then
+// the same flow as `custom` steps and what to do to write it that way. A built-in
 // workflow in workflows/built-in gets a page per file, each naming the revision in the other form.
 // The workflow files are the source; nothing written here is committed, and `pnpm build` runs this
 // first. Every document is compiled the way the engine compiles it, so the step map shows what
@@ -32,23 +32,14 @@ const DESCRIPTIONS = {
   base: 'The smallest complete flow: collect an email, have the terms accepted, approve. Two stand-in KYC connectors show where a provider call sits.',
   'conditional-fields-and-transitions':
     'Fields that appear only when an earlier answer makes them relevant, transitions guarded by conditions, and a manual review fork.',
-  'connector-fallback':
-    'An email connector with retries and a fallback declaration, so a second provider takes over when the first runs out of attempts.',
   'file-upload':
     'One document upload field, exercising the reserve-then-complete flow against object storage.',
-  'http-request':
-    'Calling a JSON API from configuration alone with the generic http_request connector.',
   'manual-review':
     'A step that parks the onboarding for an operator, with approve, reject and invalid each leading somewhere.',
-  'manual-smtp': 'Sending an email through a plain SMTP server, which MailHog catches locally.',
   scoring:
     'Named scores accumulated by rules across phone verification, an identity check and a manual review, with transitions that branch on them.',
   'sendgrid-email': 'Sending an email through SendGrid.',
-  'sumsub-kyc':
-    'An identity check whose verdict arrives on a provider callback, with document uploads and a manual review fork.',
   'twilio-verify': 'A one-time code sent and checked through Twilio Verify.',
-  'veriff-kyc':
-    'The identity check of sumsub-kyc served by Veriff instead: the same captured documents, submitted to a Veriff session over the API, with the decision arriving on the webhook.',
   'eu-b2c-individual-kyc-eea':
     'The production reference flow written as custom steps: EU B2C individual KYC across the EEA, where the applicant chooses between a passport and a national ID card.',
   'eu-b2c-individual-kyc-eea-v2':
@@ -57,24 +48,6 @@ const DESCRIPTIONS = {
     'The production reference flow with Veriff as the identity provider — identical to eu-b2c-individual-kyc-eea except that the KYC step binds veriff_kyc — written as custom steps.',
   'eu-b2c-individual-kyc-eea-veriff-v2':
     'The Veriff flow written with specialized step types, which compiles to the steps of its revision 1 when it loads.',
-};
-
-/**
- * Why an example's two forms compile to different steps, for the examples where they do. Each
- * sentence is the one `packages/engine/src/workflows/checked-in-workflows.spec.ts` asserts; the
- * steps concerned are computed below, not written here.
- */
-const DIFFERENCES = {
-  'conditional-fields-and-transitions':
-    'A `manual-review` step always keeps a stray submit where it was, so the specialized form carries a `success` arm on each review step that the `custom` form leaves out.',
-  'twilio-verify':
-    '`otp-verify` generates the re-send step itself and routes an expired or unknown challenge to it, so the specialized form gains `request_code_resend` and the arm that leads there.',
-  scoring:
-    '`otp-verify` generates the re-send step and its arm, and the phone number is collected on `collect_profile` rather than on `request_code`. `identity-profile`, `document-capture` and `kyc-identity-verification` shape the fields they collect and the document table the connector receives: the document fields are `idCardFront` and `idCardBack`, their validations are the steps’ own, and the issuing country comes from the `country` field rather than a fixed `POL`. `manual-review` keeps its stray submit arm. The specialized form also declares the `kycAttemptCount` callback field, which the `custom` form predates.',
-  'sumsub-kyc':
-    '`document-capture` and `kyc-identity-verification` shape the fields they collect and the document table the connector receives: the document fields are `idCardFront` and `idCardBack`, their validations are the steps’ own, and the issuing country comes from the `country` field rather than a fixed `POL`. `manual-review` keeps its stray submit arm. The specialized form also declares the `kycAttemptCount` callback field, which the `custom` form predates.',
-  'veriff-kyc':
-    '`document-capture` and `kyc-identity-verification` shape the fields they collect and the document table the connector receives: the document fields are `idCardFront` and `idCardBack`, their validations are the steps’ own, and the issuing country comes from the `country` field rather than a fixed `PL`. `manual-review` keeps its stray submit arm.',
 };
 
 function loadDdl() {
@@ -315,7 +288,7 @@ function renderExamplePage({ docId, label, specialized, custom }) {
           '',
         ]
       : [
-          `${code(custom.relativeFile)} writes the flow that way by hand, and the two forms do not compile to exactly the same steps. ${DIFFERENCES[docId] ?? 'The specialized types derive parts of a step that the `custom` form spells out differently.'}`,
+          `${code(custom.relativeFile)} writes the flow that way by hand, and the two forms do not compile to exactly the same steps. The specialized types derive parts of a step that the \`custom\` form spells out differently.`,
           '',
           `Steps that compile differently: ${list(comparison.differing.filter((name) => !comparison.onlySpecialized.includes(name) && !comparison.onlyCustom.includes(name)))}.${comparison.onlySpecialized.length ? ` Only in the specialized form: ${list(comparison.onlySpecialized)}.` : ''}${comparison.onlyCustom.length ? ` Only in the \`custom\` form: ${list(comparison.onlyCustom)}.` : ''}${comparison.topLevel.length ? ` The definitions also differ in ${list(comparison.topLevel)}.` : ''} Those steps as the \`custom\` form compiles them:`,
           '',

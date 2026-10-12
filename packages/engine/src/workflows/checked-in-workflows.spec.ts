@@ -55,33 +55,6 @@ const readScope = (directory: string): CheckedInWorkflow[] =>
       return { file: fileName, authored, normalized: validateAndNormalizeWorkflow(authored) };
     });
 
-const TYPED_SUFFIX = '-typed';
-const CUSTOM_STEP_TYPE = 'custom';
-
-/**
- * Every fixture that compiles to exactly the steps its `custom` twin does. The others differ on
- * purpose and say how: `conditional-fields-and-transitions` gains the stray-submit arm every
- * `manual-review` step emits, `twilio-verify` gains the re-send path, and `scoring`, `sumsub-kyc` and
- * `veriff-kyc` collect through specialized steps whose fields are shaped by the step rather than by
- * hand — and, for the first two, the specialized form also declares the `kycAttemptCount` callback
- * field that the hand-written form predates.
- */
-const IDENTICAL_PAIRS = [
-  'base',
-  'connector-fallback',
-  'file-upload',
-  'http-request',
-  'manual-review',
-  'manual-smtp',
-  'sendgrid-email',
-];
-
-const stripIdentity = (definition: NormalizedWorkflowDefinition) => ({
-  ...definition,
-  id: undefined,
-  name: undefined,
-});
-
 const everyConnector = (
   definition: NormalizedWorkflowDefinition,
 ): { stepName: string; connector: NormalizedWorkflowConnectorDeclaration }[] =>
@@ -200,125 +173,18 @@ describe('checked-in workflows', () => {
     },
   );
 
-  describe('fixtures', () => {
-    const byId = new Map(fixtures.map((workflow) => [workflow.normalized.id, workflow]));
-    const customIds = fixtures
-      .map((workflow) => workflow.normalized.id)
-      .filter((id) => !id.endsWith(TYPED_SUFFIX));
-
-    it('ship every example twice: written as custom steps, and as specialized steps', () => {
-      expect(customIds.length).toBeGreaterThan(0);
-
-      for (const id of customIds) {
-        const custom = byId.get(id)!;
-        const typed = byId.get(`${id}${TYPED_SUFFIX}`);
-
-        expect(typed).toBeDefined();
-        expect(custom.file).toBe(`${id}.workflow.json`);
-        expect(typed!.file).toBe(`${id}${TYPED_SUFFIX}.workflow.json`);
-        expect(custom.authored.steps.every((step) => step.type === CUSTOM_STEP_TYPE)).toBe(true);
-        expect(typed!.authored.steps.some((step) => step.type === CUSTOM_STEP_TYPE)).toBe(false);
-      }
-    });
-
-    it.each(IDENTICAL_PAIRS)('%s compiles to the same steps in both forms', (id) => {
-      expect(stripIdentity(byId.get(`${id}${TYPED_SUFFIX}`)!.normalized)).toEqual(
-        stripIdentity(byId.get(id)!.normalized),
-      );
-    });
-
-    it.each([
-      ['scoring', false],
-      ['sumsub-kyc', false],
-      ['veriff-kyc', true],
-    ])(
-      '%s declares the kycAttemptCount callback field in the custom form: %s',
-      (id, declaredByCustom) => {
-        const callbackFields = (workflowId: string): string[] =>
-          Object.keys(byId.get(workflowId)!.normalized.stepsByName.submit_kyc.data);
-
-        // The custom Sumsub files predate the field; the specialized step type always emits it.
-        expect(callbackFields(id).includes('kycAttemptCount')).toBe(declaredByCustom);
-        expect(callbackFields(`${id}${TYPED_SUFFIX}`)).toContain('kycAttemptCount');
-      },
+  it('claims a source key of its own for every fixture', () => {
+    const sourceKeys = fixtures.flatMap((workflow) =>
+      everyConnector(workflow.normalized)
+        .map(({ connector }) => connector.config.sourceKey)
+        .filter((key): key is string => typeof key === 'string')
+        .map((key) => [key, workflow.normalized.id] as const),
     );
+    const workflowIdBySourceKey = new Map<string, string>();
 
-    it('lets a manual review declare no invalid outcome, exactly as its custom twin does', () => {
-      const custom = byId.get('conditional-fields-and-transitions')!.normalized;
-      const typed = byId.get('conditional-fields-and-transitions-typed')!.normalized;
-
-      for (const name of ['review_us', 'review_default']) {
-        // The one difference: a manual-review step always keeps a stray submit where it was.
-        expect(typed.stepsByName[name].transitions).toEqual([
-          expect.objectContaining({ status: 'success' }),
-          ...custom.stepsByName[name].transitions,
-        ]);
-      }
-      expect(typed.stepsByName.collect_details).toEqual(custom.stepsByName.collect_details);
-    });
-
-    it('proves the phone number through an OTP step that adds only the re-send path', () => {
-      const custom = byId.get('twilio-verify')!.normalized;
-      const typed = byId.get('twilio-verify-typed')!.normalized;
-
-      expect(typed.steps.map((step) => step.name)).toEqual([
-        'request_code',
-        'verify_code',
-        'request_code_resend',
-        'approved',
-        'rejected',
-      ]);
-      expect(typed.stepsByName.request_code.data).toEqual(custom.stepsByName.request_code.data);
-      expect(typed.stepsByName.request_code.connectors).toEqual(
-        custom.stepsByName.request_code.connectors,
-      );
-    });
-
-    it('scores from the steps that collect, prove and verify, on the step where each outcome is known', () => {
-      const typed = byId.get('scoring-typed')!.normalized;
-
-      expect(typed.stepsByName.collect_profile.scoring).toHaveLength(6);
-      expect(typed.stepsByName.request_code.scoring).toEqual([]);
-      expect(typed.stepsByName.verify_code.scoring).toEqual([
-        { score: 'trust', when: { field: 'pepSelfDeclared', equals: false }, add: 15 },
-      ]);
-      expect(typed.stepsByName.submit_kyc.scoring).toHaveLength(3);
-      // The verified verdict still lands on review when the risk accumulated so far says so.
-      expect(typed.stepsByName.submit_kyc.transitions[0]).toMatchObject({
-        when: {
-          all: [
-            { field: 'kycOutcome', equals: 'verified' },
-            { score: 'risk', gte: 60 },
-          ],
-        },
-        target: 'manual_review',
-      });
-      expect(typed.stepsByName.manual_review.transitions).toEqual([
-        expect.objectContaining({ status: 'success' }),
-        expect.objectContaining({ status: 'manual.approve', target: 'approved' }),
-        expect.objectContaining({ status: 'manual.reject', target: 'rejected' }),
-        expect.objectContaining({
-          status: 'manual.invalid',
-          when: { score: 'risk', lte: 45 },
-          target: 'request_code',
-        }),
-        expect.objectContaining({ status: 'manual.invalid', target: 'rejected' }),
-      ]);
-    });
-
-    it('claims a source key of its own for every typed twin, whichever provider it binds', () => {
-      const sourceKeys = fixtures.flatMap((workflow) =>
-        everyConnector(workflow.normalized)
-          .map(({ connector }) => connector.config.sourceKey)
-          .filter((key): key is string => typeof key === 'string')
-          .map((key) => [key, workflow.normalized.id] as const),
-      );
-      const workflowIdBySourceKey = new Map<string, string>();
-
-      for (const [key, id] of sourceKeys) {
-        expect(workflowIdBySourceKey.get(key) ?? id).toBe(id);
-        workflowIdBySourceKey.set(key, id);
-      }
-    });
+    for (const [key, id] of sourceKeys) {
+      expect(workflowIdBySourceKey.get(key) ?? id).toBe(id);
+      workflowIdBySourceKey.set(key, id);
+    }
   });
 });

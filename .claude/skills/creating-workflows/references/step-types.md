@@ -137,7 +137,7 @@ At most one arm may lack a `when`, and it must come last — but a list may equa
 conditional, and then no fallback is missing. With no arm matching, a submit ends the onboarding
 `invalid` and a `manual-review` trigger is refused with `MANUAL_TRANSITION_NOT_AVAILABLE`; a
 document that wants either outcome writes the conditional arms alone, as
-`conditional-fields-and-transitions-typed` does. `webhook: { notify: false }` on an arm is the only
+`conditional-fields-and-transitions` does on its review steps. `webhook: { notify: false }` on an arm is the only
 place an outbound-notification opt-out can be written.
 
 **`substeps`** renames a generated sub-step. `otp-verify` named `send_phone_code` compiles to

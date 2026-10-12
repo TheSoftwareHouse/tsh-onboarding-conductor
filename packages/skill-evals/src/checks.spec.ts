@@ -5,13 +5,45 @@ import { dirname, join } from 'node:path';
 import { type CheckContext, changeStatusOf, loadDdl, runCheck } from './checks';
 import { REPO_ROOT } from './runner';
 
-const BASE_TYPED = join(REPO_ROOT, 'workflows', 'fixtures', 'base-typed.workflow.json');
-const MANUAL_REVIEW_TYPED = join(
-  REPO_ROOT,
-  'workflows',
-  'fixtures',
-  'manual-review-typed.workflow.json',
-);
+const BASE = join(REPO_ROOT, 'workflows', 'fixtures', 'base.workflow.json');
+
+// The graph check compares step types, so its documents are written in specialized steps: every
+// checked-in fixture is `custom` steps, which all compile to the same node type.
+const TYPED_FLOW = {
+  id: 'typed-flow',
+  version: 1,
+  initial: 'collect_email',
+  steps: [
+    {
+      name: 'collect_email',
+      type: 'connector-call',
+      config: {
+        connectors: [
+          {
+            name: 'mock_kyc_1',
+            id: 'mock_kyc_1',
+            type: 'kyc',
+            order: 1,
+            fieldMapping: { email: 'email' },
+          },
+        ],
+      },
+      include: [{ type: 'contact-details', config: { phoneNumber: 'omitted' } }],
+      edges: { success: 'approved' },
+    },
+    { name: 'approved', type: 'terminal', config: { outcome: 'approved' } },
+  ],
+};
+const TYPED_REVIEW = {
+  id: 'typed-review',
+  version: 1,
+  initial: 'review',
+  steps: [
+    { name: 'review', type: 'manual-review', edges: { approve: 'approved', reject: 'rejected' } },
+    { name: 'approved', type: 'terminal', config: { outcome: 'approved' } },
+    { name: 'rejected', type: 'terminal', config: { outcome: 'rejected' } },
+  ],
+};
 
 describe('checks', () => {
   let sandbox: string;
@@ -133,7 +165,7 @@ describe('checks', () => {
   });
 
   it('workflow-compiles runs the DDL over every matching changed file', () => {
-    write(sandbox, 'workflows/users/good.workflow.json', readFileSync(BASE_TYPED, 'utf8'));
+    write(sandbox, 'workflows/users/good.workflow.json', readFileSync(BASE, 'utf8'));
     write(
       sandbox,
       'workflows/users/bad.workflow.json',
@@ -207,18 +239,17 @@ describe('checks', () => {
   });
 
   it('compiled-graph-matches compares the compiled shape against the golden, ignoring names', () => {
-    const renamed = JSON.parse(readFileSync(BASE_TYPED, 'utf8'));
+    const renamed = structuredClone(TYPED_FLOW);
 
     renamed.id = 'renamed';
     renamed.initial = 'ask_email';
     renamed.steps[0].name = 'ask_email';
-    renamed.steps[0].edges.success[0].target = 'agree';
-    renamed.steps[1].name = 'agree';
-    renamed.agreements[0].step = 'agree';
+    renamed.steps[0].edges = { success: 'done' };
+    renamed.steps[1].name = 'done';
 
     write(sandbox, 'workflows/users/renamed.workflow.json', JSON.stringify(renamed));
-    write(evalsDirectory, 'golden/base.workflow.json', readFileSync(BASE_TYPED, 'utf8'));
-    write(evalsDirectory, 'golden/review.workflow.json', readFileSync(MANUAL_REVIEW_TYPED, 'utf8'));
+    write(evalsDirectory, 'golden/base.workflow.json', JSON.stringify(TYPED_FLOW));
+    write(evalsDirectory, 'golden/review.workflow.json', JSON.stringify(TYPED_REVIEW));
 
     const changed = context({
       changedFiles: [{ status: '??', path: 'workflows/users/renamed.workflow.json' }],
