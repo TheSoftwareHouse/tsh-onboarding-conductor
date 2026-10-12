@@ -19,6 +19,9 @@ const FILTERS: AdminOnboardingExportFilters = {
   workflowVersion: null,
   currentStep: null,
   onboardingId: null,
+  parked: null,
+  pendingConnectorId: null,
+  parkedBefore: null,
 };
 
 function axiosFailure(status: number): AxiosError {

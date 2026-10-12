@@ -856,6 +856,9 @@ describe('OnboardingsPage', () => {
         workflowVersion: null,
         currentStep: null,
         onboardingId: null,
+        parked: null,
+        pendingConnectorId: null,
+        parkedBefore: null,
       });
       expect(mockedDownloadFile.mock.calls[0]?.[1]).toMatch(
         /^onboardings-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}\.csv$/,

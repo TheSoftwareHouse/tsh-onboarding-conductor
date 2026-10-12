@@ -248,7 +248,7 @@ describe('a URL mixing a valid criterion with a malformed one', () => {
 });
 
 describe('toExportFilters', () => {
-  it('carries the five criteria and drops the page window', () => {
+  it('carries the criteria, resolves the parked bound to an instant and drops the page window', () => {
     expect(
       toExportFilters({
         status: 'awaiting_user',
@@ -256,6 +256,9 @@ describe('toExportFilters', () => {
         workflowVersion: '2',
         currentStep: 'kyc',
         onboardingId: 'abc',
+        parked: true,
+        pendingConnectorId: 'veriff_kyc',
+        parkedBefore: '2026-07-01T10:00',
         page: 3,
         limit: 50,
       }),
@@ -265,6 +268,9 @@ describe('toExportFilters', () => {
       workflowVersion: '2',
       currentStep: 'kyc',
       onboardingId: 'abc',
+      parked: true,
+      pendingConnectorId: 'veriff_kyc',
+      parkedBefore: new Date('2026-07-01T10:00').toISOString(),
     });
   });
 
@@ -275,6 +281,9 @@ describe('toExportFilters', () => {
       workflowVersion: null,
       currentStep: null,
       onboardingId: null,
+      parked: null,
+      pendingConnectorId: null,
+      parkedBefore: null,
     });
   });
 });

@@ -3163,8 +3163,8 @@ calls `GET /v1/onboardings/export` with the applied filters (never the draft, an
 `page`/`limit`), so the file matches the list on screen across every page. It is rendered only
 once a list fetch has succeeded — hidden while the list is loading or after it failed to load — and
 is labelled with that list's `pagination.total` (`Export 41 as CSV`), which is the export's row
-count for the same criteria. It is disabled while a request is in flight, while the draft Version
-is invalid and when the total is zero, and reads `Exporting…` meanwhile. The download goes through axios as a blob (`fetchAdminOnboardingsCsv`,
+count for the same criteria. It is disabled while a request is in flight, while a draft filter
+is refused (`findDraftError`) and when the total is zero, and reads `Exporting…` meanwhile. The download goes through axios as a blob (`fetchAdminOnboardingsCsv`,
 `useOnboardingsExport`) because a navigation could not carry the Entra bearer token; a failure is an
 `Export failed` toast, and since a broken connection rejects the request, no truncated file is ever
 saved. The panel names the file itself, `onboardings-<yyyy-MM-ddTHH-mm>.csv` in local time (`toDateTimeLocalValue`, `:` swapped for `-`), and does

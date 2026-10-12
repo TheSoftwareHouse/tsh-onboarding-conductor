@@ -121,6 +121,7 @@ describe('OnboardingsController', () => {
       {} as OnboardingTransitionsService,
       pendingConnectorReconcileService as unknown as PendingConnectorReconcileService,
       {} as OnboardingsExportService,
+      {} as ApiFailureAuditFilter,
     );
 
     await expect(
@@ -356,6 +357,7 @@ describe('OnboardingsController', () => {
           {} as DocumentUploadService,
           {} as OnboardingStateService,
           {} as OnboardingTransitionsService,
+          {} as PendingConnectorReconcileService,
           {
             exportCsv: jest.fn().mockResolvedValue(
               (async function* () {

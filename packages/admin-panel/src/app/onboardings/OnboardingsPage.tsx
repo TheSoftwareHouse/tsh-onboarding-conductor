@@ -159,7 +159,7 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
             variant="outline"
             size="lg"
             className="gap-2"
-            disabled={exporting || workflowVersionInvalid || exportCount === 0}
+            disabled={exporting || draftError !== null || exportCount === 0}
             onClick={handleExport}
           >
             <Download aria-hidden="true" focusable="false" className="size-4.5" />

@@ -30,6 +30,9 @@ const FILTERS = {
   workflowVersion: null,
   currentStep: null,
   onboardingId: null,
+  parked: null,
+  pendingConnectorId: null,
+  parkedBefore: null,
 } as const;
 
 function wrapper({ children }: { children: ReactNode }): ReactElement {
