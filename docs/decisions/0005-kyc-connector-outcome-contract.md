@@ -16,7 +16,7 @@ against an ordered decision table and reports exactly one of four domain outcome
 engine as `ConnectorExecutionResult.accepted()`; the adapter never returns
 `rejected()` and does not declare `canReject`. The outcome rides `submittedData` as
 `kycOutcome` (with `kycRetryStep` set only on `retry`), and the workflow document —
-`workflows/fixtures/sumsub-kyc.workflow.json` — is what routes on it, with four
+`workflows/built-in/eu-b2c-individual-kyc-eea.workflow.json` — is what routes on it, with four
 `status: success` transitions distinguished by `when` conditions on `kycOutcome`. A
 provider state the decision table cannot explain throws rather than defaulting to an
 outcome, so the callback answers `5xx` and Sumsub redelivers instead of a guess being

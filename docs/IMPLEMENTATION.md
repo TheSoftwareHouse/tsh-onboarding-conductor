@@ -1018,9 +1018,11 @@ A fixture family cannot be extended from `users/` either. On production, where f
 a users file reusing a fixture id would create a `users` family of that name and then fail on every
 development database that stored the fixture — author such flows under an id of their own.
 
-Each fixture is a flow an e2e suite starts onboardings on, written once as `custom` steps, one per
-compiled step, which is the shape any untyped document converts to. Nothing else lives here: a
-suite that needs a one-off flow writes it into a temporary `WORKFLOWS_USERS_DIR` instead.
+Each fixture is a flow an e2e suite starts onboardings on, written once. The ones below predate the
+specialized step types and are written as `custom` steps, one per compiled step, which is the shape
+any untyped document converts to; a new fixture is written in specialized step types. Nothing else
+lives here: a suite that needs a one-off flow writes it into a temporary `WORKFLOWS_USERS_DIR`
+instead.
 `packages/engine/src/workflows/checked-in-workflows.spec.ts` runs the adapters' load-time config
 checks over every checked-in file.
 

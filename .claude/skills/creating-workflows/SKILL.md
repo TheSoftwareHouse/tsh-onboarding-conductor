@@ -116,8 +116,9 @@ own. A definition a test runs against belongs in `fixtures/`. A production flow 
 | Named scores and score-conditioned routing       | `fixtures/scoring.workflow.json`                                                                                                                                                                    |
 | KYC with a provider callback, OTP with a re-send | `built-in/eu-b2c-individual-kyc-eea-v2.workflow.json` (Sumsub, needs a `levelName`), `built-in/eu-b2c-individual-kyc-eea-veriff-v2.workflow.json` (Veriff, no per-workflow keys beyond `sourceKey`) |
 
-Every fixture is written in `custom` steps — the compiled shape, verbatim — so copy one for its
-**shape** and then pick each step's type from what the request says it collects.
+The existing fixtures predate the specialized types and are written in `custom` steps — the
+compiled shape, verbatim — so copy one for its **shape**, then write each step in the specialized
+type that owns what the request says it collects.
 The built-in `-v2` revisions are the checked-in documents written in specialized step types; read
 one beside [references/step-types.md](references/step-types.md) for how
 those types are declared. `pnpm workflow:compile <file>` prints what any document compiles to.

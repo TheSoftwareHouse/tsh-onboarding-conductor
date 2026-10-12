@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-// Writes the fixture pages and the manifest the gallery and the sidebar read. An example in
-// workflows/fixtures gets a page of its own; one that also ships a `<name>-typed.workflow.json` twin
-// written with the specialized step types gets ONE page for both: the specialized form first, then
-// the same flow as `custom` steps and what to do to write it that way. A built-in
-// workflow in workflows/built-in gets a page per file, each naming the revision in the other form.
+// Writes the fixture pages and the manifest the gallery and the sidebar read. Every workflow file in
+// workflows/fixtures and workflows/built-in gets a page of its own; a built-in page also names the
+// revision written in the other form.
 // The workflow files are the source; nothing written here is committed, and `pnpm build` runs this
 // first. Every document is compiled the way the engine compiles it, so the step map shows what
 // actually runs.
@@ -24,8 +22,6 @@ const SCOPES = [
   { scope: 'fixtures', label: 'Example workflow', directory: 'workflows/fixtures' },
   { scope: 'built-in', label: 'Built-in workflow', directory: 'workflows/built-in' },
 ];
-
-const TYPED_SUFFIX = '-typed';
 
 /** One sentence per workflow, verified against the file it describes. Falls back to the derived summary. */
 const DESCRIPTIONS = {
@@ -153,45 +149,6 @@ function authoredFormOf(report) {
   return report.steps.every((step) => step.type === 'custom') ? 'custom' : 'specialized';
 }
 
-const sortKeys = (value) =>
-  Array.isArray(value)
-    ? value.map(sortKeys)
-    : value && typeof value === 'object'
-      ? Object.fromEntries(
-          Object.keys(value)
-            .sort()
-            .map((key) => [key, sortKeys(value[key])]),
-        )
-      : value;
-const same = (left, right) => JSON.stringify(sortKeys(left)) === JSON.stringify(sortKeys(right));
-
-/**
- * How two forms of one flow compare once compiled, on the normalized definition the engine runs —
- * the comparison `checked-in-workflows.spec.ts` makes, with the document's own id and name set aside.
- */
-function compareCompiled(specialized, custom) {
-  const names = unique([
-    ...specialized.normalized.steps.map((step) => step.name),
-    ...custom.normalized.steps.map((step) => step.name),
-  ]);
-  const differing = names.filter(
-    (name) => !same(specialized.normalized.stepsByName[name], custom.normalized.stepsByName[name]),
-  );
-  const onlySpecialized = differing.filter((name) => !custom.normalized.stepsByName[name]);
-  const onlyCustom = differing.filter((name) => !specialized.normalized.stepsByName[name]);
-  const topLevel = ['initial', 'webhook', 'scores'].filter(
-    (key) => !same(specialized.normalized[key], custom.normalized[key]),
-  );
-
-  return {
-    identical: differing.length === 0 && topLevel.length === 0,
-    differing,
-    onlySpecialized,
-    onlyCustom,
-    topLevel,
-  };
-}
-
 function frontMatter({ docId, title, summary }) {
   return [
     '---',
@@ -224,105 +181,7 @@ function definitionBlock(workflow, lead) {
   ];
 }
 
-/** An example: the flow in specialized steps first, then the same flow as `custom` steps. */
-function renderExamplePage({ docId, label, specialized, custom }) {
-  const definition = specialized.report.definition;
-  const connectors = definition.steps.flatMap((step) => step.connectors ?? []);
-  const connectorTypes = unique(connectors.map((connector) => connector.type)).sort();
-  const connectorIds = unique(connectors.map((connector) => connector.id)).sort();
-  const features = describeFeatures(definition);
-  const summary = DESCRIPTIONS[docId] ?? summarize(definition, connectorTypes, features);
-  // The document's `id` is the workflow's name: documents no longer carry a separate label.
-  const title = custom.document.id;
-  const comparison = compareCompiled(specialized, custom);
-
-  const lines = [
-    ...frontMatter({ docId, title, summary }),
-    `<div className="tsh-caps">${label} · revision ${specialized.document.version} · specialized and \`custom\` steps</div>`,
-    '',
-    `→ ${summary}`,
-    '',
-    `The example ships twice. ${code(specialized.document.id)} is written with the specialized step types and is the form to start from; ${code(custom.document.id)} is the same flow written as \`custom\` steps, one hand-written compiled step each. Both load side by side, so an onboarding can be started from either id.`,
-    '',
-    '## At a glance',
-    '',
-    '| | |',
-    '| --- | --- |',
-    `| Workflow ids | ${code(specialized.document.id)} in specialized steps · ${code(custom.document.id)} in \`custom\` steps |`,
-    `| Revision | ${specialized.document.version} |`,
-    ...glanceRows(definition, connectorTypes, connectorIds, features),
-    `| Steps | ${specialized.report.steps.length} specialized steps compiling to ${definition.steps.length} · ${custom.report.steps.length} \`custom\` steps |`,
-    `| Files | ${code(specialized.relativeFile)} · ${code(custom.relativeFile)} |`,
-    '',
-    '## Written with specialized steps',
-    '',
-    'Each step names what it is for and the engine derives the rest when the file loads: the fields a type collects, the status the onboarding shows while it waits there, the outcomes it can end with. `edges` wires each outcome, called a port, to the step it leads to.',
-    '',
-    '| Step | Type | Category | Compiles to | Ports |',
-    '| --- | --- | --- | --- | --- |',
-    ...authoredStepRows(specialized.report.steps),
-    '',
-    '### Step map',
-    '',
-    'The compiled form the engine runs, as the authored steps compile to it: every step with what it collects, which connectors it calls and where each outcome leads.',
-    '',
-    ...STEP_MAP_HEADER,
-    ...stepRows(definition),
-    '',
-    ...definitionBlock(
-      specialized,
-      '### Definition\n\nThe file as it ships, ready to copy into `workflows/users/` as a starting point.',
-    ),
-    '## The same flow as `custom` steps',
-    '',
-    'A `custom` step carries a compiled step verbatim. Its `config` holds the `status`, `data`, `connectors` and `transitions` a row of the step map shows, and it needs no `edges` because every transition names its target. That is the form for a step none of the specialized types describes, and any flow can be written in it: run `pnpm workflow:compile` on the specialized file to print the compiled steps, then run it again on that output with `--from-untyped` to wrap each in a `custom` step.',
-    '',
-    '```bash',
-    `$ pnpm workflow:compile ${specialized.relativeFile} > compiled.json`,
-    '$ pnpm workflow:compile compiled.json --from-untyped',
-    '```',
-    '',
-    ...(comparison.identical
-      ? [
-          `That is how ${code(custom.relativeFile)} relates to the file above: apart from its \`id\` and \`name\`, it is what those two commands print, and both files compile to the step map above.`,
-          '',
-        ]
-      : [
-          `${code(custom.relativeFile)} writes the flow that way by hand, and the two forms do not compile to exactly the same steps. The specialized types derive parts of a step that the \`custom\` form spells out differently.`,
-          '',
-          `Steps that compile differently: ${list(comparison.differing.filter((name) => !comparison.onlySpecialized.includes(name) && !comparison.onlyCustom.includes(name)))}.${comparison.onlySpecialized.length ? ` Only in the specialized form: ${list(comparison.onlySpecialized)}.` : ''}${comparison.onlyCustom.length ? ` Only in the \`custom\` form: ${list(comparison.onlyCustom)}.` : ''}${comparison.topLevel.length ? ` The definitions also differ in ${list(comparison.topLevel)}.` : ''} Those steps as the \`custom\` form compiles them:`,
-          '',
-          ...STEP_MAP_HEADER,
-          ...custom.report.definition.steps
-            .filter((step) => comparison.differing.includes(step.name))
-            .map(stepRow),
-          '',
-        ]),
-    ...definitionBlock(custom, '### Definition'),
-  ];
-
-  return {
-    page: lines.join('\n'),
-    manifest: {
-      docId,
-      scope: specialized.scope,
-      version: specialized.document.version,
-      name: title,
-      authoredAs: 'specialized and custom',
-      stepCount: definition.steps.length,
-      connectorTypes,
-      connectorIds,
-      summary,
-      forms: [specialized, custom].map((workflow) => ({
-        authoredAs: workflow.authoredAs,
-        id: workflow.document.id,
-        file: workflow.relativeFile,
-      })),
-    },
-  };
-}
-
-/** One workflow file on its own page — a built-in revision, or an example that ships in one form only. */
+/** One workflow file on its own page; `twin` is the built-in revision written in the other form. */
 function renderWorkflowPage(workflow, twin) {
   const { label, document, report, docId, authoredAs, relativeFile } = workflow;
   const definition = report.definition;
@@ -347,7 +206,11 @@ function renderWorkflowPage(workflow, twin) {
     ...glanceRows(definition, connectorTypes, connectorIds, features),
     `| Steps | ${definition.steps.length} |`,
     `| Authored as | ${authoredAs === 'custom' ? '`custom` steps, which carry the compiled step verbatim' : 'specialized step types, compiled to the steps below when the workflow loads'} |`,
-    `| The same flow as ${twin ? `${twin.authoredAs} steps` : 'the other form'} | ${twin ? `[${code(twin.docId)}](/fixtures/${twin.docId})` : '—'} |`,
+    ...(twin
+      ? [
+          `| The same flow as ${twin.authoredAs} steps | [${code(twin.docId)}](/fixtures/${twin.docId}) |`,
+        ]
+      : []),
     `| File | ${code(relativeFile)} |`,
     '',
   ];
@@ -417,7 +280,7 @@ function loadWorkflows(ddl) {
         const document = JSON.parse(readFileSync(resolve(repositoryRoot, directory, file), 'utf8'));
         // Refuses an invalid file the way the engine would at load; a fixture that stopped loading
         // must not be documented as if it worked.
-        const normalized = ddl.validateAndNormalizeWorkflow(document);
+        ddl.validateAndNormalizeWorkflow(document);
         const report = ddl.compileWorkflowReport(document);
 
         return {
@@ -426,42 +289,12 @@ function loadWorkflows(ddl) {
           file,
           relativeFile: `${directory}/${file}`,
           document,
-          normalized,
           report,
           docId: basename(file, '.workflow.json'),
           authoredAs: authoredFormOf(report),
         };
       }),
   );
-}
-
-/** Pairs each example's two files under the plain name; a file without its counterpart stands alone. */
-function groupExamples(workflows) {
-  const byDocId = new Map(workflows.map((workflow) => [workflow.docId, workflow]));
-  const pages = [];
-
-  for (const workflow of workflows) {
-    if (workflow.docId.endsWith(TYPED_SUFFIX)) {
-      const plain = byDocId.get(workflow.docId.slice(0, -TYPED_SUFFIX.length));
-      if (plain && plain.authoredAs === 'custom' && workflow.authoredAs === 'specialized') {
-        continue; // rendered with its `custom` counterpart below
-      }
-    }
-
-    const typed = byDocId.get(`${workflow.docId}${TYPED_SUFFIX}`);
-    if (workflow.authoredAs === 'custom' && typed?.authoredAs === 'specialized') {
-      pages.push({
-        docId: workflow.docId,
-        label: workflow.label,
-        specialized: typed,
-        custom: workflow,
-      });
-    } else {
-      pages.push({ docId: workflow.docId, single: workflow });
-    }
-  }
-
-  return pages;
 }
 
 function generate() {
@@ -472,14 +305,12 @@ function generate() {
   clean();
 
   const workflows = loadWorkflows(ddl);
-  const examples = groupExamples(workflows.filter((workflow) => workflow.scope === 'fixtures'));
+  const fixtures = workflows.filter((workflow) => workflow.scope === 'fixtures');
   const builtIn = workflows.filter((workflow) => workflow.scope === 'built-in');
   const builtInDocIds = builtIn.map((workflow) => workflow.docId);
 
   const rendered = [
-    ...examples.map((page) =>
-      page.single ? renderWorkflowPage(page.single) : renderExamplePage(page),
-    ),
+    ...fixtures.map((workflow) => renderWorkflowPage(workflow)),
     ...builtIn.map((workflow) =>
       renderWorkflowPage(
         workflow,

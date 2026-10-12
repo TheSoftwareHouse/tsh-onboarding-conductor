@@ -4,7 +4,7 @@
   "evals": [
     {
       "id": "fixture-consent-review",
-      "prompt": "Add a fixture workflow under workflows/fixtures called mock-consent-review. It asks the applicant for an email address and acceptance of the terms, then a human reviewer approves or rejects the application. Include everything the repository expects of a new fixture.",
+      "prompt": "Add a fixture workflow under workflows/fixtures called mock-consent-review, for a new e2e suite to start onboardings on. It asks the applicant for an email address and acceptance of the terms, then a human reviewer approves or rejects the application. Include everything the repository expects of a new fixture.",
       "model": "sonnet",
       "expected_output": "One new file under workflows/fixtures: mock-consent-review.workflow.json written in specialized steps, compiling and validating — a contact-details step collecting email with the phone number omitted, including a consents fragment for the terms, followed by a manual-review step whose approve and reject ports lead to approved and rejected terminals. The step types and edges match the golden definition. No existing workflow file is edited, and docs/IMPLEMENTATION.md's checked-in workflows section and docs/EXTENDING.md's example list mention the new fixture.",
       "golden": "golden/mock-consent-review.workflow.json",

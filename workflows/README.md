@@ -39,8 +39,9 @@ is revision 1 as `custom` steps, one hand-written step each, and
 `eu-b2c-individual-kyc-eea-v2.workflow.json` is revision 2 through the
 specialized step types; a spec asserts the two are identical once normalized.
 `fixtures/` holds only the flows the e2e suites start onboardings on, each
-written once in `custom` steps. Copy whichever suits you; `docs/EXTENDING.md`
-covers the vocabulary, and
+written once: the existing ones in `custom` steps, a new one in specialized
+step types. Copy whichever suits you; `docs/EXTENDING.md` covers the
+vocabulary, and
 `pnpm workflow:compile <file>` prints what a document compiles to — or where it
 fails.
 

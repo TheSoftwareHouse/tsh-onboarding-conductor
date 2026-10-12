@@ -35,7 +35,7 @@ Both `workflows/` and `email-templates/` are split into three scopes:
 ```
 workflows/                       email-templates/
 ├── built-in/   shipped with the application, not configurable
-├── fixtures/   examples backing local development and CI (workflows only: skipped when NODE_ENV=production)
+├── fixtures/   flows the e2e suites run against (workflows only: skipped when NODE_ENV=production)
 └── users/      yours — relocatable with WORKFLOWS_USERS_DIR / EMAIL_TEMPLATES_USERS_DIR
 ```
 
@@ -87,7 +87,7 @@ by a booting engine.
 A file is a list of typed steps — see the next section for the vocabulary — and the
 quickest start is to copy the closest workflow from [workflows/fixtures/](../workflows/fixtures/),
 which holds the flows the e2e suites run against, each written as `custom` steps, one hand-written
-compiled step each: `base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`,
+compiled step each (a new fixture is written in specialized step types): `base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`,
 `twilio-verify`, `sendgrid-email` and `scoring` — `scoring` is the one to copy for named scores and
 score-conditioned transitions. The production reference
 flow is [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), shipped built-in in both forms —
@@ -792,8 +792,8 @@ What a new type or format must respect is described in
 Put an HTML file in `email-templates/users/` and reference it from a connector by its scope-prefixed
 path — `"templatePath": "users/welcome.html"`. Template variables are supplied through the step's
 `fieldMapping`. A path that omits a known scope prefix, is absolute, or resolves outside its scope
-directory is rejected and the connector step fails. `email-templates/fixtures/manual-smtp.html`,
-together with the `manual-smtp` workflow, is a working example against the local MailHog sink.
+directory is rejected and the connector step fails. `email-templates/fixtures/manual-smtp.html` is a
+working example, referenced as `"templatePath": "fixtures/manual-smtp.html"`.
 
 ## Add an SSO provider
 

@@ -79,7 +79,7 @@ A **specialized** step says the same thing in fewer words. It names what the ste
 }
 ```
 
-Both compile to the identical step, so the API, the admin panel and your front-end see no difference. The specialized types cover what an onboarding is made of: an address, a one-time code, a document capture, an identity check, a manual review. They are the form a drag-and-drop builder works in, and `custom` is the escape hatch for a step none of them describes. The two built-in revisions of the EEA onboarding are the same flow written both ways, 957 lines of `custom` steps or 271 lines of specialized ones, and every example in the [fixtures gallery](/fixtures) shows its flow both ways on one page, the specialized form first.
+Both compile to the identical step, so the API, the admin panel and your front-end see no difference. The specialized types cover what an onboarding is made of: an address, a one-time code, a document capture, an identity check, a manual review. They are the form a drag-and-drop builder works in, and `custom` is the escape hatch for a step none of them describes. The two built-in revisions of the EEA onboarding are the same flow written both ways, 957 lines of `custom` steps or 271 lines of specialized ones.
 
 ## Two habits worth knowing up front
 
