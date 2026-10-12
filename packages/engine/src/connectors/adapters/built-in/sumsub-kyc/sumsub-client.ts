@@ -55,6 +55,16 @@ type SumsubHttpMethod = 'GET' | 'POST';
 const EXISTING_APPLICANT_ID_PATTERN = /applicant id:?\s*([0-9a-fA-F]{24})/i;
 
 /**
+ * The class name tells a timeout from a refused connection; the message could carry a URL. Read
+ * structurally because a `DOMException` need not be an `Error` of this realm.
+ */
+const errorName = (error: unknown): string => {
+  const name = typeof error === 'object' && error !== null ? Reflect.get(error, 'name') : undefined;
+
+  return typeof name === 'string' ? name : typeof error;
+};
+
+/**
  * Signed HTTP transport to Sumsub, one method per endpoint the adapter calls. Every request is
  * HMAC-SHA256 signed over `ts + METHOD + path-with-query + body` and sent under
  * `AbortSignal.timeout`, matching `twilio-verify.connector.ts` and `http-request.connector.ts`:
@@ -394,6 +404,25 @@ export class SumsubClient {
 
     this.logger.debug(`SUMSUB_REQUEST method=${method} path=${path}`);
 
+    const response = await this.send(method, path, headers, body);
+
+    // Callers read meaning out of some non-2xx answers (an existing applicant's 409), so the
+    // status is only logged here and the exception stays theirs to throw.
+    if (!response.ok) {
+      this.logger.warn(
+        `SUMSUB_RESPONSE_ERROR method=${method} path=${path} status=${response.status}`,
+      );
+    }
+
+    return response;
+  }
+
+  private async send(
+    method: SumsubHttpMethod,
+    path: string,
+    headers: Readonly<Record<string, string>>,
+    body?: Buffer,
+  ): Promise<Response> {
     try {
       return await fetch(`${this.baseUrl}${path}`, {
         method,
@@ -404,7 +433,11 @@ export class SumsubClient {
         body: body ? new Uint8Array(body) : undefined,
         signal: AbortSignal.timeout(this.timeoutMs),
       });
-    } catch {
+    } catch (error) {
+      this.logger.warn(
+        `SUMSUB_REQUEST_FAILED method=${method} path=${path} error=${errorName(error)} ` +
+          `timeoutMs=${this.timeoutMs}`,
+      );
       throw new SumsubUnavailableException();
     }
   }

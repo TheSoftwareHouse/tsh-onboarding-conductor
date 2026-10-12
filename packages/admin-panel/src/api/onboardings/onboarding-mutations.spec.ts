@@ -2,11 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { auditQueries } from '@/api/audit/audit-queries';
 import { onboardingMutations, reviewInvalidationKeys } from './onboarding-mutations';
 import { onboardingQueries } from './onboarding-queries';
+import { reconcilePendingConnector } from './onboarding-reconcile';
 import { submitOnboardingReview } from './onboarding-review';
 
 vi.mock('./onboarding-review', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./onboarding-review')>()),
   submitOnboardingReview: vi.fn(),
+}));
+
+vi.mock('./onboarding-reconcile', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./onboarding-reconcile')>()),
+  reconcilePendingConnector: vi.fn(),
 }));
 
 describe('onboardingMutations.review', () => {
@@ -38,5 +44,28 @@ describe('onboardingMutations.review', () => {
     await mutationFn?.('approve', {} as never);
 
     expect(submitOnboardingReview).toHaveBeenCalledWith('onboarding-1', 'approve');
+  });
+});
+
+describe('onboardingMutations.reconcile', () => {
+  it('invalidates the trail, the list and the audit trail, never the summary the engine just answered', () => {
+    const { meta } = onboardingMutations.reconcile('onboarding-1');
+
+    expect(meta).toEqual({
+      invalidates: [
+        onboardingQueries.transitions('onboarding-1').queryKey,
+        onboardingQueries.lists(),
+        auditQueries.all(),
+      ],
+    });
+  });
+
+  it('asks the provider about the factory onboarding', async () => {
+    vi.mocked(reconcilePendingConnector).mockResolvedValueOnce({} as never);
+    const { mutationFn } = onboardingMutations.reconcile('onboarding-1');
+
+    await mutationFn?.(undefined, {} as never);
+
+    expect(reconcilePendingConnector).toHaveBeenCalledWith('onboarding-1');
   });
 });

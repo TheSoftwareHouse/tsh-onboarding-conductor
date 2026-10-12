@@ -40,6 +40,9 @@ const VALID_DEFINITION: WorkflowDefinition = {
       connectors: [
         {
           id: 'kyc',
+          authoredId: 'kyc',
+          selected: false,
+          selectableIds: [],
           name: 'KYC',
           type: 'kyc',
           order: 1,
@@ -94,6 +97,59 @@ describe('fetchWorkflowDefinition', () => {
     mockedGet.mockResolvedValueOnce({ data: VALID_DEFINITION });
 
     await expect(fetchWorkflowDefinition('kyc', 3)).resolves.toEqual(VALID_DEFINITION);
+  });
+
+  it('reads the runtime selection off the primary connector', async () => {
+    const connector = VALID_DEFINITION.steps[0].connectors[0];
+    mockedGet.mockResolvedValueOnce({
+      data: {
+        ...VALID_DEFINITION,
+        steps: [
+          {
+            ...VALID_DEFINITION.steps[0],
+            connectors: [
+              {
+                ...connector,
+                id: 'veriff_kyc',
+                authoredId: 'sumsub_kyc',
+                selected: true,
+                selectableIds: ['sumsub_kyc', 'veriff_kyc'],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const definition = await fetchWorkflowDefinition('kyc', 3);
+
+    expect(definition.steps[0].connectors[0]).toMatchObject({
+      id: 'veriff_kyc',
+      authoredId: 'sumsub_kyc',
+      selected: true,
+      selectableIds: ['sumsub_kyc', 'veriff_kyc'],
+    });
+  });
+
+  it('defaults the selection keys for an engine that predates them', async () => {
+    const legacy: Record<string, unknown> = { ...VALID_DEFINITION.steps[0].connectors[0] };
+    delete legacy.authoredId;
+    delete legacy.selected;
+    delete legacy.selectableIds;
+    mockedGet.mockResolvedValueOnce({
+      data: {
+        ...VALID_DEFINITION,
+        steps: [{ ...VALID_DEFINITION.steps[0], connectors: [legacy] }],
+      },
+    });
+
+    const definition = await fetchWorkflowDefinition('kyc', 3);
+
+    expect(definition.steps[0].connectors[0]).toMatchObject({
+      authoredId: 'kyc',
+      selected: false,
+      selectableIds: [],
+    });
   });
 
   it('defaults scores to an empty map when the field is absent', async () => {

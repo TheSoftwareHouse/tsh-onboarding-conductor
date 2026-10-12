@@ -1,9 +1,12 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `feat/agentic-skills-evals` at `415b754` (2026-09-18), plus the uncommitted
-local-only arrangement of the golden sets (§13: no workflow, the signed-in Claude Code account only,
-the reminder hooks) in the tree. Bump this when that work lands. Typed steps as the only
-authored form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
+**Status:** describes `feat/veriff-kyc-connector` at `e2b12b2` (2026-10-12) with the pull-request
+review fixes on top of it — the callback-only submit guard (§2 "The callback-fields guard", §3) and
+images-only uploads at Veriff (§4) — plus the phase-2 documentation of runtime connector selection
+and the persisted parked connector (§2, §4, §5, §8, §9, §11, §12;
+[0038](decisions/0038-runtime-connector-selection.md)) on top of the KYC connector kernel and the
+`veriff_kyc` provider (§4). Bump this when that work lands. Typed steps as the only authored form (§2.1,
+[0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -256,6 +259,78 @@ _Reasoning:_ operators need to group connectors by what they do, and a closed en
 grouping stable as providers come and go. Declaring it on the workflow too means a document
 classifies itself without a registry lookup — worth the redundancy only because the mismatch is a
 startup failure rather than a silent disagreement.
+
+**Runtime selection.** An operator can change which adapter a step's connector slot runs without
+publishing a version ([0038](decisions/0038-runtime-connector-selection.md)). A selection is one
+row per workflow family and step (`workflow_connector_selections`, §9); `Workflow` applies it by
+replacing the `id` of the step's primary connector — config, field mapping, retry and error handler
+stay as authored — in every stored version that has the step, so execution, callback resolution and
+the admin projection see the same effective binding
+(`workflows/domain/connector-selection.ts`). It applies only to a step with exactly one connector
+declaration, and never to a fallback. `WorkflowRegistryService.toWorkflow` reads the family's rows on
+every resolution — no cache, so a selection takes effect on the next request on every instance. The
+compile dry run (`POST /v1/admin/workflows/compile`) ignores selections. Choosing the authored id
+stores a row too, a family-wide pin, since the authored id differs between versions; only
+`DELETE` clears it.
+
+**One set of rules for the read and the write.** `ConnectorSelectionRules`
+(`workflows/domain/connector-selection.ts`), built by
+`WorkflowRegistryService.createConnectorSelectionRules()` from the execution port and the active
+scopes, is the only statement of which adapter may serve a slot. `refuse(step, connectorId)` answers
+the first failing rule from the table below, or nothing; `listSelectableIds(step, authoredId,
+effectiveId)` is the admin projection's `selectableIds`: the authored and effective ids plus every
+selectable adapter `refuse` lets through, judged against the step as authored and sorted. So an id
+the panel offers is an id a save accepts, with one asymmetry: the projection is per version, while
+the write runs the rules across every non-retired version. A step with no connector or more than one
+projects `[]`, a fallback's id is never listed, and a candidate whose `validateDeclaration` throws is
+left out rather than failing the read. Without a port — the compile dry run, a unit test — the list
+is the authored and effective ids alone.
+
+Saving runs `refuse` against **every non-retired version that has the step**, in order, and the
+first refusal names its version (`WORKFLOW_CONNECTOR_SELECTION_INVALID`, §11):
+
+| Reason                    | Refused when                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `no_connector`            | The step declares no connector                                                                         |
+| `multiple_connectors`     | The step declares more than one, so a step name cannot name the slot                                   |
+| `in_fallback_chain`       | The id is already a fallback on the step                                                               |
+| `adapter_not_registered`  | No adapter with the id is registered                                                                   |
+| `fixture_not_allowed`     | The adapter is in the `fixtures` scope and `NODE_ENV=production`                                       |
+| `type_mismatch`           | The adapter's `type` differs from the declaration's                                                    |
+| `async_unsupported`       | The slot is `async: true` and the adapter does not support a callback                                  |
+| `callback_fields_missing` | The step does not declare every field in the adapter's `callbackFields` (below)                        |
+| `declaration_invalid`     | The adapter's `validateDeclaration` throws for the declaration with the id replaced; the message rides |
+
+**The callback-fields guard.** An asynchronous adapter lists the `submittedData` keys its callback
+may emit in `ConnectorAdapter.callbackFields`, and a step bound to it must declare every one in
+`data`, or a verdict carrying one would be refused when it arrived. `normalizeDefinition` runs the
+check for every async connector of a step, fallbacks included, so a hand-written step missing a field
+fails the boot as a `WorkflowConnectorDeclarationInvalidError`; the selection service runs the same
+check per version (`callback_fields_missing`). It is what keeps the stored Sumsub revision 1, which
+does not declare `kycAttemptCount`, from being switched to Veriff and losing a retry verdict; a typed
+KYC step always passes.
+
+The same list guards the other direction. The step declares a callback field as ordinary `data`,
+so a client could post it: `kycOutcome: 'verified'` would be overwritten by the verdict the park
+waits on, but `kycAttemptCount: 0` on the resubmission after each retry would reset the cap and buy
+the applicant unlimited provider sessions. `Workflow.evaluate` therefore refuses a client submit
+(`continuation` absent) that carries any key an async candidate of the step's slots — fallbacks
+included — lists in `callbackFields`: `400 INVALID_STEP_DATA` with `{field: ['CALLBACK_ONLY']}`,
+before any connector runs. The continuation — the provider's callback and the operator reconcile,
+applied through the same submit path — carries them freely. `GET …/state` still lists the fields in
+`step.schema`, since they are the step's; a client should not send them.
+
+**The shipped Veriff family carries Sumsub's keys.** A selection keeps the authored `config`, and
+`sumsub_kyc`'s `validateDeclaration` requires `levelName` and `questionnaireDefinitionId`, so both
+revisions of `eu-b2c-individual-kyc-eea-veriff` (and the `users/` mirrors) declare them — inert for
+Veriff, which ignores every `providerConfig` key — and the family can be switched to Sumsub and
+back. `checked-in-workflows.spec.ts` parses every shipped `veriff_kyc` declaration with
+`parseSumsubConfig` so the keys cannot be dropped silently. The intended follow-up is letting the
+operator edit connector config on a switch; until then, keys the new provider ignores may remain.
+
+Fixture adapters are left out of the selectable ids and refused in production, as fixture workflows
+are not loaded there. A row naming an adapter this build does not register logs a warning per row at
+boot and fails loudly when the step executes; it never falls back to the authored provider.
 
 ### Fields
 
@@ -540,7 +615,7 @@ keyed to its version — the same seam, and the same reasoning, as the field-typ
 | `document-capture`          | collect   | One upload, or two compiled steps for a two-sided document                                                       |
 | `selfie-capture`            | collect   | One upload, in the selfie slot rather than the identity one                                                      |
 | `otp-verify`                | verify    | Send, check and re-send of a code to the address a collector published                                           |
-| `kyc-identity-verification` | verify    | One parked step, seven ports, connector declaration derived from the contract                                    |
+| `kyc-identity-verification` | verify    | One parked step, seven ports, five callback fields, connector declaration derived from the contract              |
 | `decision`                  | decide    | A data-less branch point; one port per condition                                                                 |
 | `risk-score`                | decide    | A step's scoring rules, with score-banded ports                                                                  |
 | `manual-review`             | decide    | An `awaiting_manual_review` step; approve / reject ports, `invalid` optional                                     |
@@ -571,6 +646,20 @@ both `fieldMapping` and `config` keys beside what the type derives (for `notify`
 binding). An addition that would override a derived key is refused — the derivation is the point of
 the type — and `GET /v1/admin/step-types` publishes each type's `connectorTypes` so a builder can
 filter the configured connectors before the author picks one.
+
+**The identity-verification step names no provider.** Its config is `connector`, `sourceKey` and
+`maxAttemptsPerDocSet`, all required. `levelName` and `questionnaireDefinitionId` are still accepted
+at the step level, optional, and they are Sumsub's: stored revisions authored for Sumsub carry them
+and a stored revision is immutable. A new document puts a provider's own keys under `connector.config`
+instead; the step merges them into the compiled declaration's `config` (a key present both at the
+step level and there is refused like any other override of a derived key), and the KYC connector
+hands every key no kernel rule consumed to the provider as `providerConfig` (§4). The step declares
+five callback fields on its compiled step — `kycOutcome`, `kycRetryStep`, `kycReasonCodes`,
+`kycCustomerMessage` and `kycAttemptCount` (an optional `number`, emitted unconditionally). Stored
+versions keep the _authored_ JSON, so the added field changes no stored revision; it changes the
+compiled form of one, which is why `eu-b2c-revision-equivalence.spec.ts` pins it (below).
+`maxAttemptsPerDocSet` keeps its name for the stored revisions' sake and reads two ways: per docSet at
+Sumsub, total resubmissions per onboarding at Veriff (§4).
 
 Every binding also carries the compiled form's **failure policy** (§4): `errorHandler`, `retry` and
 a `fallback` chain of up to three entries, each naming an `id` of the same capability and, where
@@ -658,7 +747,7 @@ One further startup invariant crosses document boundaries and sits outside that 
 documents declare the same value — the same key repeated within one document, across steps or
 connectors, is legal and does not trigger it. It is generic over connector id, no adapter is
 special-cased, and it exists because `sourceKey` is how an operator names one workflow's
-deployment-specific connector configuration (`sumsub_kyc`'s, for one — §4) for correlation outside
+deployment-specific connector configuration (`sumsub_kyc`'s or `veriff_kyc`'s, for two — §4) for correlation outside
 the engine; two documents silently sharing one would make that correlation ambiguous. Stored `draft`
 rows are left out of that sweep and out of the dry run's uniqueness check, so a draft may share a
 `sourceKey` with another workflow; the conflict can surface only once a publish step exists.
@@ -780,18 +869,34 @@ still made directly in the database.
 #### `built-in/` — shipped, loaded in every environment
 
 A built-in family cannot be extended from `users/`: a users file reusing its `id` fails the boot
-with `WorkflowScopeConflictError`. The two `users/*-local.workflow.json` files are the fork pattern
-instead — copies under ids of their own, with renamed `sourceKey`s.
+with `WorkflowScopeConflictError`. The four `users/*-local.workflow.json` files — `eu-b2c-individual-kyc-eea-local`,
+`eu-b2c-individual-kyc-eea-v2-local`, `eu-b2c-individual-kyc-eea-veriff-local` and
+`eu-b2c-individual-kyc-eea-veriff-v2-local` — are the fork pattern instead: copies under ids of their
+own, with renamed `sourceKey`s (and, for the manual-test walkthroughs, a local provisioning stub).
 
-| File                                         | Rev | Authored as                           | Connector types                       | Is                                                                                           |
-| -------------------------------------------- | --- | ------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `eu-b2c-individual-kyc-eea.workflow.json`    | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card |
-| `eu-b2c-individual-kyc-eea-v2.workflow.json` | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The identical flow, authored through the specialized step types (§2.1)                       |
+| File                                                | Rev | Authored as                           | Connector types                       | Is                                                                                                |
+| --------------------------------------------------- | --- | ------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `eu-b2c-individual-kyc-eea.workflow.json`           | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card      |
+| `eu-b2c-individual-kyc-eea-v2.workflow.json`        | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The identical flow, authored through the specialized step types (§2.1)                            |
+| `eu-b2c-individual-kyc-eea-veriff.workflow.json`    | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The same flow with the KYC step bound to `veriff_kyc` (family `eu-b2c-individual-kyc-eea-veriff`) |
+| `eu-b2c-individual-kyc-eea-veriff-v2.workflow.json` | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The Veriff family's revision 2, through the specialized step types                                |
 
 Seventeen steps: contact and consents → SMS one-time code (with a resend path) → declared identity →
 purpose and source of funds → `select_document_type` → the capture steps for the document chosen →
 selfie → `submit_kyc` → manual review → account provisioning → `userId` collection → `approved` /
 `rejected` / `invalid`.
+
+**The Veriff family.** `eu-b2c-individual-kyc-eea-veriff` is the Sumsub family under an id, a name and
+a `sourceKey` of its own (`eu_b2c_individual_kyc_eea_veriff_v1`), and its two revisions are authored
+exactly as the Sumsub ones are. The difference from the Sumsub family is the KYC step's
+connector binding: `veriff_kyc` in place of `sumsub_kyc`, without the Sumsub-specific `levelName` and
+`questionnaireDefinitionId`. Two others are consequences: the Sumsub revision 1 predates
+`kycAttemptCount`, whereas the Veriff revision 1, written after it, declares the field in
+`submit_kyc.data` itself, because a provider that does not count attempts writes it; and the identity
+document uploads accept `image/png` and `image/jpeg` only (revision 2 narrows `document-capture`'s
+default with `contentTypes`), because Veriff takes a PDF only once enabled on the account (§4). Both families
+declare the same two agreement families (`eu-b2c-terms`, `eu-b2c-privacy-notice`), the same retry arms
+and the same ports. The two `-veriff-local` forks are the fork pattern for it.
 
 **Two revisions, one flow.** Revision 1 is the flow written step by step — seventeen `custom`
 steps, each carrying one compiled step verbatim, which is what a document written as untyped steps
@@ -803,7 +908,10 @@ by the submit that collected the number. Eighteen compiled steps against sevente
 contact step collects the same fields and consents, the send step carries the connector the contact
 step used to, and every other step normalizes to the identical definition — the same fields, the
 same connector declarations, the same transitions, and the same root `agreements` array bound to
-the same step. 951 lines against 277. Every invariant in
+the same step. 951 lines against 277. For the Sumsub pair the spec pins one further difference: the
+compiled revision 2's `submit_kyc.data` carries `kycAttemptCount` (`number`, optional, persisted),
+which the hand-written revision 1 predates and a stored revision cannot gain. The Veriff pair needs
+no such exception, its revision 1 declaring the field. Every invariant in
 `eu-b2c-individual-kyc-workflow.spec.ts` runs against both, so the specialized types are held to the
 step-by-step document's own rules rather than to a weaker set written for them.
 
@@ -813,18 +921,19 @@ saying the key belongs to the product: two revisions of one onboarding must not 
 at the provider. Starting an onboarding without naming a version therefore picks revision 2, and an
 onboarding already in flight stays on the revision it was created with.
 
-**One document, both routes.** A workflow definition may contain at most **one Sumsub-parked
-step**: the adapter's callback submits the closed, un-suffixed key set `kycOutcome` /
-`kycRetryStep` / `kycReasonCodes` / `kycCustomerMessage`, the engine re-submits it through the step
+**One document, both routes.** A workflow definition may contain at most **one KYC-parked
+step**: the connector's callback submits the closed, un-suffixed key set `kycOutcome` /
+`kycRetryStep` / `kycReasonCodes` / `kycCustomerMessage` / `kycAttemptCount`, the engine re-submits it through the step
 that parked, a key the step does not declare is an `UNKNOWN` field error that loses the verdict, and
-field names are unique across a whole definition. Branching to several `sumsub_kyc` steps is
+field names are unique across a whole definition. Branching to several KYC steps is
 therefore not available, and everything that varies per applicant — issuing country and document
 type alike — has to vary _within_ one declaration.
 
 `config.documents[].countryField` is what allows that. A document mapping may name a connector
-payload key holding the applicant's own ISO alpha-2 issuing country instead of fixing an alpha-3 in
-config — exactly one of `country` / `countryField`, enforced by `parseSumsubConfig`. The adapter
-converts it through the same ISO table `buildFixedInfo` uses, which carries all 249 assigned codes.
+payload key holding the applicant's own ISO alpha-2 issuing country instead of fixing a country in
+config — exactly one of `country` / `countryField`, enforced by `parseKycConfig`. A fixed country is
+accepted as alpha-2 or alpha-3 and the kernel normalises everything to alpha-2 through an ISO table
+of all 249 assigned codes; Sumsub converts back to alpha-3 at submit.
 So **country is not a reason to add a file**: one declaration serves the whole perimeter.
 
 `idDocType` has no payload equivalent and stays fixed per `documents[]` entry, so a workflow offering
@@ -857,14 +966,19 @@ way in both. Neither is named with a version: the `termsVersion` and `privacyNot
 fields this replaces are gone from the document.
 
 Adding a jurisdiction means extending `nationality`, residence `country` and whichever issuing-country
-enums the state belongs in — plus the Sumsub level, which is per declaration. Adding a document type
+enums the state belongs in — plus, for Sumsub, the level, which is per declaration. Adding a document type
 means a `documents[]` entry, its capture steps and a routing arm on `select_document_type`.
 
 Four further details are consequences of engine behaviour rather than of the business flow:
 
-- **All four callback fields are declared**, not just `kycOutcome` and `kycRetryStep`.
-  `buildReasonFields` attaches `kycReasonCodes` and `kycCustomerMessage` to every `retry` and
-  `refused` verdict, so a document that omits them loses exactly the verdicts that carry a reason.
+- **Every callback field the connector can write is declared**, not just `kycOutcome` and
+  `kycRetryStep`. `buildKycSubmittedData` attaches `kycReasonCodes` and `kycCustomerMessage` to every
+  `retry` and `refused` verdict, so a document that omits them loses exactly the verdicts that carry
+  a reason; likewise `kycAttemptCount` on a `retry` from a provider that does not count attempts. The
+  Sumsub revision 1 files declare four, because Sumsub counts attempts itself and the kernel never
+  writes the fifth for it; the Veriff files declare all five. Declared as `data`, they are still the
+  connector's: a client submit carrying one is refused as `CALLBACK_ONLY` (the callback-fields guard,
+  above), which is what keeps the kernel's running `kycAttemptCount` honest.
 - **Each retry arm returns to a step the reset data can be re-collected from** — `IDENTITY` to
   `select_document_type`, so a customer whose document was refused may also switch to the other one;
   `SELFIE` to `capture_selfie`; `QUESTIONNAIRE` to `collect_purpose` (the questionnaire is
@@ -874,12 +988,13 @@ Four further details are consequences of engine behaviour rather than of the bus
   could never reach Sumsub — routing it back to `collect_personal` would ask the customer to retype
   into a void. Each arm pairs `kycRetryStep` with `kycOutcome` inside an `all` block, because
   persisted context keys are never deleted and a `kycRetryStep` from an earlier pass survives.
-- **No callback field caps a length the provider controls.** `kycCustomerMessage` carries Sumsub's
-  `moderationComment`, which is operator-authored free text with no length guarantee; a `maxLength`
+- **No callback field caps a length the provider controls.** `kycCustomerMessage` carries the provider's own
+  free text (Sumsub's `moderationComment`, Veriff's decision `reason`), which has no length guarantee; a `maxLength`
   on it fails the parked step's own validator and loses the verdict outright.
 - **`manual_review` declares a recursive `success` transition.** `canSubmit: false` is advisory;
-  the submit endpoint guards only on approved/completed, so without a `success` arm a stray empty
-  POST resolves to no transition and lands the onboarding in terminal `invalid`.
+  the submit endpoint guards only on approved/completed and on a parked step (`409
+ONBOARDING_AWAITING_CONNECTOR`, §3), so without a `success` arm a stray empty POST on a
+  review step resolves to no transition and lands the onboarding in terminal `invalid`.
 
 `provision_account` names the generic HTTP connector with a placeholder URL; a deployment repoints it
 at its own account system. It sends the onboarding id as an `Idempotency-Key` header, because a retry
@@ -909,7 +1024,7 @@ document converts to; `<name>-typed.workflow.json` (id `<name>-typed`) is the sa
 the specialized step types and uses no `custom` step. The e2e suites address the plain ids, whose
 compiled steps are unchanged. `packages/engine/src/workflows/checked-in-workflows.spec.ts` guards the
 pairing, runs the adapters' load-time config checks over every checked-in file, and pins the seven
-pairs that compile to identical steps; the "Typed twin" column says how the other four differ.
+pairs that compile to identical steps; the "Typed twin" column says how the other five differ.
 
 | File | Connector types | Demonstrates | Typed twin |
 | ------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- -------------------- |
@@ -920,10 +1035,11 @@ pairs that compile to identical steps; the "Typed twin" column says how the othe
 | `manual-smtp` | `email_delivery` | Local MailHog send with an HTML template from connector config | Identical: `notify` including a `form`, `templatePath` on the binding's `config` |
 | `file-upload` | `kyc` | `file` field plus the document reservation flow | Identical: a `connector-call` carrying the `file` field |
 | `http-request` | `custom` | The generic HTTP connector with placeholders, query, and error statuses | Identical: `http-call` including a `form`, `fieldMapping` naming the two payload keys that differ from their fields |
-| `sumsub-kyc` | `kyc` | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter | A two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `POL`, and the field validations are the steps' |
+| `sumsub-kyc` | `kyc` | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter | A two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `POL`, and the field validations are the steps' and the step declares the optional `kycAttemptCount` callback field the hand-written twin predates |
+| `veriff-kyc` | `kyc` | The same shape against `veriff_kyc`: a provider that does not count attempts, so the custom form declares `kycAttemptCount` and the kernel keeps the running total; uploads are images only, since Veriff takes a PDF only once enabled on the account; the document country is `PL` (alpha-2), and no `levelName` or `questionnaireDefinitionId` | The `sumsub-kyc-typed` step graph with the `veriff_kyc` binding: a two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `PL`, and the field validations are the steps' |
 | `manual-review` | none | All three manual triggers and a recursive `success` transition | Identical: `manual-review` including a `form` |
 | `connector-fallback` | `email_delivery` | An unconfigured `sendgrid_email` primary retries three times 200 ms apart, falls through a `mock_email_delivery` link told to fail, and is delivered by `smtp` on `send_notification`; `optional_notice` swallows the same failure via `errorHandler: continue_on_error` with no fallback declared | Identical: the whole chain, retry and handler on the `notify` binding, the SMTP entry with its own `fieldMapping` and `config` |
-| `scoring` | `phone_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_verify` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting | Twelve compiled steps through specialized step types: step-level `scoring` on `identity-profile`, on `otp-verify` (landing on `verify_code`) and on `kyc-identity-verification`; the risk band routes through conditional edges on `success` and `verified`; `manual-review`'s `invalid` edge is score-gated with a fallback arm |
+| `scoring` | `phone_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_verify` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting | Twelve compiled steps through specialized step types: step-level `scoring` on `identity-profile`, on `otp-verify` (landing on `verify_code`) and on `kyc-identity-verification`; the risk band routes through conditional edges on `success` and `verified`; `manual-review`'s `invalid` edge is score-gated with a fallback arm; `submit_kyc` also declares `kycAttemptCount` |
 
 ---
 
@@ -959,14 +1075,40 @@ explicit and forcing the caller to handle each.
    `FOR UPDATE` so it does not block rows referencing this one.
 3. Snapshot pre-mutation status/step (used by the error-path webhook, §6).
 4. Reject if already `approved` or `completedAt != null` — `409 ONBOARDING_COMPLETED`.
-5. `workflow.evaluate(...)`:
+5. Reject a client submit while the row is parked: `pendingConnector` set and no
+   `continuation.resolvedConnector` — `409 ONBOARDING_AWAITING_CONNECTOR`, carrying the park's
+   `connectorId`, `connectorName` and `connectorOrder` (never the `providerReference`). Audited as
+   `onboarding.rejected_attempt` with outcome `awaiting_connector`, and the client webhook's
+   `notifyError` fires as for the other refusals. _Reasoning:_ a parked KYC step's fields are all
+   optional, so `{}` passed the validator and re-ran the connector chain — a second paid provider
+   session, whose decision then raced the first's. The step is the provider's to decide; only a
+   callback or an operator reconcile (§5) continues it.
+6. Re-check a continuation's park under the lock: when `continuation.resolvedConnector` carries a
+   `pendingConnector` — the park the adapter correlated the callback against through an unlocked
+   read (§4) — and the locked row no longer holds it (`OnboardingEntity.isParkedOn`: `connectorId`,
+   `connectorOrder` and `providerReference` all equal), throw `ConnectorCallbackSupersededError`.
+   This runs before the completed guard of point 4: a continuation for an onboarding a reconcile
+   or another callback has since decided is a redelivery to acknowledge, not a
+   `409 ONBOARDING_COMPLETED` the provider would keep retrying.
+   The `catch` rethrows it before anything else: no `rejected_attempt` row, no `notifyError`,
+   nothing written — the newer attempt's own callback decides the onboarding. The webhook route
+   answers it `204` (§5); the reconcile route reports `superseded`.
+7. `workflow.evaluate(...)`:
    - `Step.collectAcceptedData` — unknown fields, inactive-but-submitted fields, missing required
      fields, and per-field schema failures all produce `{field: ['UNKNOWN' | 'REQUIRED' |
-'INVALID']}`. Any error → `400 INVALID_STEP_DATA` with the error map; the state is unchanged
-     and the client retries.
+'INVALID']}`, and a client body carrying a key an async connector of the step writes on its
+     callback produces `{field: ['CALLBACK_ONLY']}` before the step validator runs (§2). Any error →
+     `400 INVALID_STEP_DATA` with the error map; the state is unchanged and the client retries.
    - Connector chain runs (§4) against `connectorData` merged over context.
    - Outcome maps to a trigger: accepted → `success`, rejected → `rejected`, pending → park,
-     invalid-data → either retryable (back to the client) or terminal-invalid.
+     invalid-data → either retryable (back to the client) or terminal-invalid. A retryable
+     refusal reached through a continuation — the provider delivered, and what it delivered is
+     that the step's data is wrong, as a one-time code the user mistyped — releases the park in a
+     second, locked transaction once the refusing one has rolled back (`releasePark`). A
+     continuation that names its park must still match it (`isParkedOn`); one that only knows its
+     slot — the fixture adapters correlate through their own stores — matches the park on that
+     connector order. Either way a newer attempt's park is left alone. The step is then the client's to
+     resubmit instead of parked for good behind the `409` of point 5.
    - Scores recalculate here, immediately before target resolution: `Scoring.applyRules` sums the
      current step's `scoring` rules onto the onboarding's scores and clamps once (§2). This sits
      after the connector chain, not before it, so it runs exactly once per resolved transition — a
@@ -976,9 +1118,14 @@ explicit and forcing the caller to handle each.
      transition whose status matches, whose `reason` covers the refusal, and whose `when` holds.
      Order in the JSON is the precedence. Since the unconditional fallback is optional (§2), a
      trigger whose arms all fail resolves to no transition, which ends the onboarding `invalid`.
-6. Assign the next state, save, and write the `onboarding.state_transition` audit row **inside the
-   same transaction**.
-7. Commit, then notify the client webhook (§6) outside the transaction.
+8. Assign the next state, save, and write the `onboarding.state_transition` audit row **inside the
+   same transaction**. A next state that parks is stamped first: `stampParkedAt` sets
+   `pendingConnector.parkedAt` (ISO-8601) when the record has none, and leaves a re-park's stamp
+   alone — the stamp sits here, not in `Workflow`, so the domain stays clock-free. A continuation
+   then writes the row that says who applied the connector's result (`logAppliedContinuation`):
+   `origin: 'provider_callback'` writes `webhook.inbound_callback_applied`, `origin:
+'admin_reconcile'` writes `onboarding.pending_connector_reconciled` naming the operator (§8).
+9. Commit, then notify the client webhook (§6) outside the transaction.
 
 Anything that resolves to no valid transition ends at the terminal `invalid` status with
 `completedAt` set, rather than throwing. _Reasoning:_ an onboarding that cannot advance is a
@@ -1124,8 +1271,16 @@ submit's transaction — see
 ### The port
 
 `ConnectorAdapter` (`ports/connector-adapter.port.ts`) is one interface for every provider:
-`name`, `id`, `type`, optional `supportsAsyncCallback` + `callbackAuth`, optional
-`validateDeclaration`, required `execute`, optional `mapCallbackResult`.
+`name`, `id`, `type`, optional `supportsAsyncCallback` + `callbackAuth`, optional `callbackFields`,
+optional `validateDeclaration`, required `execute`, optional `mapCallbackResult`. `callbackFields`
+lists the `submittedData` keys an async adapter's callback may emit; a step bound to the adapter must
+declare each (§2).
+
+`ConnectorExecutionPort` is what the workflow side sees of the adapters. Besides `execute`, `resume`
+and `validateDeclarations`, an optional `listAdapters()` returns one `ConnectorAdapterSummary`
+(`id`, `type`, `supportsAsyncCallback`, `scope`, `callbackFields`) per registered adapter, which
+`ConnectorSelectionRules` filters by the active scopes and judges per step (§2). It is the only seam: the adapter
+collection is not exported from `ConnectorsModule`, and the modules already `forwardRef` each other.
 
 `execute` receives `{ declaration, execution: {onboardingId, stepName}, context, payload,
 payloadFieldSources }` and returns a `ConnectorExecutionResult`: `accepted` | `rejected(reason)` |
@@ -1162,8 +1317,10 @@ rather than failing on someone's onboarding.
 `WorkflowConnectorExecutorService` sorts declarations by `order` and runs them sequentially. The
 first non-`accepted` result short-circuits and becomes the step's outcome. On `async: true` the
 adapter's `execute` initiates the work; if it accepts, the executor returns
-`pending({connectorName, connectorId, connectorOrder})` and the remaining connectors are
-**not** run.
+`pending({connectorName, connectorId, connectorOrder, providerReference?})` and the remaining
+connectors are **not** run. `providerReference` is copied from the adapter's accepted result
+(`metadata.providerReference`, when a string) and becomes part of the persisted pending connector
+(§5).
 
 `resume(...)` re-enters the chain with a completed connector's order and result, skipping
 everything at or below it. That is the whole resumption mechanism: the parked onboarding stays on
@@ -1197,7 +1354,8 @@ a full normalized declaration, the async path needs no special case: the `pendin
 it names that entry's own `name` and `id` with the primary's `order`, so the provider's callback
 still arrives at its own `/v1/webhooks/<id>/callback`, and
 `AwaitingCallbackConnectorResolver.findConnector` resolves it by matching each step connector _and_
-every link of its chain (`resolvers/awaiting-callback-connector.resolver.ts`).
+every link of its chain, or, for an onboarding whose park is recorded, from the persisted pending
+connector (§5; `resolvers/awaiting-callback-connector.resolver.ts`).
 
 Three handlers ship in `connectors/error-handlers/built-in/`, documented in
 [`error-handlers/README.md`](../packages/engine/src/connectors/error-handlers/README.md):
@@ -1263,6 +1421,7 @@ Declared schemas:
 | `twilio_verify`  | `accountSid` (required), `authToken` (secret, required), `verifyServiceSid` (required, must match `^VA[A-Za-z0-9]+$`) |
 | `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       |
 | `sumsub_kyc`     | `appToken` (required), `secretKey` (secret, required), `callbackSigningSecret` (secret, required)                     |
+| `veriff_kyc`     | `apiKey` (required), `sharedSecretKey` (secret, required)                                                             |
 
 Stored values are one flat `Record<string, string>` per connector, held as plaintext JSON in the
 `connectors` table (`id` primary key, `type`, `settings jsonb`, `updated_at`, `updated_by`) — see
@@ -1347,18 +1506,20 @@ Every mock's connector id, class name and filename begin with `mock`, so a mock 
 recognisable wherever it appears — in a workflow declaration, an audit row or the
 adapters directory.
 
-| Type                                                 | Kind        | Notes                                                                                                                                   |
-| ---------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `http_request`                                       | **Generic** | Config-driven outbound JSON call. Env-configured secrets; see `packages/engine/docs/http-request-connector.md`.                         |
-| `twilio_verify`                                      | Real        | Twilio Verify start/check; `TwilioVerifyUnavailableException` on provider failure.                                                      |
-| `sendgrid_email`                                     | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                |
-| `smtp`                                               | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`. |
-| `sumsub_kyc`                                         | Real        | KYC via Sumsub; `async: true`-only (park on `execute`, resume on the provider's callback). See "The KYC connector" below.               |
-| `mock_kyc_1`, `mock_kyc_2`                           | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                  |
-| `mock_phone_verification`, `mock_email_verification` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.   |
-| `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                            |
-| `mock_sumsub_file_upload`                            | Mock        | Reads a completed document from object storage.                                                                                         |
-| `mock_async_callback`                                | Mock        | The async/callback reference implementation; declares `callbackAuth: {kind: 'none'}` with a justification.                              |
+| Type                                                 | Kind        | Notes                                                                                                                                                                                                           |
+| ---------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `http_request`                                       | **Generic** | Config-driven outbound JSON call. Env-configured secrets; see `packages/engine/docs/http-request-connector.md`.                                                                                                 |
+| `twilio_verify`                                      | Real        | Twilio Verify start/check; `TwilioVerifyUnavailableException` on provider failure.                                                                                                                              |
+| `sendgrid_email`                                     | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                                                                                        |
+| `smtp`                                               | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`.                                                                         |
+| `sumsub_kyc`                                         | Real        | KYC via Sumsub; `async: true`-only (park on `execute`, resume on the provider's callback). See "The KYC connector" below.                                                                                       |
+| `veriff_kyc`                                         | Real        | KYC via Veriff, API-only; the same kernel and the same `async: true`-only contract as `sumsub_kyc`. See "The KYC connector" below.                                                                              |
+| `mock_kyc_1`, `mock_kyc_2`                           | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                                                                                          |
+| `mock_phone_verification`, `mock_email_verification` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.                                                                           |
+| `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                                                                                                    |
+| `mock_sumsub_file_upload`                            | Mock        | Reads a completed document from object storage.                                                                                                                                                                 |
+| `mock_async_callback`                                | Mock        | The async/callback reference implementation; declares `callbackAuth: {kind: 'none'}` with a justification.                                                                                                      |
+| `mock_async_callback_2`                              | Mock        | The same adapter under a second id with its own initiations, declaring one callback field (`providerVerdict`); lets a slot be switched between two callback-capable adapters and shows the callback-only guard. |
 
 ### The generic HTTP connector
 
@@ -1379,13 +1540,38 @@ env-var source is deliberate, and is the one connector exempt from "Operator-pro
 above: the aliases are named by workflow JSON, not by the adapter, so there is no schema an
 operator could be shown and nothing for `/v1/admin/connectors` to list.
 
-### The KYC connector (`sumsub_kyc`)
+### The KYC connector
 
-`connectors/adapters/built-in/sumsub-kyc.connector.ts` plus a `sumsub-kyc/` directory (contract
-constants, config parsing, the signing HTTP client, applicant/questionnaire mapping, the outcome
-table) — the same split `http_request` already established, and today's richest adapter: async,
-a secret-bearing `settingsSchema`, a per-declaration `config` it parses itself, a document
-resolver, and `mapCallbackResult`.
+`sumsub_kyc` and `veriff_kyc` are two thin adapters over one kernel,
+`connectors/adapters/built-in/kyc/`. The engine-level `ConnectorAdapter` port stays flat and keyed
+by `id` — runtime credentials, the webhook route and (below) the callback secret all key on the id —
+so the sharing happens one layer down:
+[0037](./decisions/0037-kyc-connector-kernel-and-providers.md) records why a second stand-alone
+adapter copied from the first was not built.
+
+- **`KycConnector`** (`kyc-connector.ts`, abstract, implements `ConnectorAdapter` with
+  `type = 'kyc'` and `supportsAsyncCallback = true`) owns the engine-facing half, identically for
+  every provider: parsing the step's compiled `config` (`kyc-config.ts`), resolving and reading every
+  captured document before any provider call (`kyc-submission.ts`), building the applicant from the
+  eight canonical roles, resolving credentials through `ConnectorSettingsService`, correlating a
+  callback, deciding the outcome (`kyc-outcome.ts`), the identity guard
+  (`kyc-identity-comparison.ts`), the attempt cap, the closed `submittedData` and the log lines.
+  `id`, `name`, `callbackAuth` and `settingsSchema` come from the provider it is built with. A
+  document the provider cannot take — `submit` throws `KycDocumentUnsupportedError` before its
+  first call — is answered as retryable `invalid-data` on the step field the document was uploaded
+  under (`KycDocument.sourceField`), reason `UNSUPPORTED_CONTENT_TYPE`, so the client sees
+  `400 INVALID_STEP_DATA` naming the field and uploads again; logged as `KYC_DOCUMENT_UNSUPPORTED
+connectorId= onboardingId= field= contentType=`.
+- **`KycProvider`** (`kyc-provider.port.ts`) owns the wire half: `id`, `name`, `settingsSchema`,
+  `callbackAuth`, `countsAttempts`, `validateConfig(providerConfig, config)`,
+  `submit(settings, submission) → {providerReference}`, `parseCallback(input, settings) →
+KycCallbackEvent`, `fetchVerdict(settings, event, context) → KycVerdict` and an optional
+  `onRetry(settings, event, target)`. A provider that needs more of its webhook between
+  `parseCallback` and `fetchVerdict` extends the event type.
+- **`SumsubKycConnector`** and **`VeriffKycConnector`** (`sumsub-kyc.connector.ts`,
+  `veriff-kyc.connector.ts`) extend `KycConnector`, inject their provider and the kernel's
+  dependencies, and call `super`. `connectors.module.ts` registers each connector, its provider and
+  its HTTP client.
 
 **Every outcome the callback reports is `accepted()`; the workflow document does all routing.**
 `ConnectorRejectionReason` has four members (`ATTEMPTS_EXHAUSTED`, `CHALLENGE_EXPIRED`,
@@ -1393,63 +1579,312 @@ resolver, and `mapCallbackResult`.
 `WorkflowTransitionStatus` is only `success | rejected | manual.*` — so rather than bend the
 adapter into that vocabulary, it reports a domain outcome inside `submittedData` —
 `kycOutcome: 'verified' | 'human_review' | 'retry' | 'refused'` — and the workflow document routes
-on it with `when` conditions (`workflows/fixtures/sumsub-kyc.workflow.json`, §2). The adapter never
-returns `rejected()` and does not declare `canReject`. An unrecognised provider state (a RED
-verdict the ordered outcome table cannot explain, or a `reviewAnswer` that is neither `RED` nor
-`GREEN`) throws `SumsubOutcomeUnrecognisedStateError` rather than defaulting to an outcome — Nest's
-default handling turns that into `500`, and Sumsub redelivers. See
+on it with `when` conditions (`workflows/fixtures/sumsub-kyc.workflow.json`, §2). The connector never
+returns `rejected()` and does not declare `canReject`. See
 [0005](./decisions/0005-kyc-connector-outcome-contract.md).
 
-`execute()` checks the configured Sumsub level against `config` before any side-effecting call —
-`SumsubLevelNotFoundError` if the level is absent, `SumsubLevelDocSetMismatchError` if a docSet
-named in `config.documents` is not on the level (the reverse is legal — a level carries steps the
-adapter uploads nothing into, `APPLICANT_DATA` and `QUESTIONNAIRE`), and
-`SumsubLevelQuestionnaireMissingError` if the level declares no `QUESTIONNAIRE` docSet while the
-config declares a questionnaire. Each names both sides.
-The check is **not cached**: it runs on every execution, so a level changed at Sumsub after the
-first fetch is never missed. It then creates the applicant, uploads each configured document read
-back through `CompletedOnboardingDocumentResolver` and `ObjectStoragePort` (the same path
-`mock_sumsub_file_upload` already exercises), submits the questionnaire, and returns `accepted()`
-— the async park itself is the executor's own `pending()`, built only because the workflow step
-declares `async: true` ("Execution and chaining", above), not by anything the adapter returns.
-Every Sumsub API call — in `execute()` and in `mapCallbackResult()` alike — surfaces a network
-failure, a timeout or a non-2xx it cannot otherwise explain as `500 SUMSUB_UNAVAILABLE` (§11); the
-one named exception is `finalizeSubmission`'s `409` for missing docSets, which carries their names
-back as `SumsubSubmissionIncompleteError` instead of the generic unavailable error.
+**`validateDeclaration`** runs at startup over every loaded and stored revision: `parseKycConfig`
+(below), then a check that every `documents[].payloadField` and `countryField` is mapped in
+`fieldMapping` or `optionalFieldMapping`, then the provider's own `validateConfig`.
 
-`mapCallbackResult()` resolves the onboarding still awaiting this callback through
-`AwaitingCallbackConnectorResolver.findConnector({onboardingId, connectorId})`: it loads the
-onboarding, resolves its workflow, finds the current step, and returns the matching connector's
-`order`, or `undefined` when the onboarding is gone, terminal, or has moved past this step. A
-redelivered callback that resolves to `undefined` throws `ConnectorCallbackAlreadyAppliedError`,
-which the webhook route answers with an ordinary `204` instead of retrying forever (§5). That
-resolution is the whole of the correlation: the callback's `externalUserId` **is** the onboarding
-id the adapter created the applicant under, so the body's `applicantId` is only ever used to read
-the verdict back from Sumsub, never to check the delivery against a stored copy of itself.
+**`config`.** `parseKycConfig` reads `sourceKey`, `documents`, `questionnairePathMap` and
+`maxAttemptsPerDocSet` (a positive integer, no code default) and passes every other key to the
+provider as `providerConfig`, wherever it was authored. A `documents[]` entry names a
+`payloadField`, an `idDocSetType`, an `idDocType`, an optional `idDocSubType` and `optional`, and
+exactly one of `country` (alpha-2 or alpha-3, normalised to alpha-2) or `countryField`. A malformed
+key raises `KycConfigInvalidError` naming it.
 
-`submittedData` is a closed, declared shape and nothing else — `OnboardingsService.submit` writes
-it verbatim into `webhook.inbound_callback_applied` audit metadata (§3, §8):
+**`execute()`** builds the whole `KycSubmission` before touching the provider: every document's
+country is resolved first, an optional document the applicant did not supply is skipped, and each
+remaining document is resolved through `CompletedOnboardingDocumentResolver` and read from
+`ObjectStoragePort` (the same path `mock_sumsub_file_upload` exercises). If no document was supplied,
+or one does not resolve, the connector answers `invalid()`; a missing identity field or an unassigned
+country throws, being an authoring defect rather than missing input. Only then does it call
+`provider.submit` and return `accepted()` — the async park itself is the executor's own `pending()`,
+built only because the workflow step declares `async: true` ("Execution and chaining", above), not
+by anything the connector returns.
+
+**`mapCallbackResult()`** is the same for every provider:
+
+1. `provider.parseCallback` reduces the webhook to a `KycCallbackEvent`: `onboardingId`, an optional
+   `providerReference`, `actionable`, and an opaque `hint` the provider reads back later.
+2. An `onboardingId` that is not a UUID can match no onboarding and must not reach a UUID column as
+   a cast error: it throws `ConnectorCallbackAlreadyAppliedError`, which the webhook route answers
+   with `204` (§5).
+3. `AwaitingCallbackConnectorResolver.findConnector({onboardingId, connectorId})` loads the
+   onboarding, resolves its workflow, finds the current step and answers **only from the persisted
+   park** (§5): the connector's `order` and the `pendingConnector` record the callback is
+   correlated against, or `undefined` when the onboarding is gone, terminal, has moved past this
+   step, or is parked on a different connector id. There is no fallback to the step's chain: a row
+   on the step with no park (a retry verdict cleared it and the client has not resubmitted) logs
+   `AWAITING_CALLBACK_PARK_NOT_RECORDED` at warn and resolves to `undefined` too. `undefined`
+   throws `ConnectorCallbackAlreadyAppliedError`, which the webhook route acknowledges with `204`;
+   that is the redelivery guard. The callback's own id for the onboarding **is** the onboarding id
+   the provider was given at submit, so correlation needs nothing from the webhook body beyond it.
+4. An event with `actionable: false` re-parks the step with nothing applied (`KYC_CALLBACK_ACKNOWLEDGED`
+   at debug). So does an event whose `providerReference` differs from the one recorded on the parked
+   connector, compared **before** the verdict is fetched — a late decision for a session a provider
+   switch or a retry has superseded (`KYC_CALLBACK_SUPERSEDED`, at log level). The re-park spreads
+   the stored record first (`buildParkedResult`), so the recorded reference and `parkedAt` survive
+   it. Sumsub's reference is its stable applicant id, so this guard never fires for it.
+5. Otherwise `decide` runs: `provider.fetchVerdict` returns a `KycVerdict` — always read back from
+   the provider, never taken from the webhook body — and `evaluateKycOutcome` decides. The result
+   carries the park it was decided for (`resolvedConnector.pendingConnector`), and the submit path
+   compares that with the row it locks (§3, step 6): the resolver's read above was unlocked, so a
+   client submit or a switch landing between it and the lock makes the result superseded, and the
+   engine drops it rather than applying a decision for an attempt the onboarding no longer waits on.
+
+**`reconcilePending({ onboardingId })`** is the same correlation and decision without the parse,
+for an operator whose callback never came (§5). It resolves through the same resolver
+(`undefined` throws `ConnectorCallbackAlreadyAppliedError`, which the reconcile service reports as
+`superseded`), requires the park to carry a `providerReference` (else
+`PendingConnectorReconcileUnsupportedException` with `reason: 'reference_missing'`), asks the
+provider for the event to read with — `provider.buildReconcileEvent({ onboardingId,
+providerReference })` — and runs `decide` on it. A `pending` verdict is `{ outcome: 'still_pending' }`;
+anything else is `{ outcome: 'resolved', callback }`, the same `ConnectorCallbackResult` a webhook
+would have produced. Each ask logs `KYC_RECONCILE connectorId= onboardingId= outcome=`. The
+providers differ only in the event: Veriff's carries `origin: 'reconcile'`, which makes
+`fetchVerdict` answer `pending` for a session with no decision yet where a webhook event throws
+`VeriffDecisionNotAvailableError` (a webhook needs the 5xx so Veriff redelivers; an operator's read
+has nobody to redeliver); Sumsub's carries the reviewed hint, and its `fetchVerdict` already answers
+`pending` while `reviewStatus` is not `completed`.
+
+**`KycVerdict`** is the vocabulary a provider maps its own states onto:
+
+| Verdict                                                                  | Meaning                                                          |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `pending`                                                                | Not decided; the step stays parked and the provider calls again  |
+| `needs_review(reason, detail?)`                                          | Human review for a provider-side reason; `detail` is counts only |
+| `approved(verifiedIdentity)`                                             | Verified, subject to the identity guard                          |
+| `declined(reasonCodes?, customerMessage?)`                               | Refused                                                          |
+| `resubmission(target, attemptCount?, limitExceeded?, reasonCodes?, msg)` | The applicant may try again; `target` is a `KYC_RETRY_TARGETS`   |
+
+A state a provider cannot map is **thrown**, never defaulted, so the callback answers 5xx and the
+provider redelivers (0005's rule, kernel-wide).
+
+**The kernel's outcome rules**, in order, stopping at the first match (`evaluateKycOutcome`):
+
+1. `pending` parks; nothing is applied.
+2. `needs_review` is `human_review` (`KYC_NEEDS_REVIEW`).
+3. `approved` is `verified` unless the declared identity does not match what the provider verified,
+   in which case it is `human_review` (`KYC_IDENTITY_GUARD_FIRED`). The guard overrides the
+   provider's own approval.
+4. `declined` is `refused`, with the reason codes and customer message.
+5. `resubmission` is `retry` — unless the provider said `limitExceeded` or the attempt count has
+   reached `maxAttemptsPerDocSet`, in which case it is `human_review` (`KYC_ATTEMPTS_EXHAUSTED`). The
+   cap beats the retry it is capping. On a `retry` the connector calls `provider.onRetry` (a Sumsub
+   step reset) before reporting.
+
+**Attempt counting** means two things. A provider that reports attempts itself
+(`countsAttempts: true`; Sumsub's per-docSet `attemptCnt`) puts the count on its verdict and the
+cap is per docSet. A provider that does not (`countsAttempts: false`; Veriff) leaves the kernel to
+count: it reads `kycAttemptCount` from the onboarding's context (0 when never written), adds one for
+this resubmission, compares that with the cap — total resubmissions per onboarding — and writes the
+new total as `kycAttemptCount` on the `retry`. Persisted context keys are never deleted, so the
+total survives from one pass to the next. The kernel never writes `kycAttemptCount` for Sumsub,
+which is why the stored Sumsub revision 1, which does not declare the field, keeps working.
+
+**The identity guard** compares the applicant's declared last name and date of birth with what the
+provider verified — never first name, where transliteration and middle-name placement are noise.
+Both sides are trimmed, case-folded, stripped of diacritics, with hyphen and space folded together;
+there is no edit distance and no threshold, because a threshold is not defensible in an audit. A
+field the provider returned nothing for is unknown, not a mismatch; when every compared field is
+unknown the result is `no-verified-data`, which is not a `match` and lands in review. The declared
+side is read through the connector's own `fieldMapping`, not by payload key names. Only field names
+are logged, never the compared values.
+
+**`submittedData`** is a closed, declared shape and nothing else — `OnboardingsService.submit`
+writes it verbatim into `webhook.inbound_callback_applied` audit metadata (§3, §8):
 
 ```ts
-type SumsubCallbackSubmission = {
+type KycCallbackSubmission = {
   kycOutcome: 'verified' | 'human_review' | 'retry' | 'refused';
   kycRetryStep?: 'IDENTITY' | 'SELFIE' | 'APPLICANT_DATA' | 'QUESTIONNAIRE'; // only on retry
-  kycReasonCodes?: readonly string[]; // Sumsub buttonIds — machine-readable, not identity data
-  kycCustomerMessage?: string; // moderationComment only, never clientComment
+  kycReasonCodes?: readonly string[]; // machine-readable provider codes, not identity data
+  kycCustomerMessage?: string; // the provider's customer-facing message only
+  kycAttemptCount?: number; // only on retry, only for a provider that does not count attempts
 };
 ```
 
-Never present: `clientComment`, MRZ, document numbers, dates of birth, image bytes, or a raw
-provider payload.
+`kycReasonCodes` and `kycCustomerMessage` travel only with `refused` and `retry`; `verified` and
+`human_review` carry `kycOutcome` alone. Never present: Sumsub's `clientComment`, MRZ, document
+numbers, dates of birth, image bytes, or a raw provider payload.
 
-All three credentials sit in one place. `appToken` and `secretKey` sign every outbound Sumsub
-call; `callbackSigningSecret` verifies every inbound one (§5). All are operator-configured through
-`/v1/admin/connectors/sumsub_kyc` like any other `settingsSchema` field (above), so the
-`connectors` table is the only source for both directions and `configured` on the admin surface
-means the connector can both call Sumsub and verify what Sumsub sends back. The signing secret was
-env-only until
+**Log lines** carry ids, field names and counts, never a provider's free text or a compared value:
+`KYC_RETRY`, `KYC_ATTEMPTS_EXHAUSTED`, `KYC_NEEDS_REVIEW` and `KYC_IDENTITY_GUARD_FIRED` (one per
+decision, at log level), `KYC_CALLBACK_SUPERSEDED` (log level) and `KYC_CALLBACK_ACKNOWLEDGED`
+(debug), each with `connectorId` and `onboardingId`.
+
+#### `sumsub_kyc`
+
+`sumsub-kyc.connector.ts` plus a `sumsub-kyc/` directory: `sumsub-kyc.provider.ts` (the
+`KycProvider`), the signing HTTP client, the applicant and questionnaire mapping, the state → verdict
+table (`sumsub-outcome.ts`), config parsing and contract constants. `countsAttempts` is `true`.
+Its provider-specific keys, `levelName` and `questionnaireDefinitionId` (both required, non-empty),
+may sit at the step level of a stored revision or under `connector.config`; Sumsub also requires a
+non-empty `questionnairePathMap`, since a level cannot be finalised without a questionnaire.
+
+`submit` reads the Sumsub level and checks it against the **submitted documents' docSets** before any
+side-effecting call: `SumsubLevelNotFoundError` if the level is absent,
+`SumsubLevelDocSetMismatchError` if a submitted document's docSet is not on the level (containment,
+not equality — the reverse is legal, a level carries steps the connector uploads nothing into,
+`APPLICANT_DATA` and `QUESTIONNAIRE`), and `SumsubLevelQuestionnaireMissingError` if the level
+declares no `QUESTIONNAIRE` docSet. The check is **not cached**: it runs on every execution, so a
+level changed at Sumsub after the first fetch is never missed. The documents are read from object
+storage before it, the check still precedes `createApplicant`, so a drift costs nothing at Sumsub. It
+then creates the applicant (`externalUserId` is the onboarding id), uploads each document with its
+country converted to alpha-3, submits the questionnaire and finalizes. The `providerReference` is the
+applicant id.
+
+`parseCallback` asserts `X-Payload-Digest-Alg` is `HMAC_SHA256_HEX`
+(`SumsubCallbackDigestAlgorithmMismatchError` otherwise — a real downgrade already fails the HMAC
+check; this makes the error precise), and takes the onboarding id from `externalUserId` and the
+reference from `applicantId`. Event classification: `applicantReviewed` is actionable;
+`applicantOnHold` and `applicantAwaitingService` are actionable and decided without a read-back, as
+`needs_review` with reason `on_hold_or_awaiting_service`; every other `type`, including one Sumsub
+invents later, is acknowledged and dropped.
+
+For a reviewed applicant, `fetchVerdict` reads back the review status, the applicant, the AML case
+and, only when the review is `RED`, the per-docSet status, then maps in this order, first match
+wins:
+
+| State                                                                                      | Verdict                                                                             |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `reviewStatus` not `completed`                                                             | `pending`                                                                           |
+| Screening not resolved: no AML case (Sumsub's `204`), or any hit not `false_positive`      | `needs_review('screening_unresolved', {hitCount})` — overrides `GREEN`              |
+| `RED` with `reviewRejectType` `FINAL`                                                      | `declined(buttonIds, moderationComment)`                                            |
+| `RED` with `RETRY` and a failed docSet                                                     | `resubmission(docSet, attemptCnt, buttonIds, moderationComment)`                    |
+| `GREEN`                                                                                    | `approved({lastName, dateOfBirth})` from the applicant's verified `info`            |
+| Anything else (unknown reject type, a `RETRY` with no resolvable docSet, any other answer) | throws `SumsubOutcomeUnrecognisedStateError`; Nest answers `500`, Sumsub redelivers |
+
+A missing `attemptCnt` on the failed docSet counts as 0. An unresolved screening hit is logged as
+`SUMSUB_SCREENING_HIT_UNRESOLVED` with the entry key names, `matchStatus` and the hit count only.
+`onRetry` resets the failed step at Sumsub.
+
+This is the one place the port changed behaviour: a review answer that is neither `RED` nor `GREEN`
+with an identity mismatch used to land in `human_review`; it now throws like every other
+unexplained provider state.
+
+Credentials: `appToken`, `secretKey` and `callbackSigningSecret`. `appToken` and `secretKey` sign
+every outbound call; `callbackSigningSecret` verifies every inbound one (§5; HMAC-SHA256, hex,
+`x-payload-digest`). All are operator-configured through `/v1/admin/connectors/sumsub_kyc` like any
+other `settingsSchema` field (above), so the `connectors` table is the only source for both
+directions and `configured` on the admin surface means the connector can both call Sumsub and verify
+what Sumsub sends back. The signing secret was env-only until
 [0006](./decisions/0006-callback-signing-secret-in-connector-settings.md) moved it, after a
 deployment reported `configured: true` while rejecting every callback for a missing secret.
+
+Every Sumsub API call — in `execute()` and in `mapCallbackResult()` alike — surfaces a network
+failure, a timeout or a non-2xx it cannot otherwise explain as `500 SUMSUB_UNAVAILABLE` (§11); the
+one named exception is `finalizeSubmission`'s `409` for missing docSets, which carries their names
+back as `SumsubSubmissionIncompleteError` instead of the generic unavailable error. Before the
+exception, `SumsubClient` warns with what the exception hides: `SUMSUB_RESPONSE_ERROR method= path=
+status=` on every non-2xx (so a `401` from a rotated token reads differently from an outage) and
+`SUMSUB_REQUEST_FAILED method= path= error= timeoutMs=` when `fetch` itself rejects, where `error` is
+the error's class name only — `TimeoutError` or `TypeError` — never its message, the body or a header.
+
+#### `veriff_kyc`
+
+`veriff-kyc.connector.ts` plus a `veriff-kyc/` directory: `veriff-kyc.provider.ts`, the signing
+`VeriffClient`, the `VeriffMediaFitter` and the contract constants. The flow is **API-only**: no Veriff UI is shown to anyone;
+the engine creates a session, uploads the images the applicant already captured, and submits it.
+`countsAttempts` is `false`. The provider takes no keys of its own under `connector.config`; its
+`validateConfig` refuses at startup a `documents[]` entry that maps to no media context.
+
+`submit` always opens a **new session per execute**, never reusing one: a Veriff session is
+single-use, and a resubmission after a `resubmission_requested` decision is a new verification
+(which also lets the kernel's own counter, not a Veriff state machine, give the cap).
+
+1. `POST /v1/sessions` with `verification: {vendorData, person, timestamp}`. `vendorData` is the
+   **onboarding id**; `person` is `{firstName, lastName, dateOfBirth}`. A `document: {type,
+country}` prefill is added only when every identity upload agrees on one document type among
+   `ID_CARD`, `PASSPORT`, `DRIVERS_LICENSE` and `RESIDENCE_PERMIT` (country alpha-2); a workflow
+   offering a choice of document leaves Veriff to detect it. Logged as `VERIFF_SESSION_CREATED`.
+   Before it, every document must be an `image/*`: Veriff accepts a PDF on the media endpoint only
+   once its Solutions Engineer enables it for the account, which no deployment can assume, so a
+   PDF throws `KycDocumentUnsupportedError` with no session created and the kernel sends the
+   applicant back to the upload (above). The shipped Veriff workflows narrow their capture fields to
+   `image/png` and `image/jpeg` for the same reason (§2 fixtures), and the guard covers a
+   user-authored document that does not.
+2. For each document, `POST /v1/sessions/{id}/media` with `image: {context, content}`, where
+   `content` is a base64 data URI (`data:<contentType>;base64,…`) with the stored document's content
+   type. The context follows the document mapping: docSet `SELFIE` → `face`; docSet `IDENTITY` with
+   no side or `FRONT_SIDE` → `document-front` (so a passport is `document-front`); `BACK_SIDE` →
+   `document-back`. Anything else maps to no context. Before the upload, `VeriffMediaFitter.fit`
+   brings an `image/*` document within Veriff's longer-side limit (`VERIFF_MEDIA_MAX_SIDE_PX`,
+   1920 px): the engine's own upload cap is in bytes (§7), so a phone photo well under it is still
+   refused by Veriff on its pixel dimensions. An image already within the limit passes through as
+   the same object; a larger one is resized with `sharp` to fit inside 1920×1920,
+   never enlarged, its EXIF orientation baked in first (resizing drops the tag) and its format and
+   content type kept. Logged as `VERIFF_MEDIA_DOWNSCALED from=<w>x<h> to=<w>x<h>`, dimensions only.
+3. `PATCH /v1/sessions/{id}` with `verification: {status: "submitted"}`, closing the upload phase and
+   starting the decision. The `providerReference` is the session id.
+
+Every request carries `X-AUTH-CLIENT` (the `apiKey`) and `X-HMAC-SIGNATURE`, the hex HMAC-SHA256 of
+the exact bytes sent under the shared secret — or, for the bodyless `GET`, of the session id.
+`VeriffClient` is plain `fetch` under `AbortSignal.timeout`, no SDK. Before every
+`VERIFF_UNAVAILABLE` it warns with what the exception hides: `VERIFF_RESPONSE_ERROR method= path=
+status=` on a non-2xx (so a `401` from a wrong `apiKey` reads differently from an outage) and
+`VERIFF_REQUEST_FAILED method= path= error= timeoutMs=` when `fetch` rejects, where `error` is the
+error's class name only — `TimeoutError` or `TypeError` — never its message, the body or a header.
+
+Veriff posts **two shapes to one endpoint**. `parseCallback` first asserts `x-auth-client` equals the
+stored `apiKey` (`VeriffCallbackAuthClientMismatchError` otherwise: the HMAC check already proves the
+body is Veriff's, so this names an integration mix-up precisely). An **event webhook** (it carries
+`action` or `feature`, or has no `verification` object) decides nothing and is acknowledged: its
+onboarding id is the top-level `vendorData`, and an event without one gets an empty id, which the
+kernel answers as already applied. A **decision webhook** yields `verification.vendorData` as the
+onboarding id and `verification.id` as the session id.
+
+`fetchVerdict` **reads the decision back** with `GET /v1/sessions/{id}/decision` and never trusts the
+webhook body. A `verification: null` read-back throws (`VeriffDecisionNotAvailableError`) rather than
+parking — unlike Sumsub, no later event follows a decision webhook, so only a 5xx makes Veriff
+redeliver; a decision whose `vendorData` differs from the callback's onboarding throws
+`VeriffDecisionVendorDataMismatchError`. Every decision read back is logged as `VERIFF_DECISION
+onboardingId= sessionId= status= code= reasonCode=` — never the free-text `reason` or the `person`.
+The mapping is on `status`, never on the numeric `code`:
+
+| Decision `status`        | `code` | Verdict                                                                                                                                                                |
+| ------------------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `review`                 | 9121   | `pending`                                                                                                                                                              |
+| `approved`               | 9001   | `approved({lastName, dateOfBirth})` from the decision's `person`                                                                                                       |
+| `declined`               | 9102   | `declined([reasonCode], reason)`                                                                                                                                       |
+| `resubmission_requested` | 9103   | `resubmission(target, limitExceeded, [reasonCode], reason)` — `SELFIE` for reason codes 202, 208 and 214, else `IDENTITY`; `limitExceeded` when the reason code is 539 |
+| `expired`, `abandoned`   | 9104   | `resubmission(IDENTITY)` with no reason; should not occur in API-only mode, where the session is submitted inside the same `execute`                                   |
+| any other                |        | throws `VeriffDecisionUnrecognisedStateError` (status and code only, never the free text)                                                                              |
+
+The `code` column follows Veriff's status-codes table
+(devdocs.veriff.com/docs/verification-session-status-codes-table), which gives 9104 to both
+`expired` and `abandoned` and 9121 to `review`; the `GET /v1/sessions/{id}/decision` reference
+(devdocs.veriff.com/apidocs/v1sessionsiddecision-1) instead gives 9104 to `expired` and 9121 to
+`abandoned`. That disagreement is why the mapping keys on `status` and the codes are logged only
+(`VERIFF_DECISION_CODE_*` in `veriff-contract.ts`).
+
+Veriff reports no attempt count, so the kernel counts: every `resubmission` — `expired` and
+`abandoned` included — adds one to `kycAttemptCount` and is capped at `maxAttemptsPerDocSet` as total
+resubmissions per onboarding. Face reason codes 201 and 217 are not mapped to `SELFIE` today.
+
+Credentials: `apiKey` (required, not secret) and `sharedSecretKey` (secret, required), configured
+through `/v1/admin/connectors/veriff_kyc`, so the admin panel's Connectors page shows the card
+without panel code. **One secret signs both directions.** `callbackAuth` is HMAC-SHA256, hex, header
+`x-hmac-signature`, with `secretSettingKey: 'sharedSecretKey'` so the signature verifier reads that
+key rather than `callbackSigningSecret` (§5). Store the shared secret of the key pair Veriff marks
+as the integration's **master signature key**: Veriff accepts any of an integration's secrets on API
+calls but signs every webhook with the master one, so a non-master secret passes every outbound call
+while each webhook is refused with `signature_mismatch` (found in the first manual run, 2026-10-05).
+A rotation window is a comma-separated list: the first
+entry signs outbound calls, every entry verifies inbound ones, so a secret containing a comma cannot
+be stored. `VERIFF_BASE_URL` and `VERIFF_TIMEOUT_MS` are deployment settings (§10). Veriff uses one
+host for test and live; the API key decides the mode. Any failure reaching Veriff, a non-2xx, or a
+body it cannot read is `500 VERIFF_UNAVAILABLE` (§11).
+
+**What a test integration requires.** A Veriff TEST integration never decides on its own: the
+decision is forced in the Veriff Customer Portal, which then fires the decision webhook. Point both
+the decision webhook URL and the event webhook URL at `<public host>/v1/webhooks/veriff_kyc/callback`,
+and store the integration's `apiKey` and shared secret as above; sample images of any size work,
+since `VeriffMediaFitter` brings them within Veriff's 1920 px longer-side limit before upload.
+`scripts/run-eu-b2c-kyc-manual-test-veriff.sh` drives the Veriff walkthrough end to end against
+`eu-b2c-individual-kyc-eea-veriff-v2-local` and stops at the one step only the Portal can perform.
 
 ---
 
@@ -1473,8 +1908,10 @@ The request path is ordered so that nothing happens before authentication:
 3. `CallbackSignatureVerifier.verify(adapter, {rawBody, headers})`.
 4. Only then `adapter.mapCallbackResult(...)` parses the payload and correlates it to an
    onboarding.
-5. `OnboardingsService.submit(onboardingId, submittedData, { providerIdentity, resolvedConnector })`
-   replays the normal submit path with `resume`.
+5. `OnboardingsService.submit(onboardingId, submittedData, { providerIdentity, origin:
+'provider_callback', resolvedConnector })` replays the normal submit path with `resume`;
+   `resolvedConnector` carries the `pendingConnector` the adapter correlated against, which the
+   submit path re-checks under the row lock (§3, step 6).
 
 Responsibility is split: **the adapter declares the recipe** (header names, `sha256`/`sha512`,
 `hex`/`base64`, optional epoch-seconds timestamp header with a tolerance window, optional
@@ -1482,10 +1919,14 @@ Responsibility is split: **the adapter declares the recipe** (header names, `sha
 engine executes the check** — secret lookup, timing-safe comparison with no early exit across
 rotation secrets, replay bounding, and failure classification.
 
-Secrets come from the adapter's own `callbackSigningSecret` setting, resolved through
+Secrets come from the adapter's own settings, resolved through
 `ConnectorSettingsService` on every callback like any other connector credential (§4,
-[0006](./decisions/0006-callback-signing-secret-in-connector-settings.md)). A provider-side
-rotation window is a comma-separated list in that one value, and every entry is tried; a secret
+[0006](./decisions/0006-callback-signing-secret-in-connector-settings.md)). The key defaults to
+`callbackSigningSecret`; an adapter whose provider signs both directions with one secret names the
+key in `callbackAuth.secretSettingKey` instead — `veriff_kyc` names `sharedSecretKey`, so there is
+no second secret to store. `CallbackSignatureVerifier` reads whichever key the adapter names and
+nothing else. A provider-side rotation window is a comma-separated list in that one value, and every
+entry is tried (an adapter signing outbound with the same secret uses the first); a secret
 containing a comma therefore cannot be stored. A signed connector with no stored secret rejects at
 request time rather than failing startup — _reasoning:_ a missing secret for one provider must not
 take the whole engine down. Because the value is a declared `settingsSchema` field, that gap is
@@ -1510,18 +1951,104 @@ honest about being unable to verify anything right now and keeps the provider's 
 until the gap closes. The distinguishing reason itself still never reaches the caller — only the
 `webhook.inbound_callback_rejected` audit record.
 
-A callback whose resolved connector no longer matches an onboarding still awaiting it — typically
-because an earlier delivery already applied its verdict — is not treated as an error either: an
-adapter's `mapCallbackResult` throws `ConnectorCallbackAlreadyAppliedError` (`sumsub_kyc` does,
-through `AwaitingCallbackConnectorResolver` — §4), `WebhookController` catches it, records
-`webhook.inbound_callback_rejected` with reason `callback_already_applied`, and answers the route's
-ordinary `204` rather than the `400 INVALID_STEP_DATA` a stale redelivery produced before. That is
-also the redelivery guard: a provider's retried delivery of an already-applied verdict is
-acknowledged once, not reapplied.
+**The parked connector is persisted.** When a step parks, the next state carries
+`pendingConnector` — `{connectorId, connectorName, connectorOrder, providerReference?, parkedAt?}`,
+the connector that initiated the work, the reference the adapter's accepted result returned, and
+the instant the submit path first wrote the park (§3, step 8; a re-park keeps it) — and
+`onboardings.pending_connector` (§9) stores it. Every other transition sets it to `null`. An
+operator may switch the step's connector while an onboarding waits (§2), so
+`AwaitingCallbackConnectorResolver.findConnector` answers from the record and from nothing else:
+
+1. Load the onboarding and its effective workflow, as before; an unknown, approved or completed
+   onboarding, or one with no current step, or whose step is gone, resolves to `undefined`.
+2. If `pendingConnector` is `null`, log `AWAITING_CALLBACK_PARK_NOT_RECORDED` at warn and resolve
+   to `undefined`. There is no fallback to the step's chain any more: a row on the step without a
+   park is one a retry verdict has cleared and the client has not resubmitted, and a late decision
+   for an attempt it no longer waits on must not decide it. (Migration `0031` never backfilled the
+   column, so a row parked before it would resolve the same way; the branch is unreleased, so no
+   deployed row is in that state.)
+3. Otherwise the callback's connector id must equal `pendingConnector.connectorId`, else
+   `undefined`. The slot is the step's declaration with `order === connectorOrder` (`undefined` if
+   none). The connector is the link of `[slot, ...slot.fallbacks]` carrying the parked id or, when
+   the operator has since switched the primary and that id is no longer in the chain, the slot with
+   its `id` replaced by the parked id — its authored config and field mapping are provider-neutral
+   and stand in.
+
+The resolution carries the record (`pendingConnector`, never `null`) so the KYC kernel can compare
+provider references before it fetches a verdict (§4), and the adapter's callback result carries it
+on to the submit path, which compares it with the row it locks (`OnboardingEntity.isParkedOn`, §3
+step 6) — the resolver's own read is unlocked, so that second check is what makes the comparison
+hold at the moment the result is applied. So an onboarding parked on the previous provider finishes
+with it, its callback arriving at that adapter's own `/v1/webhooks/<id>/callback`, while one started
+after the switch parks on the new provider. `providerReference` is plain data on the onboarding
+row, not encrypted, so the resolver reads it without the encryption port; it is never exposed by the
+admin API.
+
+Two kinds of callback are acknowledged rather than applied, and neither is an error:
+
+- A callback whose resolved connector no longer matches an onboarding still awaiting it —
+  typically because an earlier delivery already applied its verdict: an adapter's
+  `mapCallbackResult` throws `ConnectorCallbackAlreadyAppliedError` (the KYC connectors do, through
+  `AwaitingCallbackConnectorResolver`, as they do for an `onboardingId` that is not a UUID — §4),
+  `WebhookController` catches it, records `webhook.inbound_callback_rejected` with reason
+  `callback_already_applied`, and answers the route's ordinary `204` rather than the
+  `400 INVALID_STEP_DATA` a stale redelivery produced before. That is the redelivery guard: a
+  provider's retried delivery of an already-applied verdict is acknowledged once, not reapplied.
+- A callback decided for a park the locked row no longer holds — a client submit or a switch
+  landed between the adapter's read and the lock: the submit path throws
+  `ConnectorCallbackSupersededError`, `WebhookController` records
+  `webhook.inbound_callback_rejected` with reason `callback_superseded`, and answers `204`. Nothing
+  is written to the onboarding and no client notification goes out; the newer attempt's own
+  callback decides it. The route's `@ApiNoContentResponse` names all three meanings of its `204`.
+
+### Stuck onboardings: the operator reconcile
+
+Nothing in the engine wakes a parked onboarding on its own: `expiresAt` is never set, manual review
+applies only `manual.*` arms (and the KYC step declares none), and a callback that never arrives
+leaves the row parked indefinitely. `POST /v1/onboardings/{id}/pending-connector/reconcile`
+(`@AdminRoute()`, `200`, operation `reconcileOnboardingPendingConnector`,
+`PendingConnectorReconcileService`) is the operator's answer: ask the parked connector's adapter
+for the verdict the provider holds, and apply it as the callback would have been applied.
+
+1. Load the onboarding (`404 ONBOARDING_NOT_FOUND`); a row with no park is refused
+   `409 ONBOARDING_NOT_AWAITING_CONNECTOR`.
+2. Find the park's adapter through `ConnectorExecutionPort.findAdapterById`. The port method is
+   optional — `ConnectorAdapter.reconcilePending?(input: { onboardingId })` — because a provider
+   with no read-back cannot offer it; an adapter that is missing or lacks the method is refused
+   `409 PENDING_CONNECTOR_RECONCILE_UNSUPPORTED` with `connectorId` and `reason: 'adapter'`. The
+   KYC kernel implements it (§4) and refuses with `reason: 'reference_missing'` when the park
+   records no `providerReference` to read. `mock_async_callback` implements it too, answering
+   whatever a test set with `setReconcileOutcome` (`still_pending` until set).
+3. The adapter answers `{ outcome: 'still_pending' }` or `{ outcome: 'resolved', callback }`
+   (`ConnectorReconcileResult`). `still_pending` changes nothing. `resolved` goes through
+   `OnboardingsService.submit(id, callback.submittedData, { providerIdentity, origin:
+'admin_reconcile', operatorId, resolvedConnector })` — the same path as a callback, so the row
+   lock, the completed guard and the park re-check all apply; the client webhook is notified as for
+   any transition.
+
+The response (`ReconcilePendingConnectorResponseDto`) is `{ outcome, onboarding }`, where
+`outcome` is `applied` (the verdict moved the onboarding), `still_pending` (the provider has not
+decided) or `superseded` (the onboarding left that park between the read and the apply — the
+submit path's `ConnectorCallbackSupersededError`, or the adapter's own
+`ConnectorCallbackAlreadyAppliedError`), and `onboarding` is the admin summary as it now stands.
+Every outcome leaves an audit row under the operator who asked (§8): `applied` writes
+`onboarding.pending_connector_reconciled` from inside the submit transaction; the two no-ops write
+`onboarding.pending_connector_reconcile_noop` with the outcome. The service logs
+`PENDING_CONNECTOR_RECONCILED` on an apply.
+
+Finding the rows to reconcile is the list's job: `GET /v1/onboardings` filters on `parked`
+(`true` / `false`, whether `pending_connector` is set), `pendingConnectorId` and `parkedBefore`
+(ISO-8601, compared with the record's `parkedAt`), and every admin summary's `pendingConnector`
+carries `parkedAt` (`null` for a row parked before the engine recorded it — which `parkedBefore`
+therefore never matches). There is no scheduler: the route is the manual form of the reconciliation
+a worker-role poller over `parkedAt` would run, and that poller is the recorded follow-up
+([0039](./decisions/0039-parked-onboarding-lifecycle.md)). The other recorded gap is on the client
+side: `GET /v1/onboardings/{id}/state` does not yet say the onboarding is parked, so the
+`409 ONBOARDING_AWAITING_CONNECTOR` on submit (§3) is the only signal a BFF gets.
 
 **Documented limits** (verbatim from the connector-callback doc, still true): the callback URL is
 guessable so the signature is the only barrier; secrets are keyed by connector _id_, which is right
-for a dedicated adapter like `sumsub_kyc` but wrong for a generic connector and blocks
+for a dedicated adapter like `sumsub_kyc` or `veriff_kyc` but wrong for a generic connector and blocks
 `async: true` on `http_request` until a per-initiation callback token exists; there is no replay
 dedupe inside the timestamp window; HMAC only; epoch seconds only.
 
@@ -1704,6 +2231,31 @@ names** touched by the write — and nothing else: never a value, masked or othe
 previous value. That is a deliberate guarantee, not an implementation detail — a credential must
 not be reconstructible from the audit trail.
 
+A runtime connector selection (§2) records `workflow.connector_selected` on a `PUT` and
+`workflow.connector_selection_cleared` on a `DELETE` of `/v1/admin/workflows/:workflowId/steps/:stepName/connector`,
+both with entry type `success`, filed under resource type `workflow` with `resourceId` the workflow
+key, after the database commit. A `DELETE` is audited even when no selection existed. Metadata
+carries `workflowId`, `stepName`, `previousConnectorId` and `connectorId` — ids and names, no
+configuration — and goes through the same allowlist as the other families.
+
+An operator reconcile of a parked onboarding (§5) writes one of two actions
+(`PENDING_CONNECTOR_ACTIONS`, `AuditService.logPendingConnectorReconcile`), both with actor type
+`operator` — the operator id from the admin token, or the unknown-actor placeholder when the claims
+carry none — filed under resource type `onboarding` with `resourceId` the onboarding id:
+
+| Action                                        | Entry type | Written when                                                                                                                                                                                                                                           |
+| --------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `onboarding.pending_connector_reconciled`     | `success`  | The verdict read back was applied, inside the submit transaction, in place of the `webhook.inbound_callback_applied` row a callback writes. Metadata: `connectorId`, `connectorOrder`, `providerIdentity`, `submittedData`, `connectorExecutionResult` |
+| `onboarding.pending_connector_reconcile_noop` | `observed` | The ask changed nothing. Metadata: `connectorId`, `connectorOrder`, `outcome` (`still_pending` \| `superseded`)                                                                                                                                        |
+
+The applied row keeps the same sensitive-data exception as `webhook.inbound_callback_applied`
+(below) for the same reason, and a reader tells the two apart by action alone. The refusals around
+it land elsewhere: a client submit refused because the row is parked is an
+`onboarding.rejected_attempt` with outcome `awaiting_connector` (`REJECTED_ATTEMPT_OUTCOME_ALLOWLIST`,
+`submit` only), and a callback dropped because the locked row no longer holds the park it was decided
+for is a `webhook.inbound_callback_rejected` with reason `callback_superseded` (§5), beside
+`callback_already_applied`.
+
 The agreement feature (§2, §9) adds three actions, allowlisted the same way
 (`AGREEMENT_RESOURCE_ALLOWLIST`, `filterAgreementMetadata`), and every one of them is written in the
 same transaction as the change it describes:
@@ -1801,20 +2353,21 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 so a version is a row rather than half of a composite key — decision record
 [0028](decisions/0028-identity-and-version-tables.md) has the reasoning.
 
-| Table                   | Purpose                                                                                                                                                                                                                                                                                                                                  |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`           | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                                                                                                                                                                   |
-| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                          |
-| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                   |
-| `audit_log`             | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                |
-| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                 |
-| `workflows`             | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below |
-| `workflow_versions`     | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                |
-| `agreements`            | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                                                             |
-| `agreement_versions`    | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                     |
-| `onboarding_agreements` | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                         |
-| `encryption_keys`       | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                     |
-| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                                                    |
+| Table                           | Purpose                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`                   | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, `pending_connector` jsonb (nullable, plain — the connector the onboarding is parked on awaiting a callback, §5), expires_at, completed_at, rejection_reason, timestamps                                                                     |
+| `onboarding_documents`          | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                                             |
+| `client_webhook_outbox`         | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                                      |
+| `audit_log`                     | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                                   |
+| `connectors`                    | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                                    |
+| `workflows`                     | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below                    |
+| `workflow_versions`             | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                                   |
+| `workflow_connector_selections` | the operator's connector choice per family and step: composite PK `(workflow_id, step_name)`, `workflow_id` FK to `workflows` (`ON DELETE CASCADE`, `fk_workflow_connector_selections_workflow`), `connector_id` (checked against `^[a-z0-9_]+$`), `updated_at`, `updated_by`. `step_name` is not a foreign key — it names a step inside the versions' JSON |
+| `agreements`                    | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                                                                                |
+| `agreement_versions`            | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                                        |
+| `onboarding_agreements`         | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                                            |
+| `encryption_keys`               | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                                        |
+| `_engine_alive`                 | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                                                                       |
 
 Only `agreements` carries a `current_version_id`. An agreement version is created only by
 `POST /v1/admin/agreements`, which sets the pointer in the same statement that writes the version,
@@ -1857,12 +2410,13 @@ nothing a decorator does not already say. A reference the schema deliberately le
 directions and fails if entity and database ever disagree; see decision record
 [0027](decisions/0027-relations-declared-on-entities.md).
 
-Ten migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Twelve migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters): `0001_init`, `0002_create_onboardings`,
 `0003_create_onboarding_documents`, `0006_create_client_webhook_outbox`, `0010_create_audit_log`,
 `0013_create_workflows`, `0016_create_connector_settings`, `0022_create_agreements`,
-`0024_create_encryption_keys`, `0028_add_onboardings_in_progress_version_index` and
-`0029_add_workflow_versions_one_draft_index`. A file under the migrations glob may export nothing but its class:
+`0024_create_encryption_keys`, `0028_add_onboardings_in_progress_version_index`,
+`0029_add_workflow_versions_one_draft_index`, `0030_create_workflow_connector_selections` and
+`0031_add_onboardings_pending_connector`. A file under the migrations glob may export nothing but its class:
 TypeORM instantiates every export as a migration.
 
 No migration has ever run against a deployed environment, so the set is folded rather than
@@ -1884,11 +2438,14 @@ both partial `onboardings` indexes the encryption sweep reads; `0028` adds
 rows with `completed_at IS NULL`, which the admin workflows list's in-progress count reads
 ([0032](decisions/0032-admin-workflows-list.md)); `0029` adds `uq_workflow_versions_one_draft`, a
 partial unique index on `workflow_versions (workflow_id)` where `status = 'draft'`, which limits a
-family to one draft ([0034](decisions/0034-admin-authored-workflow-drafts.md)). The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
+family to one draft ([0034](decisions/0034-admin-authored-workflow-drafts.md)); `0030` creates
+`workflow_connector_selections` with its check constraints, then adds the foreign key separately;
+`0031` adds `onboardings.pending_connector` with a check that it is `NULL` or a JSON object
+([0038](decisions/0038-runtime-connector-selection.md)). The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
 its fold: on a database created by this migration set there are no rows for it to convert —
 migrations run before the workflow publish — so it could never fire. The project is greenfield with
 no deployed data, so no other backfill runs either. The sequence's gaps — every number from `0001`
-to `0029` other than the eleven that survive — are permanent: nothing deployed has run a migration,
+to `0031` other than the thirteen that survive — are permanent: nothing deployed has run a migration,
 so a table or column no longer wanted in its incremental shape loses that step in place instead of
 gaining a second migration to converge to it. Local stacks are the one place the incremental set
 did run: a Compose volume created before the fold has a `migrations` table that already lists the
@@ -2063,10 +2620,13 @@ cannot express:
   sweep.
 
 Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_CONNECTOR_TIMEOUT_MS`,
-`TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`: 100–30000).
+`TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`, `VERIFF_TIMEOUT_MS`: 100–30000).
 `SUMSUB_BASE_URL` (default `https://api.sumsub.com`) and `SUMSUB_TIMEOUT_MS` are deployment
 settings on `AppConfig`, not credentials — `sumsub_kyc`'s `appToken`/`secretKey` are DB-backed
-like every other adapter's `settingsSchema` (§4).
+like every other adapter's `settingsSchema` (§4). So are `VERIFF_BASE_URL` (default
+`https://stationapi.veriff.com`, the same host for test and live — the API key decides the mode)
+and `VERIFF_TIMEOUT_MS` (default 10000, as Sumsub's); `veriff_kyc`'s `apiKey`/`sharedSecretKey` are
+DB-backed.
 
 **No connector credential is declared in `AppConfig` any more.** `TWILIO_ACCOUNT_SID`,
 `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY`, `SENDGRID_FROM`,
@@ -2097,12 +2657,13 @@ values; it renders them into the panel's `/config.js` (§12).
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GET    | `/v1/health/live`                                                                                                                                                                                                                                                                                                                                                                                                           |
 | POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                                                                                                                                                                                                                                                                   |
-| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`, `agreementStatus` (`current` \| `outdated` \| `not_accepted`)                                                                                                                                                                                                                                                         |
+| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`, `agreementStatus` (`current` \| `outdated` \| `not_accepted`), `parked` (`true` \| `false`), `pendingConnectorId`, `parkedBefore` (ISO-8601, against the park's `parkedAt`)                                                                                                                                           |
 | GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                                                                                                                                                                                                                                                                 |
 | GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                                                                                                                                                                                                                                                               |
 | GET    | `/v1/onboardings/:id/state`                                                                                                                                                                                                                                                                                                                                                                                                 |
 | POST   | `/v1/onboardings/:id/submit`                                                                                                                                                                                                                                                                                                                                                                                                |
 | POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                                                                                                                                                                                                                                                        |
+| POST   | `/v1/onboardings/:id/pending-connector/reconcile` — admin; reads a parked connector's verdict back from its provider and applies it through the submit path (§5); `200 { outcome: applied \| still_pending \| superseded, onboarding }`, nothing is created                                                                                                                                                                 |
 | POST   | `/v1/onboardings/:id/documents`                                                                                                                                                                                                                                                                                                                                                                                             |
 | POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                                                                                                                                                                                                                                                        |
 | GET    | `/v1/onboardings/:id/agreements` — accepted-versus-latest per family, ordered by `key`                                                                                                                                                                                                                                                                                                                                      |
@@ -2120,6 +2681,8 @@ values; it renders them into the panel's `/config.js` (§12).
 | GET    | `/v1/admin/workflows/:workflowId/versions/:version/document` — the draft summary plus the stored `document` verbatim; `409 WORKFLOW_VERSION_NOT_DRAFT` for a `published` or `retired` version                                                                                                                                                                                                                               |
 | PUT    | `/v1/admin/workflows/:workflowId/versions/:version` — replaces a draft with the raw document in the body, which may change its `id` and `version`; `200` with the draft summary; `409` `WORKFLOW_VERSION_NOT_DRAFT`, `WORKFLOW_DRAFT_IN_USE` and the three create codes                                                                                                                                                     |
 | DELETE | `/v1/admin/workflows/:workflowId/versions/:version` — deletes a draft; `204`; `409 WORKFLOW_VERSION_NOT_DRAFT` or `WORKFLOW_DRAFT_IN_USE`                                                                                                                                                                                                                                                                                   |
+| PUT    | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — body `{ connectorId }`, binds the step's single connector slot to that adapter in every version of the family (§2); `200` with the slot's connector projection from the highest published version                                                                                                                                                             |
+| DELETE | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — removes the selection, back to the authored connector; `204`, also when none existed                                                                                                                                                                                                                                                                          |
 | GET    | `/v1/admin/step-types` — the step-type palette: type, category, `composable`, `configSchema`                                                                                                                                                                                                                                                                                                                                |
 | GET    | `/v1/admin/step-types/schema` — the workflow JSON Schema as the engine applies it                                                                                                                                                                                                                                                                                                                                           |
 | GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                                                                                                                                                                                                                                                                      |
@@ -2166,18 +2729,19 @@ enum:
 
 | Code                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Status    |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                                                                                                                                                                                                                                                                   | 404       |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `WORKFLOW_STEP_NOT_FOUND` (carries `stepName`), `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                                                                                                                                                                                                                   | 404       |
 | `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                                                                                                                                                                                                                                                                                             | 400       |
-| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`)                                                                                                                                                                                                                                                                                                                                                                      | 400       |
+| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`), `WORKFLOW_CONNECTOR_SELECTION_INVALID` (carries `reason` — the table in §2 — `stepName`, `connectorId`, the refusing `workflowVersion` and, when there is one, `detail`)                                                                                                                                                                                            | 400       |
 | `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`), `WORKFLOW_VERSION_EXISTS` (carries `workflowId` and `version`), `WORKFLOW_DRAFT_EXISTS` (carries `workflowId` and `draftVersion`), `WORKFLOW_SCOPE_CONFLICT` (carries `workflowId` and `scope`), `WORKFLOW_DRAFT_IN_USE` (carries `workflowId` and `version`), `WORKFLOW_VERSION_NOT_DRAFT` (carries `workflowId`, `version` and `status`), `WORKFLOW_VERSION_NOT_PUBLISHED` (carries `workflowId` and `version`; reached by no route yet) | 409       |
 | `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser)                                                                                                                                                                                                                                                                    | 409       |
+| `ONBOARDING_AWAITING_CONNECTOR` — a client submit while the row is parked; carries `pendingConnector` (`connectorId`, `connectorName`, `connectorOrder`, never the provider reference) (§3); `ONBOARDING_NOT_AWAITING_CONNECTOR` — a reconcile of a row with no park; `PENDING_CONNECTOR_RECONCILE_UNSUPPORTED` — carries `connectorId` and `reason` (`adapter` \| `reference_missing`) (§5)                                                                                                                                 | 409       |
 | `ENCRYPTION_DISABLED` — `POST /v1/admin/encryption/keys` or `PATCH /v1/admin/encryption/rotation` while encryption is turned off; `ENCRYPTION_KEY_RING_CONFLICT` — two rotations at the same instant (the `uq_encryption_keys_active` loser); two operators turning encryption on at once is not a conflict, the loser is answered with the resulting state                                                                                                                                                                  | 409       |
 | `ENCRYPTION_KEY_NOT_CONFIGURED` — turning encryption on or rotating from a process with no `ENCRYPTION_KEY`                                                                                                                                                                                                                                                                                                                                                                                                                  | 503       |
 | `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                                                                                                                                                                                                                                                                                       | 400       |
 | `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                                                                                                                                                                                             | 401 / 503 |
 | `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 410       |
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                                                                                                                                                                                      | 503       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                                            | 500       |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                      | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
@@ -2292,7 +2856,7 @@ guard before the handler, and an error that is not an `HttpException` escaping i
 envelope; a status both can produce is documented as either. The submit and provider-callback
 routes list `frameworkError(500, …)` beside their coded `500`s for the second reason:
 `WorkflowConnectorExecutorService` re-throws the adapter's own error on `propagate` (§11), and the
-built-in `http_request` and Sumsub adapters raise plain `Error` subclasses, which Nest answers
+built-in `http_request` and KYC adapters raise plain `Error` subclasses, which Nest answers
 without a `code`.
 
 **Generation needs no infrastructure.** `testing/create-openapi-app.ts` compiles `AppModule` through
@@ -2381,7 +2945,15 @@ the Figma mocks, which draw both as a search box in the header band: the header 
 commit path, bypassing the panel's draft and committing straight to the URL on Enter, so it was
 moved into the grid to leave every criterion sharing one commit path — Apply. `SearchInput` remains
 in the codebase with no caller, kept deliberately as a parked capability for a future header
-search.
+search. Three further cells narrow the list to onboardings parked on a connector: a **Parked**
+checkbox ("Parked on a connector", `parked=true` — unticked means no criterion, never
+`parked=false`, like the Workflows page's draft filter), a **Pending connector** text field
+(`pendingConnectorId`, held to the engine's connector-id shape and 100 characters) and a **Parked
+before** bound (`parkedBefore`) picked from the same `DateTimePickerField` calendar the Logs window
+uses, with the operator's IANA zone noted beneath it. The bound is carried in the URL as the
+calendar's local wall-clock value, as `occurredFrom`/`occurredTo` are, and resolved to the ISO
+instant the engine compares against only in `useAdminOnboardings`' `toQueryFilters`; an onboarding
+parked before the engine began stamping `parkedAt` never matches it.
 
 Because a tab click commits by navigating, which
 changes the URL without remounting the page, `status` is deliberately **not** part of the filter
@@ -2423,9 +2995,12 @@ single key's parser can express — `occurredFrom <= occurredTo` — is plain Ty
 `filter-audit-events.ts`, read two ways: `findOccurredWindowError` gives `AuditPage` the message it
 shows inline and refuses to Apply on, and `toAuditEventQueryFilters` drops a window it refuses back
 to absent, so a URL stating a backwards one narrows nothing by it while every other criterion still
-applies. Onboardings has no cross-field rule — `isRequestableWorkflowVersion` is a single-control
-predicate `OnboardingsPage` blocks Apply on, sharing `isValidWorkflowVersion` with the URL's own
-`workflowVersion` parser so the two cannot disagree. Absence has one representation throughout,
+applies. Onboardings has no cross-field rule, only three single-control predicates —
+`isRequestableWorkflowVersion`, `isRequestableConnectorId` and `isRequestableParkedBefore` — folded
+by `findDraftError` into the one refused field and message `OnboardingsPage` blocks Apply on and
+the panel's single message element (`#onboarding-filters-error`) describes; each shares its
+validity check (`isValidWorkflowVersion`, `isValidConnectorId`, `toIsoInstant`) with the URL's own
+parser for that key, so a control and the URL cannot disagree about what is requestable. Absence has one representation throughout,
 `null`: a criterion the URL omits, states blank, or states unparseably reads as `null` and stays
 `null` into the axios `params`, which drops it — axios would send `''` as a bare `key=`, so blank
 has to resolve to absent at the boundary rather than be filtered out downstream. Zod plays no part
@@ -2455,14 +3030,28 @@ version this onboarding is pinned to (the `version` param is declared once in
 `src/lib/workflow-search-params.ts` and spread into the details page's parsers) — and the
 action cluster, Approve / Reject / Mark invalid (`OnboardingReviewActions`, gated on the pinned
 workflow definition's current step — [0021](decisions/0021-admin-panel-issues-manual-review-decisions.md))
-plus a Reload icon button. A review decision invalidates the onboarding's detail (transitions
+plus a Reload icon button. While the summary carries a `pendingConnector` — the engine's record of
+the connector the onboarding is parked on, `null` otherwise and also `null` from an engine build
+that predates the field — the cluster leads with **Check provider** (`OnboardingReconcileAction`),
+which posts `POST /v1/onboardings/:id/pending-connector/reconcile` through
+`useOnboardingReconcile`. The engine answers with the summary as it now stands, so the hook writes
+it straight into the detail query with `setQueryData` rather than re-reading it, then invalidates
+the transitions, the onboardings list and the audit trail (every outcome writes an audit row); the
+toast names the outcome — `applied` "Verdict applied." and `superseded` "Onboarding moved on." as
+success, `still_pending` "Provider has not decided yet." as a progress toast, since the provider is
+still working. A refusal raises the error toast with the message, and a 409 — no longer parked, or
+an adapter that cannot reconcile — invalidates the detail, list and trail like a review decision
+does. A review decision and a provider check both move the same onboarding, so the header holds
+every action and Reload while either is in flight. A review decision invalidates the onboarding's detail (transitions
 included), the onboardings list and the audit trail, on success (through
 `onboardingMutations.review`'s meta) and on a 409 (in the hook, from the same
 `reviewInvalidationKeys`) only; nothing is
 removed from the cache, so a list or Logs page no longer on screen keeps its rows, marked
 invalidated, and is refetched when it next mounts; Reload stays disabled while
 a decision is in flight. Beneath it, `OnboardingRunMeta` is a `MetaStrip` of Started, Last update,
-an amber-highlighted `In <step>` while one is current, Total and Expires, each read from
+an amber-highlighted `In <step>` while one is current, `Parked on <connector name>` with how long
+it has waited (from `parkedAt`, or from `updatedAt` for a park the engine recorded before it
+stamped the instant) while a `pendingConnector` is set, Total and Expires, each read from
 `createdAt`, `updatedAt`, the most recent transition and `completedAt`/`expiresAt`; an item with no
 value — no current step, no expiry — is omitted rather than shown as a placeholder. A
 `?tab=history|scores` strip (`utils/details-search-params.ts`, `nuqs`, 0018) switches between
@@ -2506,12 +3095,14 @@ and pager.
 The tab strip sits over `resourceType`, not the design's `API calls / Connector calls / Webhooks /
 Operator actions` action families: the engine matches `action` exactly — confirmed against the
 running engine, `?action=connector` returns 0 rows — so an action family has no query parameter
-behind it. The five tabs (`AUDIT_RESOURCE_TYPES` in `src/api/audit/audit-events.ts`:
-Onboardings, Webhook outbox, Callbacks, Connector settings, Admin API) plus **All** are the real
+behind it. The six tabs (`AUDIT_RESOURCE_TYPES` in `src/api/audit/audit-events.ts`:
+Onboardings, Webhook outbox, Callbacks, Connector settings, Admin API, Workflows) plus **All** are the real
 `resourceType` values, each a link carrying the committed criteria with `resourceType` set and the
 page reset, exactly as the Onboardings status tabs work above. A count is shown on the active tab
 only, taken from `pagination.total` — there is no per-resource-type count endpoint, so an inactive
-tab carries no number rather than a stale or fabricated one.
+tab carries no number rather than a stale or fabricated one. The Workflows tab is the `workflow`
+resource type the engine files connector selections under (§8), and `AuditResourceCell` links such a
+row's resource id to the workflow's details page.
 
 `resourceId` is the filter grid's first cell, labelled **Resource ID**. The design's header
 search placeholder reads `Action, resource ID, correlation ID`, but that names two separate
@@ -2638,7 +3229,21 @@ area scrolls as a whole. App-wide, the `--font-display` and `--font-body` stacks
 `tailwind.css` name `Inter Tight Variable` ahead of `Inter Tight`, the family the self-hosted
 variable font registers. The inspector beside it shows the selected step's fields,
 connectors (identity and field mapping) and outgoing transitions. It deliberately omits connector
-`config` and a View JSON action. Import JSON, Fork, every publish, retire or scheduling action and
+`config` and a View JSON action. Its one editing control is the connector binding. For a step's
+primary connector `StepConnectors` renders a native `<select>` of `selectableIds` — only when more
+than one adapter can serve the slot — showing the effective `id`, with `(authored)` after the id the
+document wrote, disabled while a write is in flight. Changing it calls
+`PUT /v1/admin/workflows/{id}/steps/{step}/connector` (§11) through `workflowMutations.selectConnector`,
+whose meta awaits every read of the family, so the outcome resolves once the new slot is on
+screen; the card shows "Applies to every version of this workflow. Onboardings already waiting on the previous
+connector finish with it." While `selected` is true a quiet "Use authored connector" button calls
+the `DELETE` (`workflowMutations.clearConnector`, same meta). Each outcome is a toast (Toasts, below): "Connector set to {id}" or "Authored connector
+restored", and "Unable to change connector" reading `Version N refused: …`
+(`describeConnectorSelectionError`), where `N` is the `workflowVersion` the engine named and the
+rest is the engine's `detail` when it sent one — it names the missing field or the offending config
+key — else the panel's sentence for the `reason`, one per reason the engine declares, else the
+engine's own message for a reason this build does not know. The "→ Global settings" link keeps the
+effective id. Import JSON, Fork, every publish, retire or scheduling action and
 the visual canvas the design draws are dropped; the design's "24 workflows" count beside the filter
 actions is dropped too, since the footer's "Showing x–y of n" already states it.
 
@@ -2902,8 +3507,9 @@ Decisions worth keeping:
   (teal tile, black `check`, 5 s), error (red tile, white `priority_high`, 10 s, carries a
   description) and progress (`tsh-blue-300` tile, black `sync`, 5 s like success, announced politely like
   success) — progress marks a write the engine has accepted but finishes later in the background.
-  A connector save or clear, and each of Approve / Reject / Mark invalid, raises exactly one toast
-  on completion. The Encryption page's toggle and re-encrypt each raise a progress toast the
+  A connector save or clear, each of Approve / Reject / Mark invalid, and a provider check raise
+  exactly one toast on completion — the check's a progress toast when the provider has not decided
+  yet, success otherwise. The Encryption page's toggle and re-encrypt each raise a progress toast the
   instant the engine accepts the write, then a second, success toast once the route's own
   `useSettledChangeToast` hook sees `isEncryptionChangeInFlight` turn `false` for that write —
   never for a change settling with no pending write started from this page, and not once the page

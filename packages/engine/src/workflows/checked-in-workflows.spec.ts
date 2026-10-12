@@ -7,12 +7,35 @@ import type {
   RawWorkflowDefinition,
 } from '@tsh/ddl-schema';
 import { parseHttpConnectorConfig } from '../connectors/adapters/built-in/http-request/http-request-config';
+import { parseKycConfig } from '../connectors/adapters/built-in/kyc/kyc-config';
 import { parseSumsubConfig } from '../connectors/adapters/built-in/sumsub-kyc/sumsub-config';
+import type { ConnectorAdapterSummary } from '../connectors/ports/connector-execution.port';
 import {
   BUILT_IN_WORKFLOWS_DIR,
   DEFAULT_USER_WORKFLOWS_DIR,
   FIXTURE_WORKFLOWS_DIR,
 } from './workflow-roots';
+import { WorkflowRegistryService } from './workflow-registry.service';
+
+const KYC_CALLBACK_FIELDS = ['kycOutcome', 'kycRetryStep', 'kycReasonCodes', 'kycCustomerMessage'];
+
+/** What the two KYC adapters declare: Veriff does not count attempts, so the kernel does. */
+const KYC_ADAPTERS: readonly ConnectorAdapterSummary[] = [
+  {
+    id: 'sumsub_kyc',
+    type: 'kyc',
+    supportsAsyncCallback: true,
+    scope: 'built-in',
+    callbackFields: KYC_CALLBACK_FIELDS,
+  },
+  {
+    id: 'veriff_kyc',
+    type: 'kyc',
+    supportsAsyncCallback: true,
+    scope: 'built-in',
+    callbackFields: [...KYC_CALLBACK_FIELDS, 'kycAttemptCount'],
+  },
+];
 
 type CheckedInWorkflow = {
   readonly file: string;
@@ -38,8 +61,10 @@ const CUSTOM_STEP_TYPE = 'custom';
 /**
  * Every fixture that compiles to exactly the steps its `custom` twin does. The others differ on
  * purpose and say how: `conditional-fields-and-transitions` gains the stray-submit arm every
- * `manual-review` step emits, `twilio-verify` gains the re-send path, and `scoring` and `sumsub-kyc`
- * collect through specialized steps whose fields are shaped by the step rather than by hand.
+ * `manual-review` step emits, `twilio-verify` gains the re-send path, and `scoring`, `sumsub-kyc` and
+ * `veriff-kyc` collect through specialized steps whose fields are shaped by the step rather than by
+ * hand — and, for the first two, the specialized form also declares the `kycAttemptCount` callback
+ * field that the hand-written form predates.
  */
 const IDENTICAL_PAIRS = [
   'base',
@@ -83,6 +108,36 @@ describe('checked-in workflows', () => {
     }
   });
 
+  it('declare every callback field their async KYC adapter emits, so either provider can be selected', () => {
+    const registry = new WorkflowRegistryService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { execute: jest.fn(), resume: jest.fn(), listAdapters: () => KYC_ADAPTERS },
+    );
+
+    for (const workflow of everything) {
+      expect(() => registry.normalizeDefinition(workflow.authored as never)).not.toThrow();
+    }
+  });
+
+  it('ships every Veriff declaration with the keys Sumsub needs, so the family can be switched back', () => {
+    // The keys are inert for Veriff, which ignores `providerConfig`; dropping them would make the
+    // selection rules refuse `sumsub_kyc` on the shipped family as `declaration_invalid`.
+    const veriffDeclarations = [...builtIn, ...users].flatMap((workflow) =>
+      everyConnector(workflow.normalized)
+        .map(({ connector }) => connector)
+        .filter((connector) => connector.id === 'veriff_kyc'),
+    );
+
+    expect(veriffDeclarations.length).toBeGreaterThan(0);
+    for (const declaration of veriffDeclarations) {
+      expect(() => parseSumsubConfig(declaration.config)).not.toThrow();
+    }
+  });
+
   it('declares every id in exactly one scope directory', () => {
     const scopesById = new Map<string, Set<string>>();
 
@@ -113,8 +168,11 @@ describe('checked-in workflows', () => {
     (_file, workflow) => {
       for (const { stepName, connector } of everyConnector(workflow.normalized)) {
         for (const declaration of [connector, ...connector.fallbacks]) {
-          if (declaration.id === 'sumsub_kyc') {
-            const config = parseSumsubConfig(declaration.config);
+          if (declaration.id === 'sumsub_kyc' || declaration.id === 'veriff_kyc') {
+            const config =
+              declaration.id === 'sumsub_kyc'
+                ? parseSumsubConfig(declaration.config)
+                : parseKycConfig(declaration.id, declaration.config);
             const mapped = { ...declaration.fieldMapping, ...declaration.optionalFieldMapping };
 
             for (const document of config.documents) {
@@ -168,6 +226,22 @@ describe('checked-in workflows', () => {
         stripIdentity(byId.get(id)!.normalized),
       );
     });
+
+    it.each([
+      ['scoring', false],
+      ['sumsub-kyc', false],
+      ['veriff-kyc', true],
+    ])(
+      '%s declares the kycAttemptCount callback field in the custom form: %s',
+      (id, declaredByCustom) => {
+        const callbackFields = (workflowId: string): string[] =>
+          Object.keys(byId.get(workflowId)!.normalized.stepsByName.submit_kyc.data);
+
+        // The custom Sumsub files predate the field; the specialized step type always emits it.
+        expect(callbackFields(id).includes('kycAttemptCount')).toBe(declaredByCustom);
+        expect(callbackFields(`${id}${TYPED_SUFFIX}`)).toContain('kycAttemptCount');
+      },
+    );
 
     it('lets a manual review declare no invalid outcome, exactly as its custom twin does', () => {
       const custom = byId.get('conditional-fields-and-transitions')!.normalized;
@@ -232,7 +306,7 @@ describe('checked-in workflows', () => {
       ]);
     });
 
-    it('claims a source key of its own for every typed Sumsub twin', () => {
+    it('claims a source key of its own for every typed twin, whichever provider it binds', () => {
       const sourceKeys = fixtures.flatMap((workflow) =>
         everyConnector(workflow.normalized)
           .map(({ connector }) => connector.config.sourceKey)

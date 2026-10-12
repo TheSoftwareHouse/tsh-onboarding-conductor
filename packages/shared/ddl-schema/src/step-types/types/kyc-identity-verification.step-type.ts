@@ -11,6 +11,7 @@ import {
   connectorBindingSchema,
   mergeDerivedWithExtras,
   readConnectorBinding,
+  readOptionalString,
   readPositiveInteger,
   readString,
   type StepConnectorBinding,
@@ -31,7 +32,7 @@ import type {
 /**
  * The callback fields the parked step must declare. The engine re-submits the provider's callback
  * body through the step that parked, so an undeclared key is an `UNKNOWN` field error that loses
- * the verdict — the step owns all four rather than trusting an author to remember them.
+ * the verdict — the step owns all five rather than trusting an author to remember them.
  *
  * Because field names are unique across a whole document, only one step can declare this set, so a
  * document holds at most one of these steps. The adapter emits these exact keys, so the limit
@@ -39,6 +40,7 @@ import type {
  */
 export const KYC_OUTCOME_FIELD = 'kycOutcome';
 export const KYC_RETRY_STEP_FIELD = 'kycRetryStep';
+export const KYC_ATTEMPT_COUNT_FIELD = 'kycAttemptCount';
 const KYC_REASON_CODES_FIELD = 'kycReasonCodes';
 const KYC_CUSTOMER_MESSAGE_FIELD = 'kycCustomerMessage';
 
@@ -62,6 +64,9 @@ const KYC_APPLICANT_ROLES: readonly CanonicalFieldRole[] = [
  * The slot: an identity check is served by a `kyc` adapter and nothing else. The author may add
  * payload keys and adapter config beside what the step derives — a provider option the step does
  * not know about, an extra attribute the level accepts — but may not override a derived one.
+ * `levelName` and `questionnaireDefinitionId` are Sumsub-specific and optional on the step; going
+ * forward provider-specific keys belong under `connector.config`. A key both derived and added is
+ * still refused.
  */
 const KYC_CONNECTOR_SLOT: StepConnectorSlot = { types: ['kyc'], extras: 'all' };
 
@@ -74,9 +79,9 @@ export const buildRetryPort = (target: KycRetryTarget): string => `retry.${targe
 
 export type KycIdentityVerificationStepConfig = {
   readonly connector: StepConnectorBinding;
-  readonly levelName: string;
+  readonly levelName?: string;
   readonly sourceKey: string;
-  readonly questionnaireDefinitionId: string;
+  readonly questionnaireDefinitionId?: string;
   readonly maxAttemptsPerDocSet: number;
 };
 
@@ -137,13 +142,7 @@ export const kycIdentityVerificationStepTypeDefinition = {
     return {
       type: 'object',
       additionalProperties: false,
-      required: [
-        'connector',
-        'levelName',
-        'sourceKey',
-        'questionnaireDefinitionId',
-        'maxAttemptsPerDocSet',
-      ],
+      required: ['connector', 'sourceKey', 'maxAttemptsPerDocSet'],
       properties: {
         connector: connectorBindingSchema(KYC_CONNECTOR_SLOT),
         levelName: { type: 'string', minLength: 1 },
@@ -158,9 +157,9 @@ export const kycIdentityVerificationStepTypeDefinition = {
 
     return {
       connector: readConnectorBinding(source.connector, KYC_CONNECTOR_SLOT, fail),
-      levelName: readString(source.levelName, fail),
+      levelName: readOptionalString(source.levelName, fail),
       sourceKey: readString(source.sourceKey, fail),
-      questionnaireDefinitionId: readString(source.questionnaireDefinitionId, fail),
+      questionnaireDefinitionId: readOptionalString(source.questionnaireDefinitionId, fail),
       maxAttemptsPerDocSet: readPositiveInteger(source.maxAttemptsPerDocSet, fail),
     };
   },
@@ -191,6 +190,7 @@ export const kycIdentityVerificationStepTypeDefinition = {
       // Uncapped on purpose: the reviewer's comment is operator-authored free text at the provider
       // with no length guarantee, and a cap here fails the parked step's validator and loses the verdict.
       [KYC_CUSTOMER_MESSAGE_FIELD]: { type: 'text', required: false },
+      [KYC_ATTEMPT_COUNT_FIELD]: { type: 'number', required: false },
     };
   },
   compile(
@@ -233,9 +233,11 @@ export const kycIdentityVerificationStepTypeDefinition = {
     }
 
     const derivedConfig = {
-      levelName: config.levelName,
+      ...(config.levelName === undefined ? {} : { levelName: config.levelName }),
       sourceKey: config.sourceKey,
-      questionnaireDefinitionId: config.questionnaireDefinitionId,
+      ...(config.questionnaireDefinitionId === undefined
+        ? {}
+        : { questionnaireDefinitionId: config.questionnaireDefinitionId }),
       documents: documents.map((document) => document.entry),
       questionnairePathMap: Object.fromEntries(
         contract.questionnaireItems.map((item) => [item.field, item.path]),

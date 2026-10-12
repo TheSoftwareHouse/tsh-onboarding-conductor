@@ -16,7 +16,8 @@ export type CallbackSignatureOutcome = 'skipped_unsigned_connector' | 'verified'
 type CallbackAuthAdapter = Pick<ConnectorAdapter, 'callbackAuth' | 'id'>;
 
 /**
- * The `settingsSchema` key every HMAC-signing adapter stores its inbound secret under. A rotation
+ * The default `settingsSchema` key an HMAC-signing adapter stores its inbound secret under; an
+ * adapter overrides it with `secretSettingKey`. A rotation
  * window is a comma-separated list, so a provider that has begun signing with a new secret while
  * still sending some deliveries under the old one is verified against both.
  */
@@ -76,7 +77,10 @@ export class CallbackSignatureVerifier {
       return 'skipped_unsigned_connector';
     }
 
-    const secrets = await this.findSigningSecrets(adapter.id);
+    const secrets = await this.findSigningSecrets(
+      adapter.id,
+      auth.secretSettingKey ?? CALLBACK_SIGNING_SECRET_KEY,
+    );
     if (secrets.length === 0) {
       throw new CallbackSignatureInvalidException('signing_secret_missing');
     }
@@ -122,14 +126,17 @@ export class CallbackSignatureVerifier {
   }
 
   /**
-   * Reads the adapter's stored `callbackSigningSecret`. Absent means the deployment has not
+   * Reads the adapter's stored inbound secret under `settingKey`. Absent means the deployment has not
    * configured this connector yet, which `CallbackSignatureInvalidException` reports as a `503`
    * so the provider keeps retrying — never `ConnectorNotConfiguredException`, whose `503
    * CONNECTOR_NOT_CONFIGURED` belongs to the outbound path.
    */
-  private async findSigningSecrets(connectorId: string): Promise<readonly string[]> {
+  private async findSigningSecrets(
+    connectorId: string,
+    settingKey: string,
+  ): Promise<readonly string[]> {
     const settings = await this.connectorSettingsService.resolve({ id: connectorId });
-    const stored = settings.find(CALLBACK_SIGNING_SECRET_KEY);
+    const stored = settings.find(settingKey);
 
     if (stored === undefined) {
       return [];

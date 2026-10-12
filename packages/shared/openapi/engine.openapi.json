@@ -1962,6 +1962,248 @@
         ]
       }
     },
+    "/v1/admin/workflows/{workflowId}/steps/{stepName}/connector": {
+      "put": {
+        "description": "Replaces the authored primary connector's id on every stored version of the family that declares the step; config, field mapping, retry and fallbacks are untouched. The adapter is validated against each non-retired version, and the first to refuse it names itself in `workflowVersion`. Onboardings already parked on the step finish with the provider they started on. The response projects the slot from the highest published version. The write is audited under the operator the token identifies.",
+        "operationId": "selectWorkflowStepConnector",
+        "parameters": [
+          {
+            "name": "workflowId",
+            "required": true,
+            "in": "path",
+            "description": "The workflow id.",
+            "schema": {
+              "example": "eu-b2c-individual-kyc-eea",
+              "type": "string"
+            }
+          },
+          {
+            "name": "stepName",
+            "required": true,
+            "in": "path",
+            "description": "The step whose connector slot is bound.",
+            "schema": {
+              "example": "submit_kyc",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelectWorkflowConnectorRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The step connector slot after the write, with its authored and selectable ids.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowStepConnectorWithFallbacksResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`WORKFLOW_CONNECTOR_SELECTION_INVALID`: The connector cannot serve the step in at least one non-retired version; carries `stepName`, `connectorId`, the `workflowVersion` that refused it, a `reason` of `no_connector`, `multiple_connectors`, `in_fallback_chain`, `adapter_not_registered`, `fixture_not_allowed`, `type_mismatch`, `async_unsupported`, `callback_fields_missing` or `declaration_invalid`, and a `detail` when the refusal has more to say.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NestHttpError"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/ApiError"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "WORKFLOW_CONNECTOR_SELECTION_INVALID"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.\n\n`WORKFLOW_STEP_NOT_FOUND`: No non-retired version of the workflow declares a step with this name; carries `stepName`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_NOT_FOUND",
+                            "WORKFLOW_STEP_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Bind a step's connector slot to another adapter",
+        "tags": [
+          "Admin: workflows"
+        ]
+      },
+      "delete": {
+        "description": "Drops the stored binding, so every version of the family runs the connector its document authored. Clearing a step with no binding succeeds. The write is audited under the operator the token identifies.",
+        "operationId": "clearWorkflowStepConnector",
+        "parameters": [
+          {
+            "name": "workflowId",
+            "required": true,
+            "in": "path",
+            "description": "The workflow id.",
+            "schema": {
+              "example": "eu-b2c-individual-kyc-eea",
+              "type": "string"
+            }
+          },
+          {
+            "name": "stepName",
+            "required": true,
+            "in": "path",
+            "description": "The step whose binding is cleared.",
+            "schema": {
+              "example": "submit_kyc",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The step runs its authored connector."
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Return a step's connector slot to its authored adapter",
+        "tags": [
+          "Admin: workflows"
+        ]
+      }
+    },
     "/v1/admin/step-types": {
       "get": {
         "description": "Every step type a workflow may use, with its category, whether it composes into another step, the connector capabilities it accepts and the JSON Schema of its config. Ports are not listed: for several types they depend on the config.",
@@ -2625,10 +2867,10 @@
         },
         "responses": {
           "204": {
-            "description": "The result was applied to the onboarding, or had already been applied by an earlier delivery of the same callback."
+            "description": "The result was applied to the onboarding, had already been applied by an earlier delivery of the same callback, or named a park the onboarding has since left and was dropped."
           },
           "400": {
-            "description": "`ASYNC_CALLBACK_RAW_BODY_REQUIRED`: The callback arrived without a body the signature could be verified over.\n\n`ASYNC_CALLBACK_PROVIDER_KEY_INVALID`: The provider key is not made of lower-case letters, digits and underscores.\n\n`ASYNC_CALLBACK_AUTHENTICATION_FAILED`: No connector adapter that accepts callbacks is registered under this provider key.\n\n`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons, and the onboarding stays where it was.",
+            "description": "`ASYNC_CALLBACK_RAW_BODY_REQUIRED`: The callback arrived without a body the signature could be verified over.\n\n`ASYNC_CALLBACK_PROVIDER_KEY_INVALID`: The provider key is not made of lower-case letters, digits and underscores.\n\n`ASYNC_CALLBACK_AUTHENTICATION_FAILED`: No connector adapter that accepts callbacks is registered under this provider key.\n\n`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons (`UNKNOWN`, `REQUIRED`, `INVALID`, `CALLBACK_ONLY`, or a connector's own), and the onboarding stays where it was.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2758,7 +3000,7 @@
             }
           },
           "500": {
-            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, or a Sumsub level or credential that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
+            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2780,6 +3022,7 @@
                                 "TWILIO_VERIFY_UNAVAILABLE",
                                 "SENDGRID_EMAIL_UNAVAILABLE",
                                 "SUMSUB_UNAVAILABLE",
+                                "VERIFF_UNAVAILABLE",
                                 "CLIENT_WEBHOOK_DELIVERY_FAILED"
                               ]
                             }
@@ -3001,6 +3244,35 @@
             "schema": {
               "$ref": "#/components/schemas/OnboardingAgreementStatus"
             }
+          },
+          {
+            "name": "parked",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings parked on an asynchronous connector (`true`), or only those not parked (`false`).",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "pendingConnectorId",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings parked on this connector id.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "parkedBefore",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings parked before this instant, by the park time the engine recorded. A row parked before that time was recorded never matches.",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3084,7 +3356,7 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "The current step's data: exactly the fields `GET /v1/onboardings/{id}/state` lists as active, validated against its `step.schema`. There is no fixed shape; the workflow decides, so the body is passed to the step validator untouched and an unknown field is refused rather than dropped.",
+          "description": "The current step's data: exactly the fields `GET /v1/onboardings/{id}/state` lists as active, validated against its `step.schema`. There is no fixed shape; the workflow decides, so the body is passed to the step validator untouched and an unknown field is refused rather than dropped. A field an asynchronous connector writes on its callback (a KYC verdict, its attempt count) is refused as `CALLBACK_ONLY`: only the provider decides it.",
           "content": {
             "application/json": {
               "schema": {
@@ -3106,7 +3378,7 @@
             }
           },
           "400": {
-            "description": "`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons, and the onboarding stays where it was.",
+            "description": "`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons (`UNKNOWN`, `REQUIRED`, `INVALID`, `CALLBACK_ONLY`, or a connector's own), and the onboarding stays where it was.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3157,7 +3429,7 @@
             }
           },
           "409": {
-            "description": "`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
+            "description": "`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`ONBOARDING_AWAITING_CONNECTOR`: The onboarding is parked on an asynchronous connector and accepts no client submit until its callback, or an operator reconcile, decides the step; `pendingConnector` names the connector. Poll the state rather than resubmitting: a resubmit would open a second provider attempt.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3172,6 +3444,7 @@
                           "type": "string",
                           "enum": [
                             "ONBOARDING_COMPLETED",
+                            "ONBOARDING_AWAITING_CONNECTOR",
                             "UNKNOWN_WORKFLOW_EVALUATION"
                           ]
                         }
@@ -3208,7 +3481,7 @@
             }
           },
           "500": {
-            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, or a Sumsub level or credential that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
+            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3230,6 +3503,7 @@
                                 "TWILIO_VERIFY_UNAVAILABLE",
                                 "SENDGRID_EMAIL_UNAVAILABLE",
                                 "SUMSUB_UNAVAILABLE",
+                                "VERIFF_UNAVAILABLE",
                                 "CLIENT_WEBHOOK_DELIVERY_FAILED"
                               ]
                             }
@@ -4201,6 +4475,215 @@
         ]
       }
     },
+    "/v1/onboardings/{id}/pending-connector/reconcile": {
+      "post": {
+        "description": "For an onboarding parked on an asynchronous connector whose callback has not arrived: asks the provider for the verdict it holds and, when there is one, applies it exactly as the callback would have been — same lock, same transition, same client notification. `still_pending` means the provider has not decided and nothing changed; `superseded` means the onboarding left that park between the read and the apply. Every outcome is written to the audit trail under the operator who asked.",
+        "operationId": "reconcileOnboardingPendingConnector",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the reconcile did, and the onboarding as it now stands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconcilePendingConnectorResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons (`UNKNOWN`, `REQUIRED`, `INVALID`, `CALLBACK_ONLY`, or a connector's own), and the onboarding stays where it was.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVALID_STEP_DATA"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_FOUND",
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ONBOARDING_NOT_AWAITING_CONNECTOR`: The onboarding is not parked on a connector, so there is no provider attempt to read back.\n\n`PENDING_CONNECTOR_RECONCILE_UNSUPPORTED`: The parked connector cannot be reconciled: its adapter offers no read-back from the provider (`reason: adapter`), or the park records no provider attempt to read (`reason: reference_missing`). Wait for the callback, or review the onboarding by hand.\n\n`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_AWAITING_CONNECTOR",
+                            "PENDING_CONNECTOR_RECONCILE_UNSUPPORTED",
+                            "ONBOARDING_COMPLETED",
+                            "UNKNOWN_WORKFLOW_EVALUATION"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_RETIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.\n\n`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NestHttpError"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/ApiError"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "CLIENT_WEBHOOK_DELIVERY_FAILED",
+                                "TWILIO_VERIFY_UNAVAILABLE",
+                                "SENDGRID_EMAIL_UNAVAILABLE",
+                                "SUMSUB_UNAVAILABLE",
+                                "VERIFF_UNAVAILABLE"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.\n\n`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Read a parked connector's verdict back from its provider",
+        "tags": [
+          "Admin: onboardings"
+        ]
+      }
+    },
     "/v1/onboardings/{id}": {
       "get": {
         "description": "One onboarding as the list reports it, without its collected data.",
@@ -4333,7 +4816,7 @@
     },
     {
       "name": "Admin: workflows",
-      "description": "The workflow catalogue as a reader sees it, and a dry compile of a document that stores nothing. Requires an operator bearer token."
+      "description": "The workflow catalogue as a reader sees it, a dry compile of a document that stores nothing, and the write that binds a step's connector slot to another adapter. Requires an operator bearer token."
     },
     {
       "name": "Admin: step types",
@@ -5218,6 +5701,26 @@
             },
             "description": "Optional connector inputs, mapped to the context field that fills each."
           },
+          "authoredId": {
+            "type": "string",
+            "description": "The connector id the workflow document authored. Differs from `id` while an operator selection is in force.",
+            "example": "sumsub_kyc"
+          },
+          "selected": {
+            "type": "boolean",
+            "description": "True when an operator selection replaces the authored connector on this step, in every stored version of the workflow that has the step."
+          },
+          "selectableIds": {
+            "description": "The connector ids a selection on this step would be accepted with, for this version, sorted: the authored and effective ids, plus every registered connector that passes the same rules the write applies — same `type`, callback-capable for an asynchronous step, every one of its callback fields declared by the step, its own declaration rules satisfied, and not already a fallback here. Empty when the step declares no connector or more than one, since no selection can address it.",
+            "example": [
+              "sumsub_kyc",
+              "veriff_kyc"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "fallbacks": {
             "description": "The chain behind this connector, in declared order.",
             "type": "array",
@@ -5235,6 +5738,9 @@
           "async",
           "fieldMapping",
           "optionalFieldMapping",
+          "authoredId",
+          "selected",
+          "selectableIds",
           "fallbacks"
         ]
       },
@@ -5658,6 +6164,20 @@
           "createdAt",
           "updatedAt",
           "document"
+        ]
+      },
+      "SelectWorkflowConnectorRequestDto": {
+        "type": "object",
+        "properties": {
+          "connectorId": {
+            "type": "string",
+            "description": "The id of a registered connector adapter that can serve the step's connector slot.",
+            "example": "veriff_kyc",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "connectorId"
         ]
       },
       "StepTypeResponseDto": {
@@ -6347,6 +6867,37 @@
         ],
         "description": "Where an onboarding stands on an agreement family, or on every family it holds: `not_accepted` while there is no accepted version, `outdated` when there is one but a newer version has been published, `current` otherwise. Derived, never stored."
       },
+      "AdminOnboardingPendingConnectorResponseDto": {
+        "type": "object",
+        "properties": {
+          "connectorId": {
+            "type": "string",
+            "description": "The id of the connector the onboarding is waiting on."
+          },
+          "connectorName": {
+            "type": "string",
+            "description": "The name the workflow step gives that connector declaration."
+          },
+          "connectorOrder": {
+            "type": "integer",
+            "description": "The order of the connector slot on the step the connector was parked in."
+          },
+          "parkedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the onboarding was first parked on this connector; null for a row parked before the engine recorded it."
+          }
+        },
+        "required": [
+          "connectorId",
+          "connectorName",
+          "connectorOrder",
+          "parkedAt"
+        ]
+      },
       "AdminOnboardingSummaryResponseDto": {
         "type": "object",
         "properties": {
@@ -6430,6 +6981,22 @@
                 "$ref": "#/components/schemas/OnboardingAgreementStatus"
               }
             ]
+          },
+          "pendingConnector": {
+            "description": "The connector the onboarding is parked on awaiting a callback; null when it is not waiting for one, and for onboardings parked before this was recorded.",
+            "oneOf": [
+              {
+                "type": "object",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/AdminOnboardingPendingConnectorResponseDto"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6444,7 +7011,8 @@
           "completedAt",
           "rejectionReason",
           "scores",
-          "agreementStatus"
+          "agreementStatus",
+          "pendingConnector"
         ]
       },
       "ListAdminOnboardingsResponseDto": {
@@ -6683,6 +7251,40 @@
           "key",
           "version",
           "created"
+        ]
+      },
+      "PendingConnectorReconcileOutcome": {
+        "type": "string",
+        "enum": [
+          "applied",
+          "still_pending",
+          "superseded"
+        ],
+        "description": "What an operator reconcile did: `applied` moved the onboarding with the verdict the provider holds, `still_pending` found the provider undecided and changed nothing, `superseded` found the onboarding no longer parked on that attempt and changed nothing."
+      },
+      "ReconcilePendingConnectorResponseDto": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "description": "What an operator reconcile did: `applied` moved the onboarding with the verdict the provider holds, `still_pending` found the provider undecided and changed nothing, `superseded` found the onboarding no longer parked on that attempt and changed nothing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingConnectorReconcileOutcome"
+              }
+            ]
+          },
+          "onboarding": {
+            "description": "The onboarding record after the reconcile, as the admin list reports it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminOnboardingSummaryResponseDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "outcome",
+          "onboarding"
         ]
       },
       "ApiError": {
@@ -9553,9 +10155,7 @@
                   "additionalProperties": false,
                   "required": [
                     "connector",
-                    "levelName",
                     "sourceKey",
-                    "questionnaireDefinitionId",
                     "maxAttemptsPerDocSet"
                   ],
                   "properties": {

@@ -17,6 +17,7 @@ const RECORD: AdminOnboardingSummary = {
   updatedAt: '2026-09-02T09:14:00.000Z',
   completedAt: null,
   scores: {},
+  pendingConnector: null,
 };
 
 function renderRow(initialPath: string): void {

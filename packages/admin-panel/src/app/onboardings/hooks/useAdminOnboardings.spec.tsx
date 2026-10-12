@@ -35,6 +35,7 @@ const RECORD_ONE: AdminOnboardingSummary = {
   updatedAt: '2026-07-02T00:00:00.000Z',
   completedAt: null,
   scores: {},
+  pendingConnector: null,
 };
 
 function page(
@@ -116,7 +117,28 @@ describe('useAdminOnboardings', () => {
       'workflowVersion',
       'currentStep',
       'onboardingId',
+      'parked',
+      'pendingConnectorId',
+      'parkedBefore',
     ]);
+  });
+
+  it('resolves the committed parked-before bound to the instant the engine compares against', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/onboardings?parked=true&parkedBefore=2026-07-01T10%3A00',
+    );
+    mockedFetchAdminOnboardings.mockResolvedValue(page([]));
+    renderHook(() => useAdminOnboardings(), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedFetchAdminOnboardings.mock.calls[0][0]).toMatchObject({
+      parked: true,
+      parkedBefore: new Date('2026-07-01T10:00').toISOString(),
+    });
   });
 
   it('invalidates the committed key, so re-applying identical criteria still refetches', async () => {
@@ -144,6 +166,9 @@ describe('useAdminOnboardings', () => {
           workflowVersion: null,
           currentStep: null,
           onboardingId: null,
+          parked: null,
+          pendingConnectorId: null,
+          parkedBefore: null,
         },
       ],
     });

@@ -4,10 +4,16 @@ import type {
   WorkflowStepConnector,
   WorkflowStepConnectorWithFallbacks,
 } from '@/api/workflows/workflow-definitions';
+import { Button } from '@/components/ui/Button/Button';
+import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { ADMIN_ROUTES } from '@/constants/routes';
+import { useConnectorSelection } from '../../hooks/useConnectorSelection';
+import { describeConnectorSelectionError } from '../../utils/describe-connector-selection-error';
 
 export interface StepConnectorsProps {
+  workflowId: string;
+  stepName: string;
   connectors: WorkflowStepConnectorWithFallbacks[];
 }
 
@@ -77,8 +83,32 @@ function MappingRows({ connector }: { connector: WorkflowStepConnector }): React
   );
 }
 
-/** One card per declared connector, in order: identity, field mapping, fallbacks and the global link. */
-export function StepConnectors({ connectors }: StepConnectorsProps): ReactElement {
+/** One card per declared connector, in order: identity, the runtime selection, field mapping, fallbacks and the global link. */
+export function StepConnectors({
+  workflowId,
+  stepName,
+  connectors,
+}: StepConnectorsProps): ReactElement {
+  const { select, clear, isPending } = useConnectorSelection(workflowId);
+
+  async function handleSelect(connectorId: string): Promise<void> {
+    const outcome = await select(stepName, connectorId);
+    if (outcome.ok) {
+      showSuccessToast(`Connector set to ${connectorId}`);
+    } else {
+      showErrorToast('Unable to change connector', describeConnectorSelectionError(outcome.error));
+    }
+  }
+
+  async function handleClear(): Promise<void> {
+    const outcome = await clear(stepName);
+    if (outcome.ok) {
+      showSuccessToast('Authored connector restored');
+    } else {
+      showErrorToast('Unable to change connector', describeConnectorSelectionError(outcome.error));
+    }
+  }
+
   return (
     <section className="flex flex-col gap-3.5 border-b border-border-hair px-6 py-5">
       <Typography variant="caps-tiny" as="h3" className="text-fg-3">
@@ -95,6 +125,42 @@ export function StepConnectors({ connectors }: StepConnectorsProps): ReactElemen
               {describeFlags(connector)}
             </span>
           </div>
+          {connector.selectableIds.length > 1 && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <select
+                  aria-label={`Connector for ${stepName}`}
+                  value={connector.id}
+                  disabled={isPending}
+                  onChange={(event) => void handleSelect(event.target.value)}
+                  className="h-10 min-w-0 flex-1 border border-border-strong bg-tsh-white px-3 font-mono text-mono text-tsh-black"
+                >
+                  {connector.selectableIds.map((id) => (
+                    <option key={id} value={id}>
+                      {id === connector.authoredId ? `${id} (authored)` : id}
+                    </option>
+                  ))}
+                </select>
+                {connector.selected && (
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    disabled={isPending}
+                    onClick={() => void handleClear()}
+                  >
+                    Use authored connector
+                  </Button>
+                )}
+              </div>
+              <Typography
+                variant="meta"
+                className="leading-natural font-normal tracking-normal text-pretty"
+              >
+                Applies to every version of this workflow. Onboardings already waiting on the
+                previous connector finish with it.
+              </Typography>
+            </div>
+          )}
           <MappingRows connector={connector} />
           {connector.fallbacks.length > 0 && (
             <div className="flex flex-col gap-1.5">

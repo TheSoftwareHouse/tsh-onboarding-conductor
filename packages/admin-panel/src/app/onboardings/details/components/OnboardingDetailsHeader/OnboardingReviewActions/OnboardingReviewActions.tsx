@@ -7,8 +7,8 @@ import { findAvailableReviewActions } from '../../../utils/manual-review-actions
 export interface OnboardingReviewActionsProps {
   definition: WorkflowDefinition | null;
   currentStep: string | null;
-  /** The action currently in flight, or null when none is. */
-  pendingAction: ManualReviewAction | null;
+  /** True while any header action is in flight, since two writes must not race on one onboarding. */
+  disabled: boolean;
   onSubmit: (action: ManualReviewAction) => void;
 }
 
@@ -28,7 +28,7 @@ const REVIEW_ACTION_VARIANT: Record<ManualReviewAction, ButtonVariant> = {
 export function OnboardingReviewActions({
   definition,
   currentStep,
-  pendingAction,
+  disabled,
   onSubmit,
 }: OnboardingReviewActionsProps): ReactElement | null {
   const availableActions = findAvailableReviewActions(definition, currentStep);
@@ -44,7 +44,7 @@ export function OnboardingReviewActions({
           key={action}
           variant={REVIEW_ACTION_VARIANT[action]}
           size="lg"
-          disabled={pendingAction !== null}
+          disabled={disabled}
           onClick={() => onSubmit(action)}
         >
           {REVIEW_ACTION_LABEL[action]}

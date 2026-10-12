@@ -40,6 +40,9 @@ function defaultQueryFilters(
     workflowVersion: null,
     currentStep: null,
     onboardingId: null,
+    parked: null,
+    pendingConnectorId: null,
+    parkedBefore: null,
     ...overrides,
   };
 }
@@ -58,6 +61,7 @@ const RECORD_ONE: AdminOnboardingSummary = {
   updatedAt: '2026-07-02T00:00:00.000Z',
   completedAt: null,
   scores: {},
+  pendingConnector: null,
 };
 
 const RECORD_TWO: AdminOnboardingSummary = {
@@ -71,6 +75,7 @@ const RECORD_TWO: AdminOnboardingSummary = {
   updatedAt: '2026-07-03T00:00:00.000Z',
   completedAt: '2026-07-04T00:00:00.000Z',
   scores: {},
+  pendingConnector: null,
 };
 
 function page(
@@ -343,7 +348,7 @@ describe('OnboardingsPage', () => {
     expect(versionInput).toHaveAttribute('aria-invalid', 'true');
     expect(
       screen.getByText('Enter a whole number greater than zero.', {
-        selector: '#workflow-version-error',
+        selector: '#onboarding-filters-error',
       }),
     ).toBeVisible();
     expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();

@@ -48,6 +48,18 @@ const workflowStepConnectorSchema = z.object({
   optionalFieldMapping: z.record(z.string(), z.string()).default({}),
 });
 
+/** The primary connector also reports the runtime selection; all three keys are absent on an older engine. */
+/** Also parses the slot the selection write answers with. */
+export const workflowPrimaryConnectorSchema = workflowStepConnectorSchema
+  .extend({
+    // What the document declares; `id` is the adapter effectively serving the slot.
+    authoredId: z.string().optional(),
+    selected: z.boolean().default(false),
+    selectableIds: z.array(z.string()).default([]),
+    fallbacks: z.array(workflowStepConnectorSchema).default([]),
+  })
+  .transform((connector) => ({ ...connector, authoredId: connector.authoredId ?? connector.id }));
+
 const workflowStepSchema = z.object({
   name: z.string().min(1),
   status: z.string().min(1),
@@ -56,13 +68,7 @@ const workflowStepSchema = z.object({
   // The new step keys are absent on an engine build that predates them.
   source: workflowStepSourceSchema.nullable().default(null),
   fields: z.array(workflowFieldSchema).default([]),
-  connectors: z
-    .array(
-      workflowStepConnectorSchema.extend({
-        fallbacks: z.array(workflowStepConnectorSchema).default([]),
-      }),
-    )
-    .default([]),
+  connectors: z.array(workflowPrimaryConnectorSchema).default([]),
 });
 
 const workflowScoreSchema = z.object({
@@ -122,9 +128,8 @@ export type WorkflowFieldUpload = z.infer<typeof workflowFieldUploadSchema>;
 /** A connector a step declares: identity and field mapping only, never its config. */
 export type WorkflowStepConnector = z.infer<typeof workflowStepConnectorSchema>;
 
-export type WorkflowStepConnectorWithFallbacks = WorkflowStepConnector & {
-  fallbacks: WorkflowStepConnector[];
-};
+/** A step's primary connector: `id` is the effective adapter, `authoredId` what the document declares. */
+export type WorkflowStepConnectorWithFallbacks = z.infer<typeof workflowPrimaryConnectorSchema>;
 
 export interface WorkflowStepDefinition {
   name: string;

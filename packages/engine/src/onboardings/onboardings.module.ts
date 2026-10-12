@@ -16,6 +16,7 @@ import { OnboardingTransitionsService } from './onboarding-transitions.service';
 import { OnboardingsController } from './onboardings.controller';
 import { OnboardingsRepository } from './onboardings.repository';
 import { OnboardingsService } from './onboardings.service';
+import { PendingConnectorReconcileService } from './pending-connector-reconcile.service';
 import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manual-review-action.pipe';
 
 @Module({
@@ -41,6 +42,7 @@ import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manua
     OnboardingStateService,
     OnboardingTransitionsService,
     DocumentUploadService,
+    PendingConnectorReconcileService,
     UnsupportedManualReviewActionPipe,
   ],
   exports: [OnboardingsService],

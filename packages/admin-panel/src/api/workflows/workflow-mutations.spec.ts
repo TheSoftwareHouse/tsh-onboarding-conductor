@@ -3,12 +3,22 @@ import type { QueryKey } from '@tanstack/react-query';
 import { workflowMutations } from './workflow-mutations';
 import { workflowQueries } from './workflow-queries';
 import {
+  deleteWorkflowConnectorSelection,
+  putWorkflowConnectorSelection,
+} from './workflow-connector-selection';
+import {
   compileWorkflowDocument,
   createWorkflowDraft,
   deleteWorkflowDraft,
   updateWorkflowDraft,
   type WorkflowDraft,
 } from './workflow-drafts';
+
+vi.mock('./workflow-connector-selection', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./workflow-connector-selection')>()),
+  putWorkflowConnectorSelection: vi.fn(),
+  deleteWorkflowConnectorSelection: vi.fn(),
+}));
 
 vi.mock('./workflow-drafts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./workflow-drafts')>()),
@@ -118,6 +128,36 @@ describe('workflowMutations', () => {
 
       expect(compileWorkflowDocument).toHaveBeenCalledWith(DOCUMENT);
       expect(options.meta).toBeUndefined();
+    });
+  });
+
+  describe('selectConnector', () => {
+    it('puts the connector on the step of the factory workflow', async () => {
+      await workflowMutations
+        .selectConnector('kyc')
+        .mutationFn?.({ stepName: 'verify', connectorId: 'veriff_kyc' }, {} as never);
+
+      expect(putWorkflowConnectorSelection).toHaveBeenCalledWith('kyc', 'verify', 'veriff_kyc');
+    });
+
+    it('awaits every read of the family, since the selection binds every version', () => {
+      expect(workflowMutations.selectConnector('kyc').meta).toEqual({
+        awaits: [workflowQueries.detailsFor('kyc')],
+      });
+    });
+  });
+
+  describe('clearConnector', () => {
+    it('deletes the selection on the step of the factory workflow', async () => {
+      await workflowMutations.clearConnector('kyc').mutationFn?.('verify', {} as never);
+
+      expect(deleteWorkflowConnectorSelection).toHaveBeenCalledWith('kyc', 'verify');
+    });
+
+    it('awaits every read of the family', () => {
+      expect(workflowMutations.clearConnector('kyc').meta).toEqual({
+        awaits: [workflowQueries.detailsFor('kyc')],
+      });
     });
   });
 });

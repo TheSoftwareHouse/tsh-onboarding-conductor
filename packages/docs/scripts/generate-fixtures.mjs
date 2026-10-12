@@ -47,10 +47,16 @@ const DESCRIPTIONS = {
   'sumsub-kyc':
     'An identity check whose verdict arrives on a provider callback, with document uploads and a manual review fork.',
   'twilio-verify': 'A one-time code sent and checked through Twilio Verify.',
+  'veriff-kyc':
+    'The identity check of sumsub-kyc served by Veriff instead: the same captured documents, submitted to a Veriff session over the API, with the decision arriving on the webhook.',
   'eu-b2c-individual-kyc-eea':
     'The production reference flow written as custom steps: EU B2C individual KYC across the EEA, where the applicant chooses between a passport and a national ID card.',
   'eu-b2c-individual-kyc-eea-v2':
     'The same flow written with specialized step types, which compiles to the steps of revision 1 when it loads.',
+  'eu-b2c-individual-kyc-eea-veriff':
+    'The production reference flow with Veriff as the identity provider — identical to eu-b2c-individual-kyc-eea except that the KYC step binds veriff_kyc — written as custom steps.',
+  'eu-b2c-individual-kyc-eea-veriff-v2':
+    'The Veriff flow written with specialized step types, which compiles to the steps of its revision 1 when it loads.',
 };
 
 /**
@@ -64,9 +70,11 @@ const DIFFERENCES = {
   'twilio-verify':
     '`otp-verify` generates the re-send step itself and routes an expired or unknown challenge to it, so the specialized form gains `request_code_resend` and the arm that leads there.',
   scoring:
-    '`otp-verify` generates the re-send step and its arm, and the phone number is collected on `collect_profile` rather than on `request_code`. `identity-profile`, `document-capture` and `kyc-identity-verification` shape the fields they collect and the document table the connector receives: the document fields are `idCardFront` and `idCardBack`, their validations are the steps’ own, and the issuing country comes from the `country` field rather than a fixed `POL`. `manual-review` keeps its stray submit arm.',
+    '`otp-verify` generates the re-send step and its arm, and the phone number is collected on `collect_profile` rather than on `request_code`. `identity-profile`, `document-capture` and `kyc-identity-verification` shape the fields they collect and the document table the connector receives: the document fields are `idCardFront` and `idCardBack`, their validations are the steps’ own, and the issuing country comes from the `country` field rather than a fixed `POL`. `manual-review` keeps its stray submit arm. The specialized form also declares the `kycAttemptCount` callback field, which the `custom` form predates.',
   'sumsub-kyc':
-    '`document-capture` and `kyc-identity-verification` shape the fields they collect and the document table the connector receives: the document fields are `idCardFront` and `idCardBack`, their validations are the steps’ own, and the issuing country comes from the `country` field rather than a fixed `POL`. `manual-review` keeps its stray submit arm.',
+    '`document-capture` and `kyc-identity-verification` shape the fields they collect and the document table the connector receives: the document fields are `idCardFront` and `idCardBack`, their validations are the steps’ own, and the issuing country comes from the `country` field rather than a fixed `POL`. `manual-review` keeps its stray submit arm. The specialized form also declares the `kycAttemptCount` callback field, which the `custom` form predates.',
+  'veriff-kyc':
+    '`document-capture` and `kyc-identity-verification` shape the fields they collect and the document table the connector receives: the document fields are `idCardFront` and `idCardBack`, their validations are the steps’ own, and the issuing country comes from the `country` field rather than a fixed `PL`. `manual-review` keeps its stray submit arm.',
 };
 
 function loadDdl() {

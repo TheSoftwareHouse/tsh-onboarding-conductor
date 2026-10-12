@@ -341,6 +341,19 @@ export class WorkflowsRepository {
     });
   }
 
+  /** Every stored version of one family, drafts and retired included, oldest first, with its definition. */
+  async findRevisions(
+    manager: EntityManager,
+    scopes: readonly WorkflowScope[],
+    key: string,
+  ): Promise<WorkflowVersionEntity[]> {
+    return manager.getRepository(WorkflowVersionEntity).find({
+      where: { workflow: { key, scope: In([...scopes]) } },
+      relations: { workflow: true },
+      order: { version: 'ASC' },
+    });
+  }
+
   /** The revision an unpinned start resolves to: the highest published one. */
   async findLatestPublished(
     manager: EntityManager,

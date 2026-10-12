@@ -35,6 +35,9 @@ const FILTERS: AdminOnboardingQueryFilters = {
   workflowVersion: null,
   currentStep: null,
   onboardingId: null,
+  parked: null,
+  pendingConnectorId: null,
+  parkedBefore: null,
 };
 
 const PAGE: AdminOnboardingsPage = {
@@ -53,6 +56,7 @@ const SUMMARY: AdminOnboardingSummary = {
   updatedAt: '2026-07-02T00:00:00.000Z',
   completedAt: null,
   scores: {},
+  pendingConnector: null,
 };
 
 const TRAIL: OnboardingTransitionsTrail = { transitions: [], truncated: false };

@@ -1,8 +1,10 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsIn,
   IsInt,
+  IsISO8601,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -12,6 +14,7 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
+import { CONNECTOR_ID_PATTERN } from '../../connectors/ports/connector-execution.port';
 import { WORKFLOW_STATUSES, type WorkflowStatus } from '@tsh/ddl-schema';
 import {
   ONBOARDING_AGREEMENT_STATUSES,
@@ -100,4 +103,36 @@ export class ListAdminOnboardingsQueryDto extends PaginationQueryDto {
   @IsString()
   @IsIn(ONBOARDING_AGREEMENT_STATUSES)
   agreementStatus?: OnboardingAgreementStatus;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description:
+      'Only onboardings parked on an asynchronous connector (`true`), or only those not parked ' +
+      '(`false`).',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  parked?: boolean;
+
+  @ApiPropertyOptional({
+    maxLength: 100,
+    description: 'Only onboardings parked on this connector id.',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(CONNECTOR_ID_PATTERN)
+  @MaxLength(100)
+  pendingConnectorId?: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    description:
+      'Only onboardings parked before this instant, by the park time the engine recorded. A row ' +
+      'parked before that time was recorded never matches.',
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  parkedBefore?: string;
 }

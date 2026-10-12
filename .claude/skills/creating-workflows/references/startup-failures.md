@@ -206,9 +206,9 @@ reachable only through a `custom` step — `terminal` cannot produce either.
 
 A clean compile does not mean a clean boot. `WorkflowRegistryService.onModuleInit` additionally
 checks that each connector `id` names a **registered adapter**, that the declared `type` agrees with
-that adapter, whatever the adapter's own `validateDeclaration` asserts (for `sumsub_kyc`: every
+that adapter, whatever the adapter's own `validateDeclaration` asserts (for `sumsub_kyc`: a `levelName`, and every
 `documents[].payloadField` and `countryField` is a mapped key), and that no two workflows claim the
-same Sumsub `sourceKey`. Those surface as `WORKFLOW_CONNECTOR_DECLARATION_INVALID` and
+same `sourceKey`. Those surface as `WORKFLOW_CONNECTOR_DECLARATION_INVALID` and
 `WORKFLOW_SOURCE_KEY_CONFLICT`, not as `WORKFLOW_INVALID`.
 
 `POST /v1/admin/workflows/compile` runs every one of these against the running engine and stores

@@ -1,149 +1,131 @@
 import {
-  evaluateSumsubOutcome,
+  mapSumsubOutcomeToVerdict,
   SumsubOutcomeUnrecognisedStateError,
   type SumsubOutcomeInput,
 } from './sumsub-outcome';
 
 const baseInput = (): SumsubOutcomeInput => ({
-  isOnHoldOrAwaitingService: false,
   screeningHits: [],
-  identityComparison: 'match',
   reviewAnswer: 'GREEN',
   reviewRejectType: undefined,
   attemptCnt: undefined,
-  maxAttemptsPerDocSet: 3,
   failedDocSet: undefined,
+  moderationComment: undefined,
+  buttonIds: undefined,
+  verifiedInfo: { lastName: 'Kowalska', dob: '1990-05-14' },
 });
 
-describe('evaluateSumsubOutcome', () => {
-  it('row 1: an on-hold or awaiting-service event yields human_review', () => {
-    expect(evaluateSumsubOutcome({ ...baseInput(), isOnHoldOrAwaitingService: true })).toEqual({
-      kycOutcome: 'human_review',
-      reason: 'on_hold_or_awaiting_service',
-    });
-  });
-
-  it('row 2: an unresolved screening hit yields human_review, outranking a GREEN verdict', () => {
-    const result = evaluateSumsubOutcome({
+describe('mapSumsubOutcomeToVerdict', () => {
+  it('an unresolved screening hit needs review, outranking a GREEN verdict', () => {
+    const verdict = mapSumsubOutcomeToVerdict({
       ...baseInput(),
       screeningHits: [{ matchStatus: 'exact', disposition: 'pending' }],
     });
 
-    expect(result.kycOutcome).toBe('human_review');
-    expect(result).toMatchObject({ reason: 'screening_unresolved', hitCount: 1 });
+    expect(verdict).toEqual({
+      kind: 'needs_review',
+      reason: 'screening_unresolved',
+      detail: { hitCount: 1 },
+    });
   });
 
-  it('row 2: a 204 (undefined) AML case never produces verified', () => {
-    const result = evaluateSumsubOutcome({ ...baseInput(), screeningHits: undefined });
+  it('a 204 (undefined) AML case never produces an approval', () => {
+    const verdict = mapSumsubOutcomeToVerdict({ ...baseInput(), screeningHits: undefined });
 
-    expect(result.kycOutcome).not.toBe('verified');
-    expect(result).toMatchObject({ reason: 'screening_unresolved', hitCount: 0 });
+    expect(verdict).toEqual({
+      kind: 'needs_review',
+      reason: 'screening_unresolved',
+      detail: { hitCount: 0 },
+    });
   });
 
-  it('row 2: a hit dispositioned false_positive does not block verified', () => {
-    const result = evaluateSumsubOutcome({
+  it('a hit dispositioned false_positive does not block an approval', () => {
+    const verdict = mapSumsubOutcomeToVerdict({
       ...baseInput(),
       screeningHits: [{ matchStatus: 'exact', disposition: 'false_positive' }],
     });
 
-    expect(result).toEqual({ kycOutcome: 'verified' });
+    expect(verdict.kind).toBe('approved');
   });
 
-  it('row 2: a hit with an unrecognised matchStatus is still treated as unresolved', () => {
-    const result = evaluateSumsubOutcome({
+  it('a hit with an unrecognised matchStatus is still treated as unresolved', () => {
+    const verdict = mapSumsubOutcomeToVerdict({
       ...baseInput(),
       screeningHits: [{ matchStatus: 'never-seen-before', disposition: 'unknown' }],
     });
 
-    expect(result.kycOutcome).toBe('human_review');
-    expect(result).toMatchObject({ reason: 'screening_unresolved' });
+    expect(verdict).toMatchObject({ kind: 'needs_review', reason: 'screening_unresolved' });
   });
 
-  it('row 3: a declared/verified mismatch yields human_review, outranking a GREEN verdict', () => {
-    const result = evaluateSumsubOutcome({ ...baseInput(), identityComparison: 'mismatch' });
-
-    expect(result).toEqual({
-      kycOutcome: 'human_review',
-      reason: 'identity_guard',
-      mismatchKind: 'mismatch',
+  it('GREEN is approved with the verified last name and date of birth', () => {
+    expect(mapSumsubOutcomeToVerdict(baseInput())).toEqual({
+      kind: 'approved',
+      verifiedIdentity: { lastName: 'Kowalska', dateOfBirth: '1990-05-14' },
     });
   });
 
-  it('row 3: no verified identity data at all yields human_review, never verified or a throw', () => {
-    const result = evaluateSumsubOutcome({
-      ...baseInput(),
-      identityComparison: 'no-verified-data',
-    });
-
-    expect(result).toEqual({
-      kycOutcome: 'human_review',
-      reason: 'identity_guard',
-      mismatchKind: 'no-verified-data',
+  it('GREEN with no verified identity block carries no identity fields', () => {
+    expect(mapSumsubOutcomeToVerdict({ ...baseInput(), verifiedInfo: {} })).toEqual({
+      kind: 'approved',
+      verifiedIdentity: { lastName: undefined, dateOfBirth: undefined },
     });
   });
 
-  it('row 4: RED with reviewRejectType FINAL yields refused', () => {
-    const result = evaluateSumsubOutcome({
+  it('RED with reviewRejectType FINAL is declined, carrying buttonIds and the moderation comment', () => {
+    const verdict = mapSumsubOutcomeToVerdict({
       ...baseInput(),
       reviewAnswer: 'RED',
       reviewRejectType: 'FINAL',
+      buttonIds: ['FORGERY'],
+      moderationComment: 'Document looks altered',
     });
 
-    expect(result).toEqual({ kycOutcome: 'refused', reason: 'final_rejection' });
-  });
-
-  it('row 5: attemptCnt at the cap yields human_review, not retry', () => {
-    const result = evaluateSumsubOutcome({
-      ...baseInput(),
-      reviewAnswer: 'RED',
-      reviewRejectType: 'RETRY',
-      attemptCnt: 3,
-      maxAttemptsPerDocSet: 3,
-      failedDocSet: 'IDENTITY',
-    });
-
-    expect(result).toEqual({
-      kycOutcome: 'human_review',
-      reason: 'attempts_exhausted',
-      docSet: 'IDENTITY',
-      attemptCnt: 3,
-      maxAttemptsPerDocSet: 3,
+    expect(verdict).toEqual({
+      kind: 'declined',
+      reasonCodes: ['FORGERY'],
+      customerMessage: 'Document looks altered',
     });
   });
 
-  it('row 6: RED with reviewRejectType RETRY, one attempt below the cap, yields retry', () => {
-    const result = evaluateSumsubOutcome({
+  it('RED with reviewRejectType RETRY is a resubmission of the failed docSet with Sumsub’s own count', () => {
+    const verdict = mapSumsubOutcomeToVerdict({
       ...baseInput(),
       reviewAnswer: 'RED',
       reviewRejectType: 'RETRY',
       attemptCnt: 2,
-      maxAttemptsPerDocSet: 3,
       failedDocSet: 'SELFIE',
+      buttonIds: ['BAD_SELFIE'],
     });
 
-    expect(result).toEqual({
-      kycOutcome: 'retry',
-      docSet: 'SELFIE',
-      attemptCnt: 2,
-      maxAttemptsPerDocSet: 3,
+    expect(verdict).toEqual({
+      kind: 'resubmission',
+      target: 'SELFIE',
+      attemptCount: 2,
+      reasonCodes: ['BAD_SELFIE'],
+      customerMessage: undefined,
     });
   });
 
-  it('row 7: GREEN with screening resolved and identity matching yields verified', () => {
-    const result = evaluateSumsubOutcome(baseInput());
+  it('a RED verdict is decided without reading a verified identity', () => {
+    const verdict = mapSumsubOutcomeToVerdict({
+      ...baseInput(),
+      reviewAnswer: 'RED',
+      reviewRejectType: 'FINAL',
+      verifiedInfo: undefined,
+    });
 
-    expect(result).toEqual({ kycOutcome: 'verified' });
+    expect(verdict.kind).toBe('declined');
   });
 
-  it('row 8: an unrecognised state throws rather than defaulting an outcome', () => {
-    expect(() => evaluateSumsubOutcome({ ...baseInput(), reviewAnswer: 'UNKNOWN_ANSWER' })).toThrow(
-      SumsubOutcomeUnrecognisedStateError,
-    );
-  });
-
-  it('row 8: a RETRY reject type with no resolvable failed docSet throws', () => {
+  it('an unrecognised review answer throws rather than defaulting an outcome', () => {
     expect(() =>
-      evaluateSumsubOutcome({
+      mapSumsubOutcomeToVerdict({ ...baseInput(), reviewAnswer: 'UNKNOWN_ANSWER' }),
+    ).toThrow(SumsubOutcomeUnrecognisedStateError);
+  });
+
+  it('a RETRY reject type with no resolvable failed docSet throws', () => {
+    expect(() =>
+      mapSumsubOutcomeToVerdict({
         ...baseInput(),
         reviewAnswer: 'RED',
         reviewRejectType: 'RETRY',
@@ -153,7 +135,7 @@ describe('evaluateSumsubOutcome', () => {
     ).toThrow(SumsubOutcomeUnrecognisedStateError);
   });
 
-  it('row 8: the thrown message carries no screening-hit content — only non-content facts', () => {
+  it('the thrown message carries no screening-hit content — only non-content facts', () => {
     const input: SumsubOutcomeInput = {
       ...baseInput(),
       reviewAnswer: 'UNKNOWN_ANSWER',
@@ -170,7 +152,7 @@ describe('evaluateSumsubOutcome', () => {
 
     let caught: unknown;
     try {
-      evaluateSumsubOutcome(input);
+      mapSumsubOutcomeToVerdict(input);
     } catch (error) {
       caught = error;
     }
@@ -183,51 +165,5 @@ describe('evaluateSumsubOutcome', () => {
     expect(message).not.toContain('exact');
     expect(message).toContain('reviewAnswer=UNKNOWN_ANSWER');
     expect(message).toContain('screeningHitsCount=1');
-  });
-
-  describe('row 3 does not preempt a RED verdict', () => {
-    it('a RED/FINAL verdict with no verified identity block still yields refused', () => {
-      const result = evaluateSumsubOutcome({
-        ...baseInput(),
-        reviewAnswer: 'RED',
-        reviewRejectType: 'FINAL',
-        identityComparison: 'no-verified-data',
-      });
-
-      expect(result).toEqual({ kycOutcome: 'refused', reason: 'final_rejection' });
-    });
-
-    it('a RED/RETRY verdict with no verified identity block still yields retry', () => {
-      const result = evaluateSumsubOutcome({
-        ...baseInput(),
-        reviewAnswer: 'RED',
-        reviewRejectType: 'RETRY',
-        identityComparison: 'no-verified-data',
-        attemptCnt: 1,
-        maxAttemptsPerDocSet: 3,
-        failedDocSet: 'IDENTITY',
-      });
-
-      expect(result).toEqual({
-        kycOutcome: 'retry',
-        docSet: 'IDENTITY',
-        attemptCnt: 1,
-        maxAttemptsPerDocSet: 3,
-      });
-    });
-
-    it('a GREEN verdict with no verified identity block still yields human_review, not verified', () => {
-      const result = evaluateSumsubOutcome({
-        ...baseInput(),
-        reviewAnswer: 'GREEN',
-        identityComparison: 'no-verified-data',
-      });
-
-      expect(result).toEqual({
-        kycOutcome: 'human_review',
-        reason: 'identity_guard',
-        mismatchKind: 'no-verified-data',
-      });
-    });
   });
 });

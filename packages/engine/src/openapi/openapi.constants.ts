@@ -75,8 +75,9 @@ export const API_TAGS = {
   adminWorkflows: {
     name: 'Admin: workflows',
     description:
-      'The workflow catalogue as a reader sees it, and a dry compile of a document that stores ' +
-      'nothing. Requires an operator bearer token.',
+      'The workflow catalogue as a reader sees it, a dry compile of a document that stores ' +
+      "nothing, and the write that binds a step's connector slot to another adapter. Requires " +
+      'an operator bearer token.',
   },
   adminStepTypes: {
     name: 'Admin: step types',

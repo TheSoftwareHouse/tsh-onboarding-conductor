@@ -1,5 +1,9 @@
 import { mutationOptions } from '@/services/query-client/mutation-options';
 import {
+  deleteWorkflowConnectorSelection,
+  putWorkflowConnectorSelection,
+} from './workflow-connector-selection';
+import {
   compileWorkflowDocument,
   createWorkflowDraft,
   deleteWorkflowDraft,
@@ -13,7 +17,7 @@ function isInPlace(draft: WorkflowDraft, workflowId: string, version: number): b
   return draft.workflowId === workflowId && draft.version === version;
 }
 
-/** Sibling module to `workflow-drafts.ts` on purpose, so `vi.mock`-ing it still intercepts the `mutationFn` calls. */
+/** Sibling module to `workflow-drafts.ts` and `workflow-connector-selection.ts` on purpose, so `vi.mock`-ing either still intercepts the `mutationFn` calls. */
 export const workflowMutations = {
   create: () =>
     mutationOptions({
@@ -58,5 +62,18 @@ export const workflowMutations = {
   compile: () =>
     mutationOptions({
       mutationFn: (document: WorkflowDocumentInput) => compileWorkflowDocument(document),
+    }),
+  // A selection binds every version of the family, so every read below the family is awaited:
+  // the caller's toast fires once the inspector shows the new slot.
+  selectConnector: (workflowId: string) =>
+    mutationOptions({
+      mutationFn: ({ stepName, connectorId }: { stepName: string; connectorId: string }) =>
+        putWorkflowConnectorSelection(workflowId, stepName, connectorId),
+      meta: { awaits: [workflowQueries.detailsFor(workflowId)] },
+    }),
+  clearConnector: (workflowId: string) =>
+    mutationOptions({
+      mutationFn: (stepName: string) => deleteWorkflowConnectorSelection(workflowId, stepName),
+      meta: { awaits: [workflowQueries.detailsFor(workflowId)] },
     }),
 };

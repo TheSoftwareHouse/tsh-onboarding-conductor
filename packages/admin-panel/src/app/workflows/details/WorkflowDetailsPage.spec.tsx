@@ -96,6 +96,9 @@ function definition(version: number, extraStep?: string): WorkflowDefinition {
         connectors: [
           {
             id: 'twilio_verify',
+            authoredId: 'twilio_verify',
+            selected: false,
+            selectableIds: ['twilio_verify'],
             name: 'twilio_verify',
             type: 'phone-verification',
             order: 1,

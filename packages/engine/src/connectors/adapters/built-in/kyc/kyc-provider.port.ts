@@ -1,0 +1,168 @@
+import type {
+  ConnectorCallbackHmacAuth,
+  ConnectorCallbackMappingInput,
+  ConnectorSettingsSchema,
+} from '../../../ports/connector-adapter.port';
+import type { ResolvedConnectorSettings } from '../../../connector-settings.service';
+import type { KycRetryTarget } from './kyc-contract';
+import type { KycConfig } from './kyc-config';
+
+/** The eight applicant roles as the workflow collected them; countries are ISO alpha-2. */
+export type KycApplicant = Readonly<{
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string;
+  nationality: string;
+  country: string;
+  street?: string;
+  town?: string;
+  postCode?: string;
+}>;
+
+/**
+ * One captured document, already read from object storage. `country` is ISO alpha-2;
+ * `sourceField` is the step field the client uploaded it under, which a refusal is reported on.
+ */
+export type KycDocument = Readonly<{
+  documentId: string;
+  sourceField: string;
+  docSet: string;
+  docType: string;
+  side?: string;
+  country: string;
+  contentType: string;
+  content: Buffer;
+}>;
+
+/** Everything a provider needs to open a verification. The kernel builds it before any provider call. */
+export type KycSubmission = Readonly<{
+  onboardingId: string;
+  sourceKey: string;
+  providerConfig: Readonly<Record<string, unknown>>;
+  applicant: KycApplicant;
+  documents: readonly KycDocument[];
+  questionnaire?: Readonly<{
+    pathMap: Readonly<Record<string, string>>;
+    answers: Readonly<Record<string, string | boolean | undefined>>;
+  }>;
+}>;
+
+export type KycSubmissionReceipt = Readonly<{ providerReference: string }>;
+
+/**
+ * Thrown by `KycProvider.submit` before any provider call when a document is of a kind the
+ * provider cannot take — a PDF at a provider that accepts only images. The kernel answers it as
+ * the step's own field error, so the client re-uploads instead of the provider refusing mid-flow.
+ */
+export class KycDocumentUnsupportedError extends Error {
+  constructor(
+    readonly providerId: string,
+    readonly document: Pick<KycDocument, 'documentId' | 'sourceField' | 'contentType'>,
+  ) {
+    super(
+      `${providerId} cannot verify document ${document.documentId} (${document.sourceField}) ` +
+        `of type ${document.contentType}`,
+    );
+    this.name = 'KycDocumentUnsupportedError';
+  }
+}
+
+/**
+ * A provider webhook, reduced to what the kernel acts on. `actionable: false` re-parks the step
+ * without reading a verdict; `hint` is the provider's own classification, passed back to it
+ * untouched. A provider that needs more of the webhook later extends this type.
+ */
+export interface KycCallbackEvent {
+  readonly onboardingId: string;
+  readonly providerReference?: string;
+  readonly actionable: boolean;
+  readonly hint?: string;
+}
+
+/** The attempt an onboarding is parked on, as the park records it: enough to ask the provider. */
+export type KycPendingReference = Readonly<{ onboardingId: string; providerReference: string }>;
+
+export type KycCallbackContext = Readonly<{
+  config: KycConfig;
+  providerConfig: Readonly<Record<string, unknown>>;
+  onboardingContext: Readonly<Record<string, unknown>>;
+}>;
+
+/** What the provider says about the applicant, to be checked against what they declared. */
+export type KycVerifiedIdentity = Readonly<{ lastName?: string; dateOfBirth?: string }>;
+
+/**
+ * The vocabulary a provider maps its own states onto. A state the provider cannot map is thrown,
+ * never defaulted, so the callback answers 5xx and the provider redelivers.
+ */
+export type KycVerdict =
+  /** Not decided yet; the provider calls again. */
+  | Readonly<{ kind: 'pending' }>
+  /** Human review for a provider-side reason. `detail` carries counts only, never content. */
+  | Readonly<{
+      kind: 'needs_review';
+      reason: string;
+      detail?: Readonly<Record<string, number>>;
+    }>
+  | Readonly<{ kind: 'approved'; verifiedIdentity: KycVerifiedIdentity | undefined }>
+  | Readonly<{
+      kind: 'declined';
+      reasonCodes?: readonly string[];
+      customerMessage?: string;
+    }>
+  | Readonly<{
+      kind: 'resubmission';
+      target: KycRetryTarget;
+      /** The provider's own attempt count; absent when the kernel must count. */
+      attemptCount?: number;
+      limitExceeded?: boolean;
+      reasonCodes?: readonly string[];
+      customerMessage?: string;
+    }>;
+
+/**
+ * The wire half of a KYC connector: one implementation per provider, driven by `KycConnector`.
+ * `TEvent` lets a provider carry more of its webhook from `parseCallback` into `fetchVerdict`.
+ */
+export interface KycProvider<TEvent extends KycCallbackEvent = KycCallbackEvent> {
+  readonly id: string;
+  readonly name: string;
+  readonly settingsSchema: ConnectorSettingsSchema;
+  readonly callbackAuth: ConnectorCallbackHmacAuth;
+  /** True when the provider reports attempts itself; false makes the kernel count resubmissions. */
+  readonly countsAttempts: boolean;
+  /**
+   * Startup check of the keys no kernel rule consumed. `config` is the whole parsed declaration,
+   * for a provider whose rules also depend on the document list or the questionnaire.
+   */
+  validateConfig(providerConfig: Readonly<Record<string, unknown>>, config: KycConfig): void;
+  /**
+   * Opens the verification. A document the provider cannot take throws
+   * `KycDocumentUnsupportedError` before the first side effect; the kernel reports it on the
+   * document's step field.
+   */
+  submit(
+    settings: ResolvedConnectorSettings,
+    submission: KycSubmission,
+  ): Promise<KycSubmissionReceipt>;
+  parseCallback(
+    input: ConnectorCallbackMappingInput,
+    settings: ResolvedConnectorSettings,
+  ): TEvent | Promise<TEvent>;
+  /**
+   * The event `fetchVerdict` reads when the engine asks on an operator's behalf rather than on a
+   * webhook: the same read-back, but "not decided yet" is a `pending` verdict here, never a
+   * throw, because there is no provider waiting for a 5xx to redeliver.
+   */
+  buildReconcileEvent(reference: KycPendingReference): TEvent;
+  fetchVerdict(
+    settings: ResolvedConnectorSettings,
+    event: TEvent,
+    context: KycCallbackContext,
+  ): Promise<KycVerdict>;
+  onRetry?(
+    settings: ResolvedConnectorSettings,
+    event: TEvent,
+    target: KycRetryTarget,
+  ): Promise<void>;
+}

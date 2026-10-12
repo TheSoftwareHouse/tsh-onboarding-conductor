@@ -1,4 +1,5 @@
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
+import { ConnectorSelectionRules } from './domain/connector-selection';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
 import { WorkflowConnectorDeclarationInvalidError } from './errors/workflow-connector-declaration-invalid.error';
 import { WorkflowConnectorDeclarationInvalidException } from './errors/workflow-connector-declaration-invalid.exception';
@@ -24,6 +25,9 @@ const authored = {
 /** A registry whose validation answers with whatever the DDL normalizes, or throws what it is told to. */
 const createService = (failure?: Error) => {
   const registry = {
+    createConnectorSelectionRules: jest
+      .fn()
+      .mockReturnValue(new ConnectorSelectionRules(undefined, [])),
     validateDefinition: jest.fn(async (definition: Record<string, unknown>) => {
       if (failure) {
         throw failure;
@@ -71,6 +75,7 @@ describe('WorkflowCompilationService', () => {
     ]);
     // The registry is handed the authored document: its checks are the ones startup would run.
     expect(registry.validateDefinition).toHaveBeenCalledWith(authored);
+    expect(registry.createConnectorSelectionRules).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a document still written as untyped steps, naming the step that lacks a type', async () => {

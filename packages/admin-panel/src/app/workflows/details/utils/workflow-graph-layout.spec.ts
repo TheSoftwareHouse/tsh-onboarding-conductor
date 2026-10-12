@@ -55,6 +55,9 @@ const DEFINITION: WorkflowDefinition = {
       connectors: [
         {
           id: 'sumsub',
+          authoredId: 'sumsub',
+          selected: false,
+          selectableIds: [],
           name: 'Sumsub',
           type: 'kyc',
           order: 1,

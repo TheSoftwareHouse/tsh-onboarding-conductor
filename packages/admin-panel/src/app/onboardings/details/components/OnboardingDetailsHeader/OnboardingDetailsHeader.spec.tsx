@@ -7,13 +7,23 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OnboardingDetailsHeader } from './OnboardingDetailsHeader';
 import { ADMIN_ROUTES } from '@/constants/routes';
-import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
+import type {
+  AdminOnboardingPendingConnector,
+  AdminOnboardingSummary,
+} from '@/api/onboardings/admin-onboardings';
 import type {
   WorkflowDefinition,
   WorkflowStepDefinition,
 } from '@/api/workflows/workflow-definitions';
 
 const ONBOARDING_ID = '018f1e2a-1111-7000-8000-000000000001';
+
+const PENDING_CONNECTOR: AdminOnboardingPendingConnector = {
+  connectorId: 'veriff_kyc',
+  connectorName: 'Veriff',
+  connectorOrder: 0,
+  parkedAt: '2026-07-01T00:00:00.000Z',
+};
 
 function summary(overrides: Partial<AdminOnboardingSummary> = {}): AdminOnboardingSummary {
   return {
@@ -27,6 +37,7 @@ function summary(overrides: Partial<AdminOnboardingSummary> = {}): AdminOnboardi
     updatedAt: '2026-07-01T00:00:00.000Z',
     completedAt: null,
     scores: {},
+    pendingConnector: null,
     ...overrides,
   };
 }
@@ -82,6 +93,8 @@ describe('OnboardingDetailsHeader', () => {
         onRefresh={() => {}}
         pendingAction={null}
         onReviewSubmit={() => {}}
+        isReconciling={false}
+        onReconcile={() => {}}
         isRefreshing={false}
         statusMessage="Loading onboarding…"
       />,
@@ -91,6 +104,87 @@ describe('OnboardingDetailsHeader', () => {
     expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
     expect(screen.queryByText('Awaiting manual review')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Check provider' })).not.toBeInTheDocument();
+  });
+
+  it('offers the provider check only while the onboarding is parked on a connector', () => {
+    const { rerender } = renderHeader(
+      <OnboardingDetailsHeader
+        onboardingId={ONBOARDING_ID}
+        summary={summary()}
+        definition={null}
+        backSearch=""
+        onRefresh={() => {}}
+        pendingAction={null}
+        onReviewSubmit={() => {}}
+        isReconciling={false}
+        onReconcile={() => {}}
+        isRefreshing={false}
+        statusMessage={null}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Check provider' })).not.toBeInTheDocument();
+
+    rerender(
+      <OnboardingDetailsHeader
+        onboardingId={ONBOARDING_ID}
+        summary={summary({ pendingConnector: PENDING_CONNECTOR })}
+        definition={null}
+        backSearch=""
+        onRefresh={() => {}}
+        pendingAction={null}
+        onReviewSubmit={() => {}}
+        isReconciling={false}
+        onReconcile={() => {}}
+        isRefreshing={false}
+        statusMessage={null}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Check provider' })).toBeEnabled();
+  });
+
+  it('holds every action and the refresh control while the provider is being asked', () => {
+    renderHeader(
+      <OnboardingDetailsHeader
+        onboardingId={ONBOARDING_ID}
+        summary={summary({ pendingConnector: PENDING_CONNECTOR })}
+        definition={definition([step()])}
+        backSearch=""
+        onRefresh={() => {}}
+        pendingAction={null}
+        onReviewSubmit={() => {}}
+        isReconciling
+        onReconcile={() => {}}
+        isRefreshing={false}
+        statusMessage={null}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Check provider' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
+  });
+
+  it('holds the provider check while a review decision is in flight', () => {
+    renderHeader(
+      <OnboardingDetailsHeader
+        onboardingId={ONBOARDING_ID}
+        summary={summary({ pendingConnector: PENDING_CONNECTOR })}
+        definition={null}
+        backSearch=""
+        onRefresh={() => {}}
+        pendingAction="approve"
+        onReviewSubmit={() => {}}
+        isReconciling={false}
+        onReconcile={() => {}}
+        isRefreshing={false}
+        statusMessage={null}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Check provider' })).toBeDisabled();
   });
 
   it('renders the chip, workflow line and review actions once a summary is available', () => {
@@ -103,6 +197,8 @@ describe('OnboardingDetailsHeader', () => {
         onRefresh={() => {}}
         pendingAction={null}
         onReviewSubmit={() => {}}
+        isReconciling={false}
+        onReconcile={() => {}}
         isRefreshing={false}
         statusMessage={null}
       />,
@@ -127,6 +223,8 @@ describe('OnboardingDetailsHeader', () => {
         onRefresh={() => {}}
         pendingAction={null}
         onReviewSubmit={() => {}}
+        isReconciling={false}
+        onReconcile={() => {}}
         isRefreshing={false}
         statusMessage="Loading onboarding…"
       />,
@@ -147,6 +245,8 @@ describe('OnboardingDetailsHeader', () => {
         onRefresh={() => {}}
         pendingAction={null}
         onReviewSubmit={() => {}}
+        isReconciling={false}
+        onReconcile={() => {}}
         isRefreshing={false}
         statusMessage={null}
       />,
@@ -168,6 +268,8 @@ describe('OnboardingDetailsHeader', () => {
         onRefresh={() => {}}
         pendingAction={null}
         onReviewSubmit={() => {}}
+        isReconciling={false}
+        onReconcile={() => {}}
         isRefreshing
         statusMessage={null}
       />,
@@ -186,6 +288,8 @@ describe('OnboardingDetailsHeader', () => {
         onRefresh={() => {}}
         pendingAction="approve"
         onReviewSubmit={() => {}}
+        isReconciling={false}
+        onReconcile={() => {}}
         isRefreshing={false}
         statusMessage={null}
       />,
@@ -204,6 +308,8 @@ describe('OnboardingDetailsHeader', () => {
         onRefresh={() => {}}
         pendingAction={null}
         onReviewSubmit={() => {}}
+        isReconciling={false}
+        onReconcile={() => {}}
         isRefreshing={false}
         statusMessage={null}
       />,

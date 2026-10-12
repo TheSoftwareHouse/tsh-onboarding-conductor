@@ -5,9 +5,12 @@ import type {
   ConnectorCallbackMappingInput,
   ConnectorCallbackUnsignedAuth,
   ConnectorExecutionInput,
+  ConnectorReconcileInput,
+  ConnectorReconcileResult,
 } from '../../ports/connector-adapter.port';
 import {
   type ConnectorCallbackResult,
+  type ConnectorPendingExecution,
   type ConnectorRejectionReason,
   ConnectorExecutionResult,
 } from '../../ports/connector-execution-result';
@@ -38,10 +41,18 @@ export type MockAsyncProviderCallbackFixture = Readonly<{
   headers: Record<string, string | undefined>;
 }>;
 
-@Injectable()
-export class MockAsyncCallbackConnector implements ConnectorAdapter {
-  readonly name = 'mock_async_callback';
-  readonly id = 'mock_async_callback';
+/** The one callback field `mock_async_callback_2` declares, so a test can show the engine guarding it. */
+export const MOCK_ASYNC_CALLBACK_VERDICT_FIELD = 'providerVerdict';
+
+/**
+ * A callback-capable connector with no provider behind it: it parks every execution and lets a
+ * test deliver the provider callback itself.
+ *
+ * Two are registered rather than one because a step may declare several connectors, and a
+ * workflow that parks on one needs a second id to show the next one running. They differ in
+ * their id and in that the second declares a callback field, and each keeps its own initiations.
+ */
+abstract class AsyncCallbackMockConnector implements ConnectorAdapter {
   readonly type = 'custom' as const;
   readonly supportsAsyncCallback = true;
   readonly callbackAuth: ConnectorCallbackUnsignedAuth = {
@@ -50,7 +61,17 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
       'Local development and test fixture with no upstream provider to share a signing secret with; production ingress additionally requires naming it in CONNECTOR_CALLBACK_UNSIGNED_TYPES, which no deployment should do.',
   };
 
+  protected constructor(
+    readonly name: string,
+    readonly id: string,
+    readonly callbackFields: readonly string[] = [],
+  ) {}
+
   private readonly initiatedRequests = new Map<string, StoredInitiation>();
+  private readonly reconcileOutcomes = new Map<
+    string,
+    Omit<MockProviderCallbackPayload, 'providerReference'> | 'still_pending'
+  >();
   private latestInitiation?: MockAsyncProviderInitiation;
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
@@ -65,7 +86,7 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
       connectorOrder: input.declaration.order,
     };
 
-    return ConnectorExecutionResult.accepted();
+    return ConnectorExecutionResult.accepted({ providerReference });
   }
 
   getLatestInitiation(): MockAsyncProviderInitiation | undefined {
@@ -128,9 +149,74 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
       submittedData: payload.submittedData,
       resolvedConnector: {
         connectorOrder: storedInitiation.connectorOrder,
+        pendingConnector: this.describePark(payload.providerReference, storedInitiation),
       },
       result: this.buildResult(payload),
     };
+  }
+
+  /**
+   * What a test says the provider answers when the engine asks for a verdict instead of waiting
+   * for one; `still_pending` until set.
+   */
+  setReconcileOutcome(
+    providerReference: string,
+    outcome: Omit<MockProviderCallbackPayload, 'providerReference'> | 'still_pending',
+  ): void {
+    this.reconcileOutcomes.set(providerReference, outcome);
+  }
+
+  async reconcilePending(input: ConnectorReconcileInput): Promise<ConnectorReconcileResult> {
+    const initiation = this.findLatestInitiationFor(input.onboardingId);
+
+    if (initiation === undefined) {
+      throw new Error('No initiation for the onboarding');
+    }
+
+    const outcome = this.reconcileOutcomes.get(initiation.providerReference) ?? 'still_pending';
+
+    if (outcome === 'still_pending') {
+      return { outcome: 'still_pending' };
+    }
+
+    const payload = { ...outcome, providerReference: initiation.providerReference };
+
+    return {
+      outcome: 'resolved',
+      callback: {
+        onboardingId: input.onboardingId,
+        submittedData: payload.submittedData,
+        resolvedConnector: {
+          connectorOrder: initiation.connectorOrder,
+          pendingConnector: this.describePark(initiation.providerReference, initiation),
+        },
+        result: this.buildResult(payload),
+      },
+    };
+  }
+
+  private describePark(
+    providerReference: string,
+    initiation: StoredInitiation,
+  ): ConnectorPendingExecution {
+    return {
+      connectorName: this.name,
+      connectorId: this.id,
+      connectorOrder: initiation.connectorOrder,
+      providerReference,
+    };
+  }
+
+  private findLatestInitiationFor(onboardingId: string): MockAsyncProviderInitiation | undefined {
+    let latest: MockAsyncProviderInitiation | undefined;
+
+    for (const [providerReference, initiation] of this.initiatedRequests) {
+      if (initiation.onboardingId === onboardingId) {
+        latest = { providerReference, ...initiation };
+      }
+    }
+
+    return latest;
   }
 
   private buildResult(payload: MockProviderCallbackPayload): ConnectorExecutionResult {
@@ -261,5 +347,19 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
     }
 
     return normalized;
+  }
+}
+
+@Injectable()
+export class MockAsyncCallbackConnector extends AsyncCallbackMockConnector {
+  constructor() {
+    super('mock_async_callback', 'mock_async_callback');
+  }
+}
+
+@Injectable()
+export class MockAsyncCallback2Connector extends AsyncCallbackMockConnector {
+  constructor() {
+    super('mock_async_callback_2', 'mock_async_callback_2', [MOCK_ASYNC_CALLBACK_VERDICT_FIELD]);
   }
 }

@@ -11,6 +11,7 @@ import { Typography } from '@/components/ui/Typography/Typography';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { serializeWorkflowVersionSearch } from '@/lib/workflow-search-params';
 import { OnboardingStatusChip } from '../../../components/OnboardingStatusChip/OnboardingStatusChip';
+import { OnboardingReconcileAction } from './OnboardingReconcileAction/OnboardingReconcileAction';
 import { OnboardingReviewActions } from './OnboardingReviewActions/OnboardingReviewActions';
 
 export interface OnboardingDetailsHeaderProps {
@@ -25,6 +26,9 @@ export interface OnboardingDetailsHeaderProps {
   /** The review action currently in flight, or null when none is. */
   pendingAction: ManualReviewAction | null;
   onReviewSubmit: (action: ManualReviewAction) => void;
+  /** True while the parked connector's provider is being asked for its verdict. */
+  isReconciling: boolean;
+  onReconcile: () => void;
   /** The page's live status line; null when there is nothing to report. */
   statusMessage: string | null;
 }
@@ -39,8 +43,13 @@ export function OnboardingDetailsHeader({
   isRefreshing,
   pendingAction,
   onReviewSubmit,
+  isReconciling,
+  onReconcile,
   statusMessage,
 }: OnboardingDetailsHeaderProps): ReactElement {
+  // One write at a time: a review decision and a provider check both move the same onboarding.
+  const actionPending = pendingAction !== null || isReconciling;
+
   return (
     <header className="flex flex-col gap-2 border-b border-border-rule px-8 py-5">
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
@@ -85,19 +94,26 @@ export function OnboardingDetailsHeader({
         </div>
         <div className="flex flex-none items-center gap-2">
           {summary !== null && (
-            <OnboardingReviewActions
-              definition={definition}
-              currentStep={summary.currentStep}
-              pendingAction={pendingAction}
-              onSubmit={onReviewSubmit}
-            />
+            <>
+              <OnboardingReconcileAction
+                pendingConnector={summary.pendingConnector}
+                disabled={actionPending}
+                onReconcile={onReconcile}
+              />
+              <OnboardingReviewActions
+                definition={definition}
+                currentStep={summary.currentStep}
+                disabled={actionPending}
+                onSubmit={onReviewSubmit}
+              />
+            </>
           )}
           <Button
             variant="secondary"
             size="icon"
             aria-label="Reload"
-            // Reload resets the review mutation, which would orphan a decision still in flight.
-            disabled={isRefreshing || pendingAction !== null}
+            // Reload resets the mutations, which would orphan a write still in flight.
+            disabled={isRefreshing || actionPending}
             onClick={onRefresh}
           >
             <Refresh aria-hidden="true" className="size-4.5" />

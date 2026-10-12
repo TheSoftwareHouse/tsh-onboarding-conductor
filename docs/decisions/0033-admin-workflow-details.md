@@ -65,3 +65,10 @@ mapping, but not its connector `config`; that surface stays the Connectors setti
 `null` for a step the report has no entry for, and every step of a built-in v1 is authored as
 `custom`, so its type says little there. The versions route lists rows in every status, so a `draft`
 that nothing in the engine writes still appears once an operator sets it by hand.
+
+> **Amended 2026-10-05 by [0038](./0038-runtime-connector-selection.md):** each step's primary
+> connector also carries `authoredId` (the id the document wrote), `selected` (whether an operator
+> selection replaces it) and `selectableIds` (the ids the operator may choose), with `id` now the
+> effective connector. The admin onboarding summary gains `pendingConnector`
+> (`{ connectorId, connectorName, connectorOrder }` or `null`). Connector `config` still never
+> leaves the engine.

@@ -6,12 +6,15 @@ import {
   WorkflowInvalidError,
   validateAndNormalizeWorkflow,
   type NormalizedWorkflowDefinition,
+  type NormalizedWorkflowStep,
 } from '@tsh/ddl-schema';
 import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
+  type ConnectorAdapterSummary,
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
 import { toPaginatedMeta } from '../pagination';
+import { ConnectorSelectionRules } from './domain/connector-selection';
 import { Workflow } from './domain/workflow';
 import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import type { ListAdminWorkflowVersionsResponseDto } from './dto/list-admin-workflow-versions.response.dto';
@@ -27,6 +30,7 @@ import { WorkflowRetiredException } from './errors/workflow-retired.exception';
 import { WorkflowVersionNotPublishedException } from './errors/workflow-version-not-published.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
 import { WorkflowFileLoaderService } from './workflow-file-loader.service';
+import { WorkflowConnectorSelectionsRepository } from './workflow-connector-selections.repository';
 import { WORKFLOW_SCOPES, type WorkflowScope } from './workflow-scope';
 import { DRAFT_WORKFLOW_STATUS, RETIRED_WORKFLOW_STATUS } from './workflow-status';
 import { WorkflowsRepository } from './workflows.repository';
@@ -51,6 +55,12 @@ export class WorkflowRegistryService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly workflowFileLoaderService: WorkflowFileLoaderService,
     private readonly workflowsRepository: WorkflowsRepository,
+    private readonly connectorSelectionsRepository: WorkflowConnectorSelectionsRepository,
+    /**
+     * The only way in to the adapters: `ConnectorsModule` and this module `forwardRef` each other,
+     * so the adapter collection and scope tokens are not injected here, and `listAdapters()` on
+     * this port is how the registry learns what is registered.
+     */
     @Inject(WORKFLOW_CONNECTOR_EXECUTION_PORT)
     @Optional()
     private readonly connectorExecutionPort?: ConnectorExecutionPort,
@@ -102,6 +112,7 @@ export class WorkflowRegistryService implements OnModuleInit {
     }
 
     this.assertUniqueSourceKeys(sourceKeyDeclarations);
+    await this.warnAboutStaleSelections(manager);
 
     if ((await this.workflowsRepository.countPublished(manager, scopes)) === 0) {
       this.logger.warn(
@@ -127,7 +138,7 @@ export class WorkflowRegistryService implements OnModuleInit {
     const storedVersion = await this.resolveStoredVersion(key, version, manager, false);
 
     return {
-      workflow: this.toWorkflow(storedVersion),
+      workflow: await this.toWorkflow(storedVersion, manager),
       versionId: storedVersion.workflowVersionId,
     };
   }
@@ -156,7 +167,7 @@ export class WorkflowRegistryService implements OnModuleInit {
       throw new WorkflowRetiredException();
     }
 
-    return this.toWorkflow(storedVersion);
+    return this.toWorkflow(storedVersion, readManager);
   }
 
   /**
@@ -171,7 +182,7 @@ export class WorkflowRegistryService implements OnModuleInit {
    * uses the default connection.
    */
   async getById(key: string, version?: number, manager?: EntityManager): Promise<Workflow> {
-    return this.toWorkflow(await this.resolveStoredVersion(key, version, manager, false));
+    return this.toWorkflow(await this.resolveStoredVersion(key, version, manager, false), manager);
   }
 
   /**
@@ -184,7 +195,10 @@ export class WorkflowRegistryService implements OnModuleInit {
     try {
       const report = compileWorkflowReport(storedVersion.definition);
 
-      return this.toWorkflow(storedVersion).describeDefinition(report.steps);
+      return (await this.toWorkflow(storedVersion)).describeDefinition(
+        report.steps,
+        this.createConnectorSelectionRules(),
+      );
     } catch (error) {
       if (storedVersion.status === DRAFT_WORKFLOW_STATUS) {
         if (error instanceof WorkflowInvalidError) {
@@ -300,13 +314,54 @@ export class WorkflowRegistryService implements OnModuleInit {
       : new WorkflowNotFoundException();
   }
 
-  /** The family's label rides along so the read-side projection can report it. */
-  private toWorkflow(storedVersion: WorkflowVersionEntity): Workflow {
+  /**
+   * The family's label rides along so the read-side projection can report it, and so do the
+   * family's connector selections: read per resolution, never cached, so a selection takes effect
+   * on the next request on every instance — the way connector settings do.
+   */
+  private async toWorkflow(
+    storedVersion: WorkflowVersionEntity,
+    manager?: EntityManager,
+  ): Promise<Workflow> {
+    const selections = await this.connectorSelectionsRepository.findByWorkflowId(
+      manager ?? this.dataSource.manager,
+      storedVersion.workflowId,
+    );
+
     return new Workflow(
       this.normalizeDefinition(storedVersion.definition),
       this.connectorExecutionPort,
       storedVersion.workflow.name,
+      selections,
     );
+  }
+
+  /**
+   * The selection rules for this environment — the port's adapters under the active scopes — so
+   * the projection and the selection write judge a candidate by the same object.
+   */
+  createConnectorSelectionRules(): ConnectorSelectionRules {
+    return new ConnectorSelectionRules(this.connectorExecutionPort, this.getActiveScopes());
+  }
+
+  /**
+   * A selection naming an adapter this build does not ship (or hides in this environment) is not
+   * silently dropped at execution — it fails loudly there — so the boot says which rows are stale.
+   */
+  private async warnAboutStaleSelections(manager: EntityManager): Promise<void> {
+    const selectableIds = new Set(
+      this.createConnectorSelectionRules()
+        .listSelectableAdapters()
+        .map((adapter) => adapter.id),
+    );
+
+    for (const selection of await this.connectorSelectionsRepository.findAll(manager)) {
+      if (!selectableIds.has(selection.connectorId)) {
+        this.logger.warn(
+          `Connector selection for workflow=${selection.workflow.key} step=${selection.stepName} names connector id=${selection.connectorId}, which is not registered; executing that step will fail until the selection is cleared`,
+        );
+      }
+    }
   }
 
   /**
@@ -340,15 +395,20 @@ export class WorkflowRegistryService implements OnModuleInit {
    * source it came from — is held to the same schema and connector-declaration
    * rules. An adapter's refusal is re-thrown typed, with its message intact, so a
    * caller can tell an authoring defect from a failure of the engine's own.
+   *
+   * It also holds an asynchronous connector to its adapter's `callbackFields`: a step must declare
+   * every field a callback may emit, or the verdict carrying one would be refused when it arrived.
    */
-  private normalizeDefinition(
-    definition: Readonly<Record<string, unknown>>,
-  ): NormalizedWorkflowDefinition {
+  normalizeDefinition(definition: Readonly<Record<string, unknown>>): NormalizedWorkflowDefinition {
     const normalized = validateAndNormalizeWorkflow(definition);
+    const adaptersById = new Map(
+      (this.connectorExecutionPort?.listAdapters?.() ?? []).map((adapter) => [adapter.id, adapter]),
+    );
 
     for (const step of normalized.steps) {
       try {
         this.connectorExecutionPort?.validateDeclarations?.(step.connectors);
+        this.assertCallbackFieldsDeclared(step, adaptersById);
       } catch (cause) {
         throw new WorkflowConnectorDeclarationInvalidError(
           step.name,
@@ -358,6 +418,27 @@ export class WorkflowRegistryService implements OnModuleInit {
     }
 
     return normalized;
+  }
+
+  private assertCallbackFieldsDeclared(
+    step: NormalizedWorkflowStep,
+    adaptersById: ReadonlyMap<string, ConnectorAdapterSummary>,
+  ): void {
+    for (const connector of step.connectors) {
+      for (const candidate of [connector, ...connector.fallbacks]) {
+        if (!candidate.async) {
+          continue;
+        }
+
+        for (const field of adaptersById.get(candidate.id)?.callbackFields ?? []) {
+          if (!Object.prototype.hasOwnProperty.call(step.data, field)) {
+            throw new Error(
+              `connector ${candidate.id} emits callback field "${field}" that step "${step.name}" does not declare`,
+            );
+          }
+        }
+      }
+    }
   }
 
   /**

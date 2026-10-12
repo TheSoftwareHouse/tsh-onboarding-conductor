@@ -41,6 +41,19 @@ describe('AuditResourceCell', () => {
     );
   });
 
+  it('links a workflow row to that workflow’s details page', () => {
+    render(
+      <MemoryRouter>
+        <AuditResourceCell resourceType="workflow" resourceId="kyc basic" />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('link', { name: 'kyc basic' })).toHaveAttribute(
+      'href',
+      ADMIN_ROUTES.workflows.details('kyc basic'),
+    );
+  });
+
   it('renders no link for a resource type with nowhere to go', () => {
     render(
       <MemoryRouter>

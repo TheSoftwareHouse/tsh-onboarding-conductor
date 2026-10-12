@@ -7,6 +7,7 @@ export type CompletedOnboardingDocumentResolution = {
   readonly finalObjectKey: string;
   readonly verifiedEtag: string;
   readonly verifiedSizeBytes: number;
+  readonly contentType: string;
 };
 
 export type CompletedOnboardingDocumentResolutionInput = {
@@ -55,10 +56,13 @@ export class CompletedOnboardingDocumentResolver {
     const finalObjectKey = document.finalObjectKey?.trim();
     const verifiedEtag = document.verifiedEtag?.trim();
     const verifiedSizeBytes = document.verifiedSizeBytes;
+    const contentType = (document.verifiedContentType ?? document.requestedContentType)?.trim();
 
     if (
       !this.isNonEmptyString(finalObjectKey) ||
       !this.isNonEmptyString(verifiedEtag) ||
+      // A provider upload needs the MIME type; a document without one cannot be sent faithfully.
+      !this.isNonEmptyString(contentType) ||
       typeof verifiedSizeBytes !== 'number' ||
       !Number.isSafeInteger(verifiedSizeBytes) ||
       verifiedSizeBytes <= 0
@@ -70,6 +74,7 @@ export class CompletedOnboardingDocumentResolver {
       finalObjectKey,
       verifiedEtag,
       verifiedSizeBytes,
+      contentType,
     };
   }
 

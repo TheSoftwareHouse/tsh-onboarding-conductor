@@ -12,13 +12,21 @@ import type {
   WorkflowTransitionStatus,
 } from '@tsh/ddl-schema';
 import type {
+  ConnectorAdapterSummary,
   ConnectorExecutionPort,
   ConnectorRejectionReason,
 } from '../../connectors/ports/connector-execution.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
+  type ConnectorPendingExecution,
 } from '../../connectors/ports/connector-execution-result';
+import {
+  applyConnectorSelections,
+  ConnectorSelectionRules,
+  findSelectableConnector,
+  type WorkflowConnectorSelection,
+} from './connector-selection';
 import { Scoring } from './scoring';
 import { Step, type StepDescription } from './step';
 import type {
@@ -79,9 +87,47 @@ export type WorkflowNextState = {
   completedAt: Date | null;
   rejectionReason: ConnectorRejectionReason | null;
   scores: Record<string, number>;
+  /** The connector the onboarding is parked on awaiting a callback; `null` on every other state. */
+  pendingConnector: ConnectorPendingExecution | null;
 };
 
 export { WorkflowEvaluationResult } from './workflow-evaluation-result';
+
+/** The field error a client submit is refused with for a key only a connector callback may write. */
+export const CALLBACK_ONLY_FIELD_ERROR = 'CALLBACK_ONLY';
+
+/**
+ * Per step, the `data` keys an asynchronous connector's callback writes — every async candidate
+ * of every slot, fallbacks included, as the registry's declaration check counts them. A step with
+ * none is absent.
+ */
+const collectCallbackFields = (
+  definition: NormalizedWorkflowDefinition,
+  adapters: readonly ConnectorAdapterSummary[],
+): ReadonlyMap<string, ReadonlySet<string>> => {
+  const fieldsByAdapterId = new Map(
+    adapters.map((adapter) => [adapter.id, adapter.callbackFields]),
+  );
+  const fieldsByStep = new Map<string, ReadonlySet<string>>();
+
+  for (const step of definition.steps) {
+    const fields = new Set<string>();
+
+    for (const connector of step.connectors) {
+      for (const candidate of [connector, ...connector.fallbacks]) {
+        if (candidate.async) {
+          fieldsByAdapterId.get(candidate.id)?.forEach((field) => fields.add(field));
+        }
+      }
+    }
+
+    if (fields.size > 0) {
+      fieldsByStep.set(step.name, fields);
+    }
+  }
+
+  return fieldsByStep;
+};
 
 const projectConnector = (
   connector: NormalizedWorkflowConnectorDeclaration | NormalizedWorkflowConnectorFallback,
@@ -97,22 +143,45 @@ const projectConnector = (
 });
 
 export class Workflow {
+  /** What the document authored; `definition` is this with the operator's selections applied. */
+  private readonly authoredDefinition: NormalizedWorkflowDefinition;
+  private readonly definition: NormalizedWorkflowDefinition;
+  /** The steps whose primary connector a selection actually replaced. */
+  private readonly selectedStepNames: ReadonlySet<string>;
   private readonly stepsByName: Readonly<Record<string, Step>>;
   private readonly scoring: Scoring;
+  /** What a client submit may not carry; the callback path writes these through the same step. */
+  private readonly callbackFieldsByStep: ReadonlyMap<string, ReadonlySet<string>>;
 
   constructor(
-    private readonly definition: NormalizedWorkflowDefinition,
+    definition: NormalizedWorkflowDefinition,
     readonly connectorExecutionPort?: ConnectorExecutionPort,
     /**
      * The display label the workflow is reported under: its family's for a stored revision, the
      * document's own for a compile dry run, null when neither declares one.
      */
     readonly name: string | null = null,
+    connectorSelections: readonly WorkflowConnectorSelection[] = [],
   ) {
+    this.authoredDefinition = definition;
+    this.definition = applyConnectorSelections(definition, connectorSelections);
+    this.selectedStepNames = new Set(
+      connectorSelections
+        .filter((selection) => {
+          const step = definition.stepsByName[selection.stepName];
+
+          return step !== undefined && findSelectableConnector(step) !== undefined;
+        })
+        .map((selection) => selection.stepName),
+    );
     this.stepsByName = Object.fromEntries(
       Object.values(this.definition.stepsByName).map((step) => [step.name, new Step(step)]),
     );
     this.scoring = new Scoring(this.definition.scores);
+    this.callbackFieldsByStep = collectCallbackFields(
+      this.definition,
+      connectorExecutionPort?.listAdapters?.() ?? [],
+    );
   }
 
   get id(): string {
@@ -123,8 +192,16 @@ export class Workflow {
     return this.definition.version;
   }
 
-  /** Every step and transition, connectors without config; `source` is null without `sourceSteps`. */
-  describeDefinition(sourceSteps?: readonly StepReport[]): WorkflowDefinitionResponseDto {
+  /**
+   * Every step and transition, connectors without config; `source` is null without `sourceSteps`.
+   * A step's single primary connector also reports what the document authored, whether a
+   * selection replaced it, and which ids `rules` would let a save bind in its place — judged
+   * against the step as authored, so the list is exactly what the write accepts for this version.
+   */
+  describeDefinition(
+    sourceSteps?: readonly StepReport[],
+    rules: ConnectorSelectionRules = new ConnectorSelectionRules(undefined, []),
+  ): WorkflowDefinitionResponseDto {
     const sourcesByCompiledName = new Map(
       (sourceSteps ?? []).flatMap((entry) =>
         entry.compiledStepNames.map(
@@ -158,10 +235,18 @@ export class Workflow {
         })),
         source: sourcesByCompiledName.get(step.name) ?? null,
         fields: [...this.stepsByName[step.name].describeFields()],
-        connectors: step.connectors.map((connector) => ({
-          ...projectConnector(connector),
-          fallbacks: connector.fallbacks.map(projectConnector),
-        })),
+        connectors: step.connectors.map((connector, index) => {
+          const authoredStep = this.authoredDefinition.stepsByName[step.name];
+          const authoredId = authoredStep.connectors[index].id;
+
+          return {
+            ...projectConnector(connector),
+            authoredId,
+            selected: this.selectedStepNames.has(step.name),
+            selectableIds: rules.listSelectableIds(authoredStep, authoredId, connector.id),
+            fallbacks: connector.fallbacks.map(projectConnector),
+          };
+        }),
       })),
     };
   }
@@ -290,6 +375,18 @@ export class Workflow {
       });
     }
 
+    // A callback field is the provider's verdict, and on a step whose provider does not count
+    // attempts also the running attempt total: a client writing either would decide its own
+    // verification or reset the cap. Only the continuation — the callback or the operator
+    // reconcile, applied through this same path — may carry one.
+    if (input.continuation === undefined) {
+      const callbackOnlyErrors = this.findCallbackOnlyErrors(currentStep.name, input.submittedData);
+
+      if (callbackOnlyErrors !== undefined) {
+        return WorkflowEvaluationResult.retryableInvalidData(callbackOnlyErrors, currentStep.name);
+      }
+    }
+
     const stepData = currentStep.collectAcceptedData(input.submittedData, input.onboardingContext);
     if (stepData.acceptedData === null || stepData.connectorData === null) {
       return WorkflowEvaluationResult.retryableInvalidData(stepData.fieldErrors, currentStep.name);
@@ -356,6 +453,29 @@ export class Workflow {
   /** The step an onboarding is on, by name — `undefined` when there is none or it names no step. */
   findStep(currentStep: string | null | undefined): Step | undefined {
     return typeof currentStep === 'string' ? this.stepsByName[currentStep] : undefined;
+  }
+
+  /** The step's callback-only keys a submit carries, as field errors; `undefined` when none. */
+  private findCallbackOnlyErrors(
+    stepName: string,
+    submittedData: unknown,
+  ): Readonly<Record<string, readonly string[]>> | undefined {
+    const callbackFields = this.callbackFieldsByStep.get(stepName);
+
+    if (
+      callbackFields === undefined ||
+      typeof submittedData !== 'object' ||
+      submittedData === null ||
+      Array.isArray(submittedData)
+    ) {
+      return undefined;
+    }
+
+    const refused = Object.keys(submittedData).filter((field) => callbackFields.has(field));
+
+    return refused.length === 0
+      ? undefined
+      : Object.fromEntries(refused.map((field) => [field, [CALLBACK_ONLY_FIELD_ERROR]]));
   }
 
   private async evaluateTransition(
@@ -435,6 +555,7 @@ export class Workflow {
             completedAt: null,
             rejectionReason: null,
             scores: { ...onboardingScores },
+            pendingConnector: outcome.pending!,
           },
           outcome.pending!,
         );
@@ -511,6 +632,7 @@ export class Workflow {
       completedAt: terminal ? new Date() : null,
       rejectionReason: resolvedRejectionReason,
       scores: { ...scores },
+      pendingConnector: null,
     };
 
     if (trigger === 'rejected') {
@@ -537,6 +659,7 @@ export class Workflow {
       completedAt: new Date(),
       rejectionReason: null,
       scores: { ...scores },
+      pendingConnector: null,
     };
   }
 

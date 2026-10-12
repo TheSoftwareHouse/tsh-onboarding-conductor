@@ -26,10 +26,11 @@ workflow's connector `name` is a free label the audit trail also records, so a d
 pointing at a fixture must not label it after a real provider.
 
 Built-in adapters talk to real providers and are named after the protocol or
-vendor they speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `http_request`),
+vendor they speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `sumsub_kyc`,
+`veriff_kyc`, `http_request`),
 never after a particular development server.
 
-Three of the four declare a `settingsSchema` and read their credentials through
+Every built-in but `http_request` declares a `settingsSchema` and reads its credentials through
 `ConnectorSettingsService`, so an operator can supply and rotate them at
 runtime over `/v1/admin/connectors` instead of through environment variables —
 the database is the only source, there is no environment fallback, and an
@@ -124,5 +125,5 @@ To add your own adapter, drop it in `users/`, implement `ConnectorAdapter`, and
 add it to `USER_CONNECTOR_ADAPTER_PROVIDERS` in `../connectors.module.ts`. That
 registration is the only thing that makes it report `scope: "users"` on
 `/v1/admin/connectors` — nothing else to declare.
-Connector `type` values must be unique across all groups; the module
+Connector `id` values must be unique across all groups; the module
 throws on startup if two adapters claim the same one.

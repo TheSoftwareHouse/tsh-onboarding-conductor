@@ -11,6 +11,9 @@ const baseFilters: AdminOnboardingFilters = {
   workflowVersion: '',
   currentStep: '',
   onboardingId: '',
+  parked: false,
+  pendingConnectorId: '',
+  parkedBefore: '',
   limit: 100,
 };
 

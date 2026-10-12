@@ -7,6 +7,31 @@ import {
   ONBOARDING_AGREEMENT_STATUS_ENUM,
 } from '../../openapi/api-enums';
 
+/** The connector an onboarding is parked on while it awaits a provider's callback. */
+export class AdminOnboardingPendingConnectorResponseDto {
+  @ApiProperty({ description: 'The id of the connector the onboarding is waiting on.' })
+  connectorId!: string;
+
+  @ApiProperty({ description: 'The name the workflow step gives that connector declaration.' })
+  connectorName!: string;
+
+  @ApiProperty({
+    type: 'integer',
+    description: 'The order of the connector slot on the step the connector was parked in.',
+  })
+  connectorOrder!: number;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'When the onboarding was first parked on this connector; null for a row parked before ' +
+      'the engine recorded it.',
+  })
+  parkedAt!: string | null;
+}
+
 /** One onboarding as the operator surface reports it: the record, without its collected data. */
 export class AdminOnboardingSummaryResponseDto {
   @ApiProperty({ format: 'uuid' })
@@ -76,4 +101,13 @@ export class AdminOnboardingSummaryResponseDto {
       '`onboarding_agreement_statuses` view derives it; `not_accepted` when it holds none.',
   })
   agreementStatus!: OnboardingAgreementStatus;
+
+  @ApiProperty({
+    type: () => AdminOnboardingPendingConnectorResponseDto,
+    nullable: true,
+    description:
+      'The connector the onboarding is parked on awaiting a callback; null when it is not ' +
+      'waiting for one, and for onboardings parked before this was recorded.',
+  })
+  pendingConnector!: AdminOnboardingPendingConnectorResponseDto | null;
 }

@@ -186,6 +186,7 @@ nothing here changes because of it. There is no problem+json — the skeleton's
 | `ONBOARDING_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `AGREEMENT_NOT_FOUND`               | 404    | 404                                                                               |
 | `WORKFLOW_NOT_FOUND`                                                                     | 404    | 502 — the workflow id is the BFF's own config, not the caller's input             |
 | `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION` | 409    | 409, terminal for the attempt                                                     |
+| `ONBOARDING_AWAITING_CONNECTOR` — carries `pendingConnector`                             | 409    | wait and poll `/state`; do not resubmit — neither terminal nor a re-render        |
 | `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`                                    | 409    | re-reserve                                                                        |
 | `WORKFLOW_RETIRED`                                                                       | 410    | 410                                                                               |
 | `CONNECTOR_NOT_CONFIGURED`                                                               | 503    | 502 — an operator has not supplied a credential                                   |

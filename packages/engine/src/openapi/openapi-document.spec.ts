@@ -111,6 +111,7 @@ describe('OpenAPI document', () => {
     expect(operations.map(({ method, path }) => `${method.toUpperCase()} ${path}`).sort()).toEqual(
       [
         'DELETE /v1/admin/connectors/{connectorId}',
+        'DELETE /v1/admin/workflows/{workflowId}/steps/{stepName}/connector',
         'DELETE /v1/admin/workflows/{workflowId}/versions/{version}',
         'GET /v1/admin/agreements',
         'GET /v1/admin/audit',
@@ -143,10 +144,12 @@ describe('OpenAPI document', () => {
         'POST /v1/onboardings/{id}/agreements/{agreementId}/accept',
         'POST /v1/onboardings/{id}/documents',
         'POST /v1/onboardings/{id}/documents/{documentId}/complete',
+        'POST /v1/onboardings/{id}/pending-connector/reconcile',
         'POST /v1/onboardings/{id}/review/{action}',
         'POST /v1/onboardings/{id}/submit',
         'POST /v1/webhooks/{providerKey}/callback',
         'PUT /v1/admin/connectors/{connectorId}',
+        'PUT /v1/admin/workflows/{workflowId}/steps/{stepName}/connector',
         'PUT /v1/admin/workflows/{workflowId}/versions/{version}',
       ].sort(),
     );
