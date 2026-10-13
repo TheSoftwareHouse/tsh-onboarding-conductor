@@ -56,7 +56,19 @@ tool by hand produces confusing failures.
      major: it archives the previous document under `packages/shared/openapi/versions/` before
      regenerating, and that archive is committed with the bump.
    - `README.md` only if the change affects what the project is or where to start.
-6. **Add a changeset** for user-facing changes: `pnpm changeset`.
+
+## Versioning
+
+Nothing to do as an author: every merge into `main` is released automatically
+(`.github/workflows/release.yml`, [decision 0046](docs/decisions/0046-commit-driven-versioning.md)).
+The squash title becomes the `CHANGELOG.md` line, so keep it a clear Conventional Commit. The
+repository squashes with the commit or PR title: for a one-commit PR GitHub proposes that commit's
+title, so check the title at merge time. The squash body holds every inner commit's message, so a
+`BREAKING CHANGE:` footer in any commit of the PR bumps the minor; edit the message at merge to drop
+it. A
+`!` after the type (`feat!:`) or a `BREAKING CHANGE:` footer bumps the minor version while the
+product is `0.x`, the major from `1.0`; everything else bumps the patch. To jump to a specific
+version, set it by hand in every `package.json` in the pull request and it is released as it is.
 
 ## Checks
 

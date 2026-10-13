@@ -14,5 +14,4 @@
 - [ ] Tests cover the change (a fix includes the test that would have caught the bug)
 - [ ] `docs/IMPLEMENTATION.md` updated if this adds, changes or removes a feature
 - [ ] `.env.dist` updated, with an explanatory comment, if this adds configuration
-- [ ] `pnpm changeset` added for a user-facing change
 - [ ] Title is in Conventional Commit form (it becomes the squashed commit message)

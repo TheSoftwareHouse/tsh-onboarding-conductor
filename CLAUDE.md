@@ -35,6 +35,7 @@ Always use the root pnpm scripts. Never invoke `docker compose`, `jest`, `tsc` o
 | `pnpm typecheck`                                                                    | `tsc --noEmit` across packages; `@tsh/ddl-schema` builds first because its dependents typecheck against its `dist`         |
 | `pnpm build`                                                                        | Build all packages                                                                                                         |
 | `pnpm test` / `pnpm test:cov`                                                       | Unit tests (co-located `*.spec.ts`)                                                                                        |
+| `pnpm test:scripts`                                                                 | Tests for `scripts/` (`node --test`); part of `pnpm test` and `test:cov`                                                   |
 | `pnpm test:integration`                                                             | Integration tests                                                                                                          |
 | `pnpm test:e2e`                                                                     | Brings the stack up without the worker, runs e2e, always tears it down                                                     |
 | `pnpm format:fix`                                                                   | Canonical repo-wide Prettier write                                                                                         |
@@ -61,7 +62,9 @@ runs ESLint with `--max-warnings=0` and Prettier `--check`, and blocks the commi
 either.
 
 CI (`.github/workflows/ci.yml`) runs lint → `skills:validate` → typecheck → build →
-`test:cov` → e2e → MailHog integration. Changes must pass that sequence.
+`test:cov` → e2e → MailHog integration. Changes must pass that sequence. Every merge into `main`
+is then released by `.github/workflows/release.yml` (`scripts/release.cjs`): one product version,
+bumped from the commit history, with a generated `CHANGELOG.md`.
 
 The model-driven skill checks never run in CI, in any workflow, and never against the
 Anthropic API. `skills:evals`, `skills:routing` and `skills:ablation` each drive headless
