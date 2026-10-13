@@ -3806,7 +3806,7 @@ describe('OnboardingsController (e2e)', () => {
     }
   });
 
-  it('applies bootstrap, onboarding, document, and client webhook outbox migrations', async () => {
+  it('applies the initial schema migration', async () => {
     const dataSource = getApp().get(DataSource) as DataSource;
     const migrations = await dataSource.query(
       `SELECT name
@@ -3814,26 +3814,9 @@ describe('OnboardingsController (e2e)', () => {
        ORDER BY id`,
     );
 
-    // Each table's later `ALTER`s are folded into its creating migration (Task 4.0), so the
-    // surviving set is exactly these fifteen — and the gaps in the numbering are history, not an
-    // omission. 0029 to 0033 post-date the fold and are additive.
-    expect(migrations).toEqual([
-      { name: '0001_init' },
-      { name: '0002_create_onboardings_1735689600000' },
-      { name: '0003_create_onboarding_documents_1784419200000' },
-      { name: '0006_create_client_webhook_outbox_1784592000000' },
-      { name: '0010_create_audit_log_1785110400000' },
-      { name: '0013_create_workflows_2051308800000' },
-      { name: '0016_create_connector_settings_2051568000000' },
-      { name: '0022_create_agreements_2052172800000' },
-      { name: '0024_create_encryption_keys_2052345600000' },
-      { name: '0028_add_onboardings_in_progress_version_index_2052691200000' },
-      { name: '0029_add_workflow_versions_one_draft_index_2052777600000' },
-      { name: '0030_create_workflow_connector_selections_2052864000000' },
-      { name: '0031_add_onboardings_pending_connector_2052950400000' },
-      { name: '0032_scope_workflow_connector_selections_per_version_2053036800000' },
-      { name: '0033_add_onboardings_created_at_index_2053296000000' },
-    ]);
+    // The whole schema is one migration: the incremental history was folded into it before
+    // anything was deployed.
+    expect(migrations).toEqual([{ name: '0001_initial_schema_1735689600000' }]);
 
     const tables = await dataSource.query(
       `SELECT table_name

@@ -104,15 +104,18 @@ Do not introduce a global error enum or map as the public error contract.
 
 ## Database migrations (`src/database/migrations/`)
 
-- Filenames use a sequential numeric prefix and a snake-case stem:
-  `000N_description.ts`. Continue the existing sequence; never renumber.
-- The class name is PascalCase ending in the sequence number: `CreateOnboardings0002`.
+- The whole schema is one migration, `0001_initial_schema.ts`: the incremental history was
+  folded into it before anything was deployed. A new migration continues the sequence as
+  `0002_description.ts` — a numeric prefix and a snake-case stem; never renumber.
+- The class name is PascalCase ending in the sequence number: `AddOnboardingsNotes0002`.
 - The instance `name` is `<filename_stem>_<13-digit-timestamp>`. TypeORM parses the
-  final 13 characters as a timestamp, so the name must end in exactly 13 digits.
+  final 13 characters as a timestamp and runs migrations in that order, so the name must
+  end in exactly 13 digits, greater than the previous migration's (`0001`'s is
+  `1735689600000`).
 
 ```ts
-export class CreateOnboardings0002 implements MigrationInterface {
-  name = '0002_create_onboardings_1735689600000';
+export class AddOnboardingsNotes0002 implements MigrationInterface {
+  name = '0002_add_onboardings_notes_1767225600000';
 }
 ```
 
@@ -149,10 +152,10 @@ decorator exactly. See decision record
   changes the schema has to leave assertions that read it still true on the next run,
   and `onboardings.e2e-spec.ts`'s schema-shape assertion compares columns by name
   (`byColumnName`) rather than pinning `ordinal_position`, which a volume's history can
-  reorder. A volume created by an earlier, incremental migration set cannot boot this
-  branch at all — its `migrations` table already lists the folded numbers, so the
-  rewritten `CREATE TABLE`s never run; `pnpm stack:reset` once, or run under another
-  `COMPOSE_PROJECT_NAME`.
+  reorder. A volume created by the earlier, incremental migration set cannot boot this
+  branch at all — its `migrations` table lists the old names, so the engine runs
+  `0001_initial_schema` against tables that already exist and exits; `pnpm stack:reset`
+  once, or run under another `COMPOSE_PROJECT_NAME`.
 - A workflow document is a list of typed steps, in specs too. A spec that states a
   rule of the compiled form may still write untyped steps and load them through
   `src/workflows/testing/untyped-steps.helper.ts` (`normalizeUntypedSteps`); a spec

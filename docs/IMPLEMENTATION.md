@@ -868,7 +868,7 @@ Operators create, replace, delete and publish `draft` rows through the admin API
   `version` no larger than 2147483647, the `integer` column's maximum; the document is stored as authored and never compiled on save. The compile dry run tells
   the author whether it is valid.
 - A family holds at most one draft, enforced by the partial unique index
-  `uq_workflow_versions_one_draft` (migration `0029`).
+  `uq_workflow_versions_one_draft` (migration `0001_initial_schema`).
 - A draft whose `id` names no family creates one; an `id` naming a `built-in` or `fixtures` family is
   `WORKFLOW_SCOPE_CONFLICT`. A `name` of 1–200 characters labels the family only when the call
   creates it.
@@ -2010,9 +2010,7 @@ operator may switch the step's connector while an onboarding waits (§2), so
 2. If `pendingConnector` is `null`, log `AWAITING_CALLBACK_PARK_NOT_RECORDED` at warn and resolve
    to `undefined`. There is no fallback to the step's chain any more: a row on the step without a
    park is one a retry verdict has cleared and the client has not resubmitted, and a late decision
-   for an attempt it no longer waits on must not decide it. (Migration `0031` never backfilled the
-   column, so a row parked before it would resolve the same way; the branch is unreleased, so no
-   deployed row is in that state.)
+   for an attempt it no longer waits on must not decide it.
 3. Otherwise the callback's connector id must equal `pendingConnector.connectorId`, else
    `undefined`. The slot is the step's declaration with `order === connectorOrder` (`undefined` if
    none). The connector is the link of `[slot, ...slot.fallbacks]` carrying the parked id or, when
@@ -2425,7 +2423,7 @@ so a version is a row rather than half of a composite key — decision record
 | `agreement_versions`            | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                                                                                    |
 | `onboarding_agreements`         | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                                                                                        |
 | `encryption_keys`               | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                                                                                    |
-| `_engine_alive`                 | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                                                                                                                   |
+| `_engine_alive`                 | trivial table from `0001_initial_schema` proving migrations run                                                                                                                                                                                                                                                                                                                                         |
 
 Only `agreements` carries a `current_version_id`. An agreement version is created only by
 `POST /v1/admin/agreements`, which sets the pointer in the same statement that writes the version,
@@ -2447,7 +2445,7 @@ One view, `onboarding_agreement_statuses`, sits over `agreements`, `agreement_ve
 then aggregated over the onboarding — `not_accepted` if any family has no accepted version,
 `outdated` if every family has one but at least one is behind the family's latest, `current`
 otherwise. An onboarding with no links at all does not appear in the view, and every reader
-coalesces that absence to `not_accepted`. It is created by migration `0022` and mapped as a
+coalesces that absence to `not_accepted`. It is created by the migration and mapped as a
 TypeORM `@ViewEntity`, never generated — `synchronize: false` is global. The `onboardings` table
 gained no column for it, and the reasoning is in decision record
 [0013](decisions/0013-versioned-agreements.md).
@@ -2468,52 +2466,28 @@ nothing a decorator does not already say. A reference the schema deliberately le
 directions and fails if entity and database ever disagree; see decision record
 [0027](decisions/0027-relations-declared-on-entities.md).
 
-Fourteen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
-timestamp (TypeORM parses the last 13 characters): `0001_init`, `0002_create_onboardings`,
-`0003_create_onboarding_documents`, `0006_create_client_webhook_outbox`, `0010_create_audit_log`,
-`0013_create_workflows`, `0016_create_connector_settings`, `0022_create_agreements`,
-`0024_create_encryption_keys`, `0028_add_onboardings_in_progress_version_index`,
-`0029_add_workflow_versions_one_draft_index`, `0030_create_workflow_connector_selections`,
-`0031_add_onboardings_pending_connector`, `0032_scope_workflow_connector_selections_per_version`
-and `0033_add_onboardings_created_at_index`. A file under the migrations glob may export nothing but its class:
-TypeORM instantiates every export as a migration.
+One migration, `0001_initial_schema` (class `InitialSchema0001`, `name` ending in a 13-digit
+timestamp — TypeORM parses the last 13 characters), creates the whole schema. A file under the
+migrations glob may export nothing but its class: TypeORM instantiates every export as a migration.
+A later migration continues the sequence as `0002_description.ts`.
 
-No migration has ever run against a deployed environment, so the set is folded rather than
-incremental: each table's later `ALTER`s were merged into the `CREATE TABLE` that precedes them,
-and the emptied follow-up files were deleted outright rather than kept as history. `0002` creates `onboardings`
-with the full lifecycle status list (including `invalid`), `rejection_reason` and `scores` already
-in place; `0003` creates `onboarding_documents` with the widened `BIGINT` size columns; `0006`
-creates `client_webhook_outbox` with its final delivery lifecycle, retry-policy columns and the
-`onboarding.agreement_pending` event type already admitted — without it the outbox would reject
-every agreement notification and `WebhookService` would swallow the failure, so the event would be
-lost silently; `0010` creates `audit_log` with `entry_type` already present; `0013` creates
-`workflows` and `workflow_versions` together, with `workflow_versions.status` carrying the full
-`draft`/`published`/`retired` check from the start; `0016` creates `connectors` directly, rather
-than creating `connector_settings` and renaming it; `0022` creates `agreements`,
-`agreement_versions`, `onboarding_agreements` and the `onboarding_agreement_statuses` view; `0024`
-creates `encryption_keys` with its `rotation_interval` and `reencrypt_requested_at` columns and
-both partial `onboardings` indexes the encryption sweep reads; `0028` adds
-`idx_onboardings_in_progress_version`, a partial index on `onboardings (workflow_version_id)` over
-rows with `completed_at IS NULL`, which the admin workflows list's in-progress count reads
-([0032](decisions/0032-admin-workflows-list.md)); `0029` adds `uq_workflow_versions_one_draft`, a
-partial unique index on `workflow_versions (workflow_id)` where `status = 'draft'`, which limits a
-family to one draft ([0034](decisions/0034-admin-authored-workflow-drafts.md)); `0030` creates
-`workflow_connector_selections` with its check constraints, then adds the foreign key separately;
-`0031` adds `onboardings.pending_connector` with a check that it is `NULL` or a JSON object
-([0038](decisions/0038-runtime-connector-selection.md)); `0032` adds `workflow_connector_selections.version` and moves the primary key to
-`(workflow_id, version, step_name)`, first copying each existing row to every published version
-of its family (a version without the step ignores the row; rows name compiled steps, which the stored document may not list)
-([0042](decisions/0042-connector-selection-per-version.md)); its `down` keeps the highest
-version's row per step; `0033` adds `idx_onboardings_created_at_id` on `onboardings (created_at DESC, id DESC)`, the order of the admin list and of the CSV export's keyset batches ([0044](decisions/0044-streamed-onboardings-csv-export.md)). The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
-its fold: on a database created by this migration set there are no rows for it to convert —
-migrations run before the workflow publish — so it could never fire. The project is greenfield with
-no deployed data, so no other backfill runs either. The sequence's gaps — every number from `0001`
-to `0033` other than the fifteen that survive — are permanent: nothing deployed has run a migration,
-so a table or column no longer wanted in its incremental shape loses that step in place instead of
-gaining a second migration to converge to it. Local stacks are the one place the incremental set
-did run: a Compose volume created before the fold has a `migrations` table that already lists the
-folded numbers, so the rewritten `CREATE TABLE`s never run and the engine exits at boot. Such a
-stack is thrown away once with `pnpm stack:reset`; nothing converges it.
+No migration has ever run against a deployed environment, so the incremental history (fifteen
+files, `0001_init` to `0033_add_onboardings_created_at_index`) was folded into this one: it states
+the schema as it is, not how it got there. It creates the tables in dependency order, each followed
+by its own indexes — among them the two partial `onboardings` indexes the encryption sweep reads,
+`idx_onboardings_in_progress_version` behind the admin workflows list's in-progress count
+([0032](decisions/0032-admin-workflows-list.md)), `idx_onboardings_created_at_id` on
+`onboardings (created_at DESC, id DESC)`, the order of the admin list and of the CSV export's keyset
+batches ([0044](decisions/0044-streamed-onboardings-csv-export.md)), and
+`uq_workflow_versions_one_draft`, which limits a family to one draft
+([0034](decisions/0034-admin-authored-workflow-drafts.md)) — then adds every
+foreign key as a standalone `ALTER TABLE … ADD CONSTRAINT`, and creates the
+`onboarding_agreement_statuses` view last. The fold was checked by applying the old set and the new
+migration to two empty databases and diffing `pg_dump --schema-only`: the schemas are identical,
+column order included. Local stacks are the one place the incremental set did run: a Compose volume
+created before the fold has a `migrations` table listing the old names, so the engine tries to
+create tables that already exist and exits at boot. Such a stack is thrown away once with
+`pnpm stack:reset`; nothing converges it.
 
 `onboarding_documents.requested_max_size_bytes` / `verified_size_bytes` use a transformer that
 throws on values outside the JS safe-integer range, rather than silently returning a lossy number
@@ -2536,7 +2510,7 @@ each data key stored in `encryption_keys`, one row per key ever created, unwrapp
 from that table — "on" means a row with `deleted_at IS NULL` exists — rather than stored a second
 time: turning it on inserts a key, turning it off soft-deletes the active one, rotating
 (`POST /v1/admin/encryption/keys`) does both in one transaction. The partial unique index
-`uq_encryption_keys_active` (migration `0024`) makes "at most one unretired row" a database
+`uq_encryption_keys_active` (migration `0001_initial_schema`) makes "at most one unretired row" a database
 invariant. Nothing self-provisions: a fresh deployment has no key until an operator turns
 encryption on, and the engine refuses to boot when the table holds keys but the process has no
 KEK, since every row those keys protect would be unreadable.
@@ -2578,7 +2552,7 @@ after a rotation. Each row is loaded through `OnboardingEntity` and written back
 raw SQL write that would store plaintext, and `updated_at` is passed through unchanged. Rows are
 found by index, never by an inequality a btree cannot serve: an equality against the key ids the
 ring can read (`idx_onboardings_encryption_key`) plus the partial index over plaintext rows
-(`idx_onboardings_plaintext_context`, migration `0024`); a row the sweep cannot read — tampered
+(`idx_onboardings_plaintext_context`, migration `0001_initial_schema`); a row the sweep cannot read — tampered
 ciphertext, or a key this process cannot unwrap — is skipped, audited once as
 `encryption.reencryption_failed`/`decryption_failed` naming the onboarding, and left for a peer or a
 restart, so one such row never stalls the rest. The `reencryption_*` audit actions keep their names
@@ -2597,7 +2571,7 @@ target that drains while this process holds no rows still closes its episode.
 
 `POST /v1/admin/encryption/reencryption` is the one way to move stored rows off a key deliberately,
 for a data key whose material leaked. It stamps `encryption_keys.reencrypt_requested_at` on the
-active row (migration `0024`) and audits `encryption.reencryption_requested`; while that stands the
+active row (migration `0001_initial_schema`) and audits `encryption.reencryption_requested`; while that stands the
 sweep widens its sources back to every key it can read, `progress.pending` counts rows not yet on
 the active key, and the sweep clears the column once none are left — so the request is
 self-retiring and a replica restarting mid-run resumes from the table. Each row is decrypted and
@@ -2612,7 +2586,7 @@ it means a misconfiguration only an operator can fix, usually a key-encryption k
 
 Rotation is both manual and scheduled. `POST /v1/admin/encryption/keys` rotates now; the active
 key additionally carries how often the engine should rotate it on its own (`rotation_interval`,
-migration `0024`: `48h`, `96h`, `1w`, `2w` or `1mo`, or `NULL` for never), so the one row with
+migration `0001_initial_schema`: `48h`, `96h`, `1w`, `2w` or `1mo`, or `NULL` for never), so the one row with
 `deleted_at IS NULL` holds both "encryption is on" and "this is when it next rotates" rather than a
 settings row beside it. Turning encryption on schedules nothing — a rotation moves no rows, so a
 cadence only accumulates keys; `PATCH /v1/admin/encryption/rotation`
