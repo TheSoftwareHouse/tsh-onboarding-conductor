@@ -6,7 +6,7 @@ import {
   type OtpChannelName,
   type OtpOperation,
 } from '@tsh/ddl-schema';
-import { DataSource } from 'typeorm';
+import { OtpChallengesConnection } from '../../../otp-challenges.connection';
 import { OtpChallengesRepository } from '../../../otp-challenges.repository';
 import { OtpDeclarationInvalidError } from '../../../errors/otp-declaration-invalid.error';
 import { OtpSendLimitReachedException } from '../../../errors/otp-send-limit-reached.exception';
@@ -45,9 +45,10 @@ const nonEmptyString = (value: unknown): string | undefined =>
  * Challenges are keyed by onboarding and channel, not by connector, so the check step's connector
  * finds a code that a fallback provider delivered on the send step.
  *
- * Challenges are written through `dataSource.manager`, outside the submit's transaction, on
- * purpose: a wrong code ends the submit in a rollback (retryable invalid data), and the spent
- * attempt must survive it or the attempt budget would never run out.
+ * Challenges are written outside the submit's transaction, on purpose: a wrong code ends the submit
+ * in a rollback (retryable invalid data), and the spent attempt must survive it or the attempt
+ * budget would never run out. They go through `OtpChallengesConnection`'s own pool, never the main
+ * one, because the submit already holds a main-pool connection while this runs.
  */
 export abstract class BaseOtpConnector implements ConnectorAdapter {
   abstract readonly id: string;
@@ -57,7 +58,7 @@ export abstract class BaseOtpConnector implements ConnectorAdapter {
   readonly type = 'otp_verification' as const;
 
   protected constructor(
-    private readonly dataSource: DataSource,
+    private readonly connection: OtpChallengesConnection,
     private readonly challenges: OtpChallengesRepository,
   ) {}
 
@@ -112,7 +113,7 @@ export abstract class BaseOtpConnector implements ConnectorAdapter {
    * has returned, so a failed delivery spends no send and leaves the live code valid.
    */
   private async send(onboardingId: string, recipient: string): Promise<ConnectorExecutionResult> {
-    const manager = this.dataSource.manager;
+    const manager = await this.connection.getManager();
     const existing = await this.challenges.find(manager, onboardingId, this.channel);
     if (existing && existing.sendCount >= OTP_MAX_SENDS) {
       throw new OtpSendLimitReachedException();
@@ -137,7 +138,7 @@ export abstract class BaseOtpConnector implements ConnectorAdapter {
     code: string,
     codeField: string,
   ): Promise<ConnectorExecutionResult> {
-    const manager = this.dataSource.manager;
+    const manager = await this.connection.getManager();
     const challenge = await this.challenges.find(manager, onboardingId, this.channel);
     if (!challenge) {
       return ConnectorExecutionResult.rejected('CHALLENGE_NOT_FOUND');

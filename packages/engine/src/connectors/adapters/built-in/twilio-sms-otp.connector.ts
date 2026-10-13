@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { OtpChannelName } from '@tsh/ddl-schema';
-import { DataSource } from 'typeorm';
 import { AppConfig } from '../../../config/app.config';
 import { ConnectorSettingsService } from '../../connector-settings.service';
 import { OtpDeliveryFailedException } from '../../errors/otp-delivery-failed.exception';
+import { OtpChallengesConnection } from '../../otp-challenges.connection';
 import { OtpChallengesRepository } from '../../otp-challenges.repository';
 import type { ConnectorSettingsSchema } from '../../ports/connector-adapter.port';
 import { BaseOtpConnector } from './otp/base-otp.connector';
@@ -35,12 +35,12 @@ export class TwilioSmsOtpConnector extends BaseOtpConnector {
   };
 
   constructor(
-    dataSource: DataSource,
+    connection: OtpChallengesConnection,
     challenges: OtpChallengesRepository,
     private readonly configService: ConfigService<AppConfig, true>,
     private readonly connectorSettingsService: ConnectorSettingsService,
   ) {
-    super(dataSource, challenges);
+    super(connection, challenges);
   }
 
   protected async deliver(recipient: string, code: string): Promise<void> {

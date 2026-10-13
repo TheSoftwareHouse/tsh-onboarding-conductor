@@ -71,6 +71,19 @@ describe('validateConfig', () => {
     expect(config.OTP_SMS_TIMEOUT_MS).toBe(10000);
   });
 
+  it('defaults the OTP database pool size', () => {
+    expect(validateConfig(baseConfig).OTP_DATABASE_POOL_SIZE).toBe(5);
+  });
+
+  it('rejects an OTP_DATABASE_POOL_SIZE outside the allowed bounds', () => {
+    expect(() => validateConfig({ ...baseConfig, OTP_DATABASE_POOL_SIZE: 0 })).toThrow(
+      /OTP_DATABASE_POOL_SIZE/,
+    );
+    expect(() => validateConfig({ ...baseConfig, OTP_DATABASE_POOL_SIZE: 51 })).toThrow(
+      /OTP_DATABASE_POOL_SIZE/,
+    );
+  });
+
   it('defaults the http connector timeout', () => {
     const config = validateConfig(baseConfig);
 

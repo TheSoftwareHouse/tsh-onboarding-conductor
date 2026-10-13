@@ -18,8 +18,12 @@ import { ConnectorTypeMismatchError } from './errors/connector-type-mismatch.err
 import { OtpDeclarationInvalidError } from './errors/otp-declaration-invalid.error';
 import { OtpDeliveryFailedException } from './errors/otp-delivery-failed.exception';
 import { BaseOtpConnector } from './adapters/built-in/otp/base-otp.connector';
-import type { OtpChallengeEntity } from './entity/otp-challenge.entity';
-import type { OtpChallengesRepository, SaveOtpChallengeInput } from './otp-challenges.repository';
+import type { OtpChallengesConnection } from './otp-challenges.connection';
+import type {
+  OtpChallengeRow,
+  OtpChallengesRepository,
+  SaveOtpChallengeInput,
+} from './otp-challenges.repository';
 import type { ConnectorAdapter, ConnectorAdapterCollection } from './ports/connector-adapter.port';
 import {
   ConnectorFailureAction,
@@ -125,7 +129,7 @@ const createService = (
 
 /** One stored challenge per onboarding and channel, as the `otp_challenges` unique key keeps it. */
 const createInMemoryOtpChallenges = () => {
-  const rows = new Map<string, OtpChallengeEntity>();
+  const rows = new Map<string, OtpChallengeRow>();
   const key = (onboardingId: string, channel: string) => `${onboardingId}:${channel}`;
 
   return {
@@ -140,7 +144,7 @@ const createInMemoryOtpChallenges = () => {
         ...input,
         attempts: 0,
         sendCount: (existing?.sendCount ?? 0) + 1,
-      } as OtpChallengeEntity;
+      } as OtpChallengeRow;
       rows.set(key(input.onboardingId, input.channel), row);
       return row;
     }),
@@ -165,7 +169,7 @@ class MockDeliveryOtpConnector extends BaseOtpConnector {
     readonly id: string,
     readonly channel: OtpChannelName,
   ) {
-    super({ manager: {} } as unknown as DataSource, challenges);
+    super({ getManager: async () => ({}) } as unknown as OtpChallengesConnection, challenges);
     this.name = id;
   }
 

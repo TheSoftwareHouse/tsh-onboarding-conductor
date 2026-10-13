@@ -1252,8 +1252,8 @@ A connector declaration on a step is:
 
 ```jsonc
 {
-  "name": "otp", // instance name, unique within the step
-  "id": "otp", // resolves to a registered adapter's `id`
+  "name": "send_code", // instance name, unique within the step
+  "id": "twilio_sms_otp", // resolves to a registered adapter's `id`
   "type": "otp_verification", // what that adapter does; must match the adapter's own `type`
   "order": 1, // execution order within the step
   "async": false, // true → initiate, park, resume on callback
@@ -1623,10 +1623,14 @@ survives every re-send — whichever provider sent it — which is what caps SMS
 and the row is deleted only when a check succeeds. The row is written only after `deliver`
 returned, so a delivery that fails — the provider is down, or its settings are missing — spends no
 send and leaves the previous code valid. The rows are written outside the submit's transaction, so a wrong code's spent
-attempt survives the rollback that ends that submit. A wrong code raises `attempts` with one atomic
+attempt survives the rollback that ends that submit. They go through a pool of their own
+(`OtpChallengesConnection`, `OTP_DATABASE_POOL_SIZE`, §10), never the main one: the submit already
+holds a main-pool connection while the connector runs, and waiting on that same pool for a second
+is hold-and-wait — enough concurrent OTP submits would each hold one connection, wait forever for
+another, and stop the engine. A wrong code raises `attempts` with one atomic
 `UPDATE … SET attempts = attempts + 1 … RETURNING attempts`, so concurrent submits cannot overrun
 the budget. A hash does not protect a six-digit code from someone who can read the table; the short
-lifetime and the deletion on success do (decision record 0045).
+lifetime and the deletion on success do (decision record 0048).
 
 **Providers.** `ConnectorsModule` registers each subclass in `BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS`
 like any other adapter; a new provider is one class there (`docs/EXTENDING.md`).
@@ -2748,6 +2752,10 @@ cannot express:
 `OTP_SMS_TIMEOUT_MS` (default 10000, minimum 100, maximum 30000) is how long `twilio_sms_otp`
 waits for Twilio Programmable Messaging before raising `OTP_DELIVERY_FAILED`. The
 Twilio credentials themselves are connector settings, not configuration.
+
+`OTP_DATABASE_POOL_SIZE` (default 5, minimum 1, maximum 50) sizes the OTP challenges' own
+connection pool (§4, "The OTP connectors"), opened on the first OTP step beside the main pool, so a
+process holds up to that many connections more than the main pool's.
 
 Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_CONNECTOR_TIMEOUT_MS`,
 `OTP_SMS_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`, `VERIFF_TIMEOUT_MS`: 100–30000).

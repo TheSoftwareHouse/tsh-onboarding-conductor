@@ -1,14 +1,14 @@
-# 0046. Each OTP provider is a connector extending one base class
+# 0049. Each OTP provider is a connector extending one base class
 
 - **Status:** Accepted
 - **Date:** 2026-10-07
 - **Tags:** connectors, security, persistence, workflows
-- **Supersedes:** [0045](./0045-engine-owned-otp-with-channel-adapters.md)
+- **Supersedes:** [0048](./0048-engine-owned-otp-with-channel-adapters.md)
 - **Superseded by:** —
 
 ## Decision
 
-The engine still generates, stores and checks one-time codes itself, exactly as 0045
+The engine still generates, stores and checks one-time codes itself, exactly as 0048
 decided: a six-digit code drawn with `crypto.randomInt`, only a salted SHA-256 hash stored
 in `otp_challenges` (one row per onboarding and channel), compared with `timingSafeEqual`,
 deleted on a correct code. A provider is asked to deliver a code, never to decide whether
@@ -33,7 +33,7 @@ across every provider in the chain.
 
 ## Context
 
-Under 0045 a provider was a channel inside the `otp` connector, so one deployment had
+Under 0048 a provider was a channel inside the `otp` connector, so one deployment had
 exactly one provider per channel, chosen in code. Two needs did not fit: changing a
 workflow's provider without a code change, and falling back to a second provider when the
 first cannot deliver. The connector layer already provides both for every other capability
@@ -45,8 +45,8 @@ them.
 
 | Option                                                   | Why not                                                                                                                               |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Keep 0045's channels, select one per declaration         | Re-implements id lookup and failover inside one connector; the fallback chain, error handlers and audit rows would not apply          |
-| One connector per provider, each with its own code logic | Duplicates generation, hashing and limits per provider — the duplication 0045 rejected                                                |
+| Keep 0048's channels, select one per declaration         | Re-implements id lookup and failover inside one connector; the fallback chain, error handlers and audit rows would not apply          |
+| One connector per provider, each with its own code logic | Duplicates generation, hashing and limits per provider — the duplication 0048 rejected                                                |
 | Key challenges by connector id                           | A code sent by a fallback could not be checked by the primary, and each provider would get its own send budget, multiplying SMS spend |
 
 ## Consequences
@@ -58,7 +58,7 @@ that declares settings as its own connector.
 Workflows name a provider rather than a generic `otp`; a workflow moved to another
 provider is a document change and, for a published workflow, a new version.
 
-The security consequences of 0045 stand unchanged: the hash is no defence against
+The security consequences of 0048 stand unchanged: the hash is no defence against
 database access, and there is still no per-number or per-IP throttle across onboardings.
 A channel's send budget is now shared across providers, so a fallback does not raise what
 one onboarding can spend.

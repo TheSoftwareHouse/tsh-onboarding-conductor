@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { NormalizedWorkflowConnectorFallback, OtpChannelName } from '@tsh/ddl-schema';
-import type { DataSource } from 'typeorm';
 import { OtpDeclarationInvalidError } from '../../../errors/otp-declaration-invalid.error';
 import { OtpSendLimitReachedException } from '../../../errors/otp-send-limit-reached.exception';
-import type { OtpChallengeEntity } from '../../../entity/otp-challenge.entity';
-import type { OtpChallengesRepository } from '../../../otp-challenges.repository';
+import type { OtpChallengesConnection } from '../../../otp-challenges.connection';
+import type { OtpChallengeRow, OtpChallengesRepository } from '../../../otp-challenges.repository';
 import type { ConnectorExecutionInput } from '../../../ports/connector-adapter.port';
 import { BaseOtpConnector } from './base-otp.connector';
 
@@ -22,12 +21,12 @@ class MockDeliveryOtpConnector extends BaseOtpConnector {
   readonly delivered = jest.fn<Promise<void>, [string, string]>().mockResolvedValue(undefined);
 
   constructor(
-    dataSource: DataSource,
+    connection: OtpChallengesConnection,
     challenges: OtpChallengesRepository,
     readonly id: string,
     readonly channel: OtpChannelName,
   ) {
-    super(dataSource, challenges);
+    super(connection, challenges);
     this.name = id;
   }
 
@@ -43,7 +42,7 @@ class MockDeliveryOtpConnector extends BaseOtpConnector {
 const hashOf = (code: string): string =>
   createHash('sha256').update(`${SALT}${code}`).digest('hex');
 
-const challengeRow = (overrides: Partial<OtpChallengeEntity> = {}): OtpChallengeEntity =>
+const challengeRow = (overrides: Partial<OtpChallengeRow> = {}): OtpChallengeRow =>
   ({
     id: 'challenge-1',
     onboardingId: ONBOARDING_ID,
@@ -54,19 +53,19 @@ const challengeRow = (overrides: Partial<OtpChallengeEntity> = {}): OtpChallenge
     attempts: 0,
     sendCount: 1,
     ...overrides,
-  }) as OtpChallengeEntity;
+  }) as OtpChallengeRow;
 
 const setup = () => {
   const manager = { name: 'manager' };
   const repository = {
-    find: jest.fn<Promise<OtpChallengeEntity | null>, unknown[]>().mockResolvedValue(null),
+    find: jest.fn<Promise<OtpChallengeRow | null>, unknown[]>().mockResolvedValue(null),
     save: jest.fn().mockResolvedValue({ id: 'challenge-1', attempts: 0, sendCount: 1 }),
     incrementAttempts: jest.fn().mockResolvedValue(1),
     remove: jest.fn().mockResolvedValue(undefined),
   };
   const create = (id: string, channel: OtpChannelName) =>
     new MockDeliveryOtpConnector(
-      { manager } as unknown as DataSource,
+      { getManager: async () => manager } as unknown as OtpChallengesConnection,
       repository as unknown as OtpChallengesRepository,
       id,
       channel,

@@ -1,6 +1,7 @@
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { SmtpEmailOtpConnector } from '../src/connectors/adapters/built-in/smtp-email-otp.connector';
 import { startE2eServer } from './e2e-server';
 
 /**
@@ -14,6 +15,11 @@ const WORKFLOW_ID = 'otp-email-typed';
 const EMAIL = 'otp-person@example.com';
 const OTP_MAX_SENDS = 5;
 const CODE_PATTERN = /\b(\d{6})\b/;
+/** `pg`'s default pool size, which the engine's main pool keeps. */
+const PG_DEFAULT_POOL_SIZE = 10;
+const EXHAUSTED_POOL_TIMEOUT_MS = 30000;
+/** Right by chance one time in a million; the exhausted-pool case only needs it refused. */
+const WRONG_CODE = '000000';
 
 const OTP_INVALID_DATA = {
   code: 'INVALID_STEP_DATA',
@@ -231,4 +237,41 @@ describe('OTP connector over email (e2e)', () => {
     expect(verified.body).toMatchObject({ status: 'approved' });
     expect(await readChallenges(onboardingId)).toHaveLength(0);
   });
+
+  // A submit holds one main-pool connection for its transaction while the connector runs. Were the
+  // challenge read from that same pool, enough concurrent submits would each wait for a connection
+  // none of them releases, and the engine would hang for good. Holding every main-pool connection
+  // here stands in for those submits: the check must still answer.
+  it(
+    'checks a code while every main-pool connection is held',
+    async () => {
+      const onboardingId = await startOnboarding();
+      await submit(onboardingId, { email: EMAIL }).expect((response) =>
+        expect([200, 201]).toContain(response.status),
+      );
+
+      const heldConnections = Array.from({ length: PG_DEFAULT_POOL_SIZE }, () =>
+        dataSource().createQueryRunner(),
+      );
+      await Promise.all(heldConnections.map((runner) => runner.connect()));
+      try {
+        const result = await getApp()
+          .get(SmtpEmailOtpConnector)
+          .execute({
+            declaration: { order: 0, config: { operation: 'check', channel: 'email' } },
+            execution: { onboardingId, stepName: 'verify_code' },
+            context: {},
+            payload: { recipient: EMAIL, code: WRONG_CODE },
+            payloadFieldSources: { recipient: 'email', code: 'verificationCode' },
+          });
+
+        expect(result.isInvalidData()).toBe(true);
+      } finally {
+        await Promise.all(heldConnections.map((runner) => runner.release()));
+      }
+
+      expect((await readChallenges(onboardingId))[0].attempts).toBe(1);
+    },
+    EXHAUSTED_POOL_TIMEOUT_MS,
+  );
 });

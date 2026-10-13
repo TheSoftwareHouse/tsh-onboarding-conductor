@@ -129,6 +129,7 @@ services:
       STORAGE_S3_ACCESS_KEY_ID: onboardingdev
       STORAGE_S3_SECRET_ACCESS_KEY: onboardingdevsecret0123456789
       OTP_SMS_TIMEOUT_MS: ${OTP_SMS_TIMEOUT_MS:-10000}
+      OTP_DATABASE_POOL_SIZE: ${OTP_DATABASE_POOL_SIZE:-5}
       WORKFLOWS_USERS_DIR: /app/workflows/users
       EMAIL_TEMPLATES_USERS_DIR: /app/email-templates/users
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
@@ -252,7 +253,7 @@ services:
 
   # Short-lived internal test runner for the integration specs that need MailHog's SMTP port,
   # which only this network reaches: `smtp.e2e-spec.ts` (the SMTP connector) and
-  # `otp-email.e2e-spec.ts` (the real `otp` connector delivering a code by email). Never
+  # `otp-email.e2e-spec.ts` (the real `smtp_email_otp` connector delivering a code by email). Never
   # publishes SMTP and has no volumes. Joins `postgres` too: both specs resolve their
   # credentials through the real `ConnectorSettingsService` against the real `connectors` table,
   # rather than a stub. The OTP spec boots the whole application, so it also needs Redis and

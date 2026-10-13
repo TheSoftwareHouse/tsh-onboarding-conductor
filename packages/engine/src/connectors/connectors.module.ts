@@ -19,6 +19,7 @@ import { ConnectorSettingsService } from './connector-settings.service';
 import { ConnectorsController } from './connectors.controller';
 import { ConnectorEntity } from './entity/connector.entity';
 import { OtpChallengeEntity } from './entity/otp-challenge.entity';
+import { OtpChallengesConnection } from './otp-challenges.connection';
 import { OtpChallengesRepository } from './otp-challenges.repository';
 import { HttpRequestConnector } from './adapters/built-in/http-request.connector';
 import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
@@ -209,6 +210,7 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
     VeriffClient,
     VeriffMediaFitter,
     VeriffKycProvider,
+    OtpChallengesConnection,
     OtpChallengesRepository,
     ...CONNECTOR_ADAPTER_PROVIDERS,
     {

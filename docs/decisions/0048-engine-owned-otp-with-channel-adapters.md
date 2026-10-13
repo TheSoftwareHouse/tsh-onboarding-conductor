@@ -4,7 +4,7 @@
 - **Date:** 2026-10-06
 - **Tags:** connectors, security, persistence, workflows
 - **Supersedes:** —
-- **Superseded by:** [0046](./0046-otp-providers-extend-a-base-connector.md)
+- **Superseded by:** [0049](./0049-otp-providers-extend-a-base-connector.md)
 
 ## Decision
 

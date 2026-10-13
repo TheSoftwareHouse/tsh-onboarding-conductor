@@ -38,6 +38,9 @@ const CLIENT_WEBHOOK_TIMEOUT_MS_MAX = 30000;
 const OTP_SMS_TIMEOUT_MS_DEFAULT = 10000;
 const OTP_SMS_TIMEOUT_MS_MIN = 100;
 const OTP_SMS_TIMEOUT_MS_MAX = 30000;
+const OTP_DATABASE_POOL_SIZE_DEFAULT = 5;
+const OTP_DATABASE_POOL_SIZE_MIN = 1;
+const OTP_DATABASE_POOL_SIZE_MAX = 50;
 
 const SMTP_TIMEOUT_MS_DEFAULT = 5000;
 const SMTP_TIMEOUT_MS_MIN = 100;
@@ -360,6 +363,14 @@ export class AppConfig {
   @IsOptional()
   @Type(() => Number)
   OTP_SMS_TIMEOUT_MS: number = OTP_SMS_TIMEOUT_MS_DEFAULT;
+
+  /** Connections in the OTP challenges' own pool, opened beside the main one (`OtpChallengesConnection`). */
+  @IsInt()
+  @Min(OTP_DATABASE_POOL_SIZE_MIN)
+  @Max(OTP_DATABASE_POOL_SIZE_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  OTP_DATABASE_POOL_SIZE: number = OTP_DATABASE_POOL_SIZE_DEFAULT;
 
   @IsInt()
   @Min(HTTP_CONNECTOR_TIMEOUT_MS_MIN)

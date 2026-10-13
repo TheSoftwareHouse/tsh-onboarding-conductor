@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { OtpChannelName } from '@tsh/ddl-schema';
-import { DataSource } from 'typeorm';
 import { OtpDeliveryFailedException } from '../../errors/otp-delivery-failed.exception';
+import { OtpChallengesConnection } from '../../otp-challenges.connection';
 import { OtpChallengesRepository } from '../../otp-challenges.repository';
 import { SmtpConnector } from './smtp.connector';
 import { BaseOtpConnector } from './otp/base-otp.connector';
@@ -24,11 +24,11 @@ export class SmtpEmailOtpConnector extends BaseOtpConnector {
   readonly channel: OtpChannelName = 'email';
 
   constructor(
-    dataSource: DataSource,
+    connection: OtpChallengesConnection,
     challenges: OtpChallengesRepository,
     private readonly smtpConnector: SmtpConnector,
   ) {
-    super(dataSource, challenges);
+    super(connection, challenges);
   }
 
   protected async deliver(recipient: string, code: string): Promise<void> {

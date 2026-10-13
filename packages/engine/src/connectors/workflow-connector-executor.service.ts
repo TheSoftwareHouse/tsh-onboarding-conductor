@@ -148,7 +148,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
     private readonly dataSource: DataSource,
     /**
      * Sends a declared connector type to the mock standing in for it, so a workflow declaring
-     * `otp` reaches the fixture without any test-only declaration.
+     * `twilio_sms_otp` reaches the fixture without any test-only declaration.
      */
     @Optional()
     @Inject(CONNECTOR_MOCK_SUBSTITUTIONS)

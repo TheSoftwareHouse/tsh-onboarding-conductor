@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import type { DataSource } from 'typeorm';
+import type { OtpChallengesConnection } from '../../otp-challenges.connection';
 import { AppConfig } from '../../../config/app.config';
 import type { ConnectorSettingsService } from '../../connector-settings.service';
 import { ConnectorNotConfiguredException } from '../../errors/connector-not-configured.exception';
@@ -50,7 +50,7 @@ const createRepository = () => ({
 const createConnector = (settingsService = createSettingsService().service) => {
   const repository = createRepository();
   const connector = new TwilioSmsOtpConnector(
-    { manager: {} } as unknown as DataSource,
+    { getManager: async () => ({}) } as unknown as OtpChallengesConnection,
     repository as unknown as OtpChallengesRepository,
     createConfigService(),
     settingsService,

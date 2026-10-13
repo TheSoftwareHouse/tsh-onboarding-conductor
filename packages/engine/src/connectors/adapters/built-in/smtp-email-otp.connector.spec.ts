@@ -1,4 +1,4 @@
-import type { DataSource } from 'typeorm';
+import type { OtpChallengesConnection } from '../../otp-challenges.connection';
 import { OtpDeliveryFailedException } from '../../errors/otp-delivery-failed.exception';
 import type { OtpChallengesRepository } from '../../otp-challenges.repository';
 import type { ConnectorExecutionInput } from '../../ports/connector-adapter.port';
@@ -19,7 +19,7 @@ const createConnector = (result: ConnectorExecutionResult) => {
     save: jest.fn().mockResolvedValue({}),
   };
   const connector = new SmtpEmailOtpConnector(
-    { manager: {} } as unknown as DataSource,
+    { getManager: async () => ({}) } as unknown as OtpChallengesConnection,
     repository as unknown as OtpChallengesRepository,
     { execute } as unknown as SmtpConnector,
   );

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { OtpChannelName } from '@tsh/ddl-schema';
 import { EntityManager } from 'typeorm';
-import { OtpChallengeEntity } from './entity/otp-challenge.entity';
 
 export type SaveOtpChallengeInput = {
   onboardingId: string;
@@ -11,7 +10,7 @@ export type SaveOtpChallengeInput = {
   expiresAt: Date;
 };
 
-type OtpChallengeRow = {
+export type OtpChallengeRow = {
   id: string;
   onboardingId: string;
   channel: OtpChannelName;
@@ -22,13 +21,33 @@ type OtpChallengeRow = {
   sendCount: number;
 };
 
+const RETURNED_COLUMNS = `
+  id,
+  onboarding_id AS "onboardingId",
+  channel,
+  code_hash AS "codeHash",
+  code_salt AS "codeSalt",
+  expires_at AS "expiresAt",
+  attempts,
+  send_count AS "sendCount"
+`;
+
+/**
+ * Plain SQL throughout: callers pass the manager of `OtpChallengesConnection`, whose pool carries no
+ * entity metadata. `OtpChallengeEntity` still describes the table for the main connection, so the
+ * schema and its foreign key stay checked against it.
+ */
 export class OtpChallengesRepository {
   async find(
     manager: EntityManager,
     onboardingId: string,
     channel: OtpChannelName,
-  ): Promise<OtpChallengeEntity | null> {
-    return manager.getRepository(OtpChallengeEntity).findOne({ where: { onboardingId, channel } });
+  ): Promise<OtpChallengeRow | null> {
+    const rows = await manager.query<OtpChallengeRow[]>(
+      `SELECT ${RETURNED_COLUMNS} FROM otp_challenges WHERE onboarding_id = $1 AND channel = $2`,
+      [onboardingId, channel],
+    );
+    return rows[0] ?? null;
   }
 
   /**
@@ -47,14 +66,7 @@ export class OtpChallengesRepository {
         attempts = 0,
         send_count = otp_challenges.send_count + 1,
         updated_at = now()
-      RETURNING id,
-        onboarding_id AS "onboardingId",
-        channel,
-        code_hash AS "codeHash",
-        code_salt AS "codeSalt",
-        expires_at AS "expiresAt",
-        attempts,
-        send_count AS "sendCount"
+      RETURNING ${RETURNED_COLUMNS}
       `,
       [
         randomUUID(),
@@ -70,17 +82,14 @@ export class OtpChallengesRepository {
 
   /** Atomically bumps `attempts` and returns the new value, so concurrent submits cannot overrun. */
   async incrementAttempts(manager: EntityManager, id: string): Promise<number> {
-    const result = await manager
-      .createQueryBuilder()
-      .update(OtpChallengeEntity)
-      .set({ attempts: () => 'attempts + 1' })
-      .where('id = :id', { id })
-      .returning('attempts')
-      .execute();
-    return (result.raw as Array<{ attempts: number }>)[0].attempts;
+    const [rows] = await manager.query<[Array<{ attempts: number }>, number]>(
+      'UPDATE otp_challenges SET attempts = attempts + 1, updated_at = now() WHERE id = $1 RETURNING attempts',
+      [id],
+    );
+    return rows[0].attempts;
   }
 
   async remove(manager: EntityManager, id: string): Promise<void> {
-    await manager.delete(OtpChallengeEntity, { id });
+    await manager.query('DELETE FROM otp_challenges WHERE id = $1', [id]);
   }
 }
