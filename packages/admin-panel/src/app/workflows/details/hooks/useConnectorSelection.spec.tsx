@@ -48,11 +48,17 @@ describe('useConnectorSelection', () => {
 
     let outcome;
     await act(async () => {
-      outcome = await result.current.select('verify', 'veriff_kyc');
+      outcome = await result.current.select('verify', 'veriff_kyc', {
+        scope: 'version',
+        version: 2,
+      });
     });
 
     expect(outcome).toEqual({ ok: true });
-    expect(mockedPut).toHaveBeenCalledWith('kyc', 'verify', 'veriff_kyc');
+    expect(mockedPut).toHaveBeenCalledWith('kyc', 'verify', 'veriff_kyc', {
+      scope: 'version',
+      version: 2,
+    });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: workflowQueries.detailsFor('kyc') });
   });
 
@@ -66,7 +72,7 @@ describe('useConnectorSelection', () => {
 
     let outcome;
     await act(async () => {
-      outcome = await result.current.select('verify', 'smtp');
+      outcome = await result.current.select('verify', 'smtp', { scope: 'all' });
     });
 
     expect(outcome).toEqual({ ok: false, error });
@@ -79,11 +85,11 @@ describe('useConnectorSelection', () => {
 
     let outcome;
     await act(async () => {
-      outcome = await result.current.clear('verify');
+      outcome = await result.current.clear('verify', { scope: 'all' });
     });
 
     expect(outcome).toEqual({ ok: true });
-    expect(mockedDelete).toHaveBeenCalledWith('kyc', 'verify');
+    expect(mockedDelete).toHaveBeenCalledWith('kyc', 'verify', { scope: 'all' });
     expect(invalidate).toHaveBeenCalledTimes(1);
   });
 
@@ -93,7 +99,7 @@ describe('useConnectorSelection', () => {
 
     let outcome;
     await act(async () => {
-      outcome = await result.current.clear('verify');
+      outcome = await result.current.clear('verify', { scope: 'all' });
     });
 
     expect(outcome).toMatchObject({ ok: false, error: { message: 'Request failed.' } });

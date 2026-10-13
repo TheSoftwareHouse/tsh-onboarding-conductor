@@ -17,12 +17,20 @@ import {
   type WorkflowDraft,
   type WorkflowVersionDocument,
 } from '@/api/workflows/workflow-drafts';
-import type { WorkflowDefinition } from '@/api/workflows/workflow-definitions';
+import {
+  fetchWorkflowDefinition,
+  type WorkflowDefinition,
+} from '@/api/workflows/workflow-definitions';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
 import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { DRAFT_ERROR_MESSAGES } from '../../../constants/draft-messages';
 import { DraftEditor } from './DraftEditor';
+
+vi.mock('@/api/workflows/workflow-definitions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/workflows/workflow-definitions')>();
+  return { ...actual, fetchWorkflowDefinition: vi.fn() };
+});
 
 vi.mock('@/api/workflows/workflow-drafts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/workflows/workflow-drafts')>();
@@ -54,6 +62,7 @@ vi.mock('../JsonEditor', () => ({
 }));
 
 const mockedFetch = vi.mocked(fetchWorkflowDocument);
+const mockedDefinition = vi.mocked(fetchWorkflowDefinition);
 const mockedUpdate = vi.mocked(updateWorkflowDraft);
 const mockedDelete = vi.mocked(deleteWorkflowDraft);
 const mockedCompile = vi.mocked(compileWorkflowDocument);
@@ -704,6 +713,100 @@ describe('DraftEditor', () => {
 
       expect(await screen.findByRole('dialog', { name: 'Publish kyc v2' })).toBeInTheDocument();
       expect(screen.getByText('Valid · 3 steps')).toBeInTheDocument();
+    });
+
+    describe('connector note', () => {
+      const NOTE =
+        'Step `collect` runs sumsub_kyc on v1 (selected). v2 will run its authored veriff_kyc.';
+      const WITH_SELECTION: WorkflowDefinition = {
+        ...WORKFLOW,
+        steps: [
+          {
+            ...stepOf('collect'),
+            connectors: [
+              {
+                id: 'veriff_kyc',
+                authoredId: 'veriff_kyc',
+                name: 'Veriff',
+                type: 'kyc',
+                order: 1,
+                canReject: true,
+                async: true,
+                fieldMapping: {},
+                optionalFieldMapping: {},
+                selected: false,
+                selectableIds: [],
+                fallbacks: [],
+                versions: [
+                  { version: 1, id: 'sumsub_kyc', authoredId: 'veriff_kyc', selected: true },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      it('shows the note from the draft read and keeps Publish enabled', async () => {
+        mockedCompile.mockResolvedValue(COMPILATION);
+        mockedDefinition.mockResolvedValue(WITH_SELECTION);
+        renderEditor();
+        await editorText();
+        await clickPublish();
+
+        const dialog = await screen.findByRole('dialog');
+        expect(await within(dialog).findByText(NOTE)).toBeInTheDocument();
+        expect(mockedDefinition).toHaveBeenCalledWith(WORKFLOW_ID, VERSION);
+        expect(within(dialog).getByRole('button', { name: 'Publish' })).toBeEnabled();
+      });
+
+      it('shows no note while the read is loading', async () => {
+        mockedCompile.mockResolvedValue(COMPILATION);
+        mockedDefinition.mockReturnValue(new Promise(() => undefined));
+        renderEditor();
+        await editorText();
+        await clickPublish();
+
+        const dialog = await screen.findByRole('dialog');
+        expect(dialog).not.toHaveTextContent('runs sumsub_kyc');
+        expect(within(dialog).getByRole('button', { name: 'Publish' })).toBeEnabled();
+      });
+
+      it('shows no note when the read fails', async () => {
+        mockedCompile.mockResolvedValue(COMPILATION);
+        mockedDefinition.mockRejectedValue(new Error('boom'));
+        renderEditor();
+        await editorText();
+        await clickPublish();
+
+        const dialog = await screen.findByRole('dialog');
+        await waitFor(() => expect(mockedDefinition).toHaveBeenCalled());
+        expect(dialog).not.toHaveTextContent('runs sumsub_kyc');
+        expect(within(dialog).getByRole('button', { name: 'Publish' })).toBeEnabled();
+      });
+
+      it('removes the pinned detail read after publishing and keeps the document read', async () => {
+        mockedCompile.mockResolvedValue(COMPILATION);
+        mockedDefinition.mockResolvedValue(WITH_SELECTION);
+        mockedPublish.mockResolvedValue(PUBLICATION);
+        renderEditor({ search: '&view=json' });
+        await editorText();
+        await clickPublish();
+        const dialog = await screen.findByRole('dialog');
+        await within(dialog).findByText(NOTE);
+        await userEvent.click(within(dialog).getByRole('button', { name: 'Publish' }));
+
+        await waitFor(() =>
+          expect(showSuccessToast).toHaveBeenCalledWith(`Version ${VERSION} published.`),
+        );
+        await waitFor(() =>
+          expect(
+            client.getQueryState(workflowQueries.detail(WORKFLOW_ID, VERSION).queryKey),
+          ).toBeUndefined(),
+        );
+        expect(
+          client.getQueryState(workflowQueries.document(WORKFLOW_ID, VERSION).queryKey),
+        ).toBeDefined();
+      });
     });
 
     it('publishes the bound draft on confirm, never saves, then toasts and lands on its version', async () => {

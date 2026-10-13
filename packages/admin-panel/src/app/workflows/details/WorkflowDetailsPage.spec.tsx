@@ -102,6 +102,7 @@ function definition(version: number, extraStep?: string): WorkflowDefinition {
             authoredId: 'twilio_verify',
             selected: false,
             selectableIds: ['twilio_verify'],
+            versions: [],
             name: 'twilio_verify',
             type: 'phone-verification',
             order: 1,
@@ -379,7 +380,7 @@ describe('WorkflowDetailsPage', () => {
     expect(window.location.search).toContain('version=1');
     expect(window.location.search).not.toContain('step=');
     expect(screen.getByText('v1 retired')).toBeInTheDocument();
-    expect(screen.getByText(/stored revisions never change shape/)).toBeInTheDocument();
+    expect(screen.getByText(/a retired version never runs/)).toBeInTheDocument();
   });
 
   it('shows the terminal note for a terminal step', async () => {

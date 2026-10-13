@@ -779,8 +779,19 @@ export class AuditService {
     return {
       workflowId: metadata.workflowId,
       stepName: metadata.stepName,
-      previousConnectorId: metadata.previousConnectorId,
       connectorId: metadata.connectorId,
+      ...(metadata.scope === undefined ? {} : { scope: metadata.scope }),
+      ...(metadata.versions === undefined
+        ? {}
+        : {
+            versions: metadata.versions.map(({ version, previousConnectorId }) => ({
+              version,
+              previousConnectorId,
+            })),
+          }),
+      ...(metadata.previousConnectorId === undefined
+        ? {}
+        : { previousConnectorId: metadata.previousConnectorId }),
     };
   }
 

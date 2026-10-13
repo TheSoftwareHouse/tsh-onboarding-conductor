@@ -13,6 +13,7 @@ import { useSaveDraft } from '../../hooks/useSaveDraft';
 import { useValidateDraft } from '../../hooks/useValidateDraft';
 import { useWorkflowDetailsSearchParams } from '../../hooks/useWorkflowDetailsSearchParams';
 import { JSON_INDENT } from '../../constants/json-indent';
+import { describePublishConnectorNotes } from '../../utils/describe-publish-connector-notes';
 import { parseWorkflowDocument } from '../../utils/parse-workflow-document';
 import { DeleteDraftAction } from './DeleteDraftAction';
 import { DraftGraph } from './DraftGraph';
@@ -48,6 +49,11 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
     isError,
     refetch,
   } = useQuery(workflowQueries.document(workflowId, version));
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const { data: pinnedDefinition } = useQuery({
+    ...workflowQueries.detail(workflowId, version),
+    enabled: isPublishModalOpen,
+  });
   const validateMutation = useValidateDraft();
   const saveMutation = useSaveDraft(workflowId, version);
   const deleteMutation = useDeleteDraft(workflowId, version);
@@ -56,7 +62,6 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
   // `null` means the editor shows the saved document untouched.
   const [edited, setEdited] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<ValidationOutcome | null>(null);
-  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
   // Bumped on every edit, so a compile that was sent for older text is dropped when it lands.
   const textRevision = useRef(0);
   // The revision a compile is in flight for, so a repeated request for the same text is dropped.
@@ -258,6 +263,7 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
         version={version}
         isPending={publishMutation.isPending}
         onConfirm={handleConfirmPublish}
+        connectorNotes={pinnedDefinition ? describePublishConnectorNotes(pinnedDefinition) : []}
       />
     </>
   );

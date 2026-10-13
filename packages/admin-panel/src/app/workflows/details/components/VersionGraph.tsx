@@ -37,7 +37,12 @@ export function VersionGraph({
           onSelectStep={onSelectStep}
         />
       </div>
-      <StepInspector workflowId={workflowId} step={selectedStep} versionStatus={versionStatus} />
+      <StepInspector
+        workflowId={workflowId}
+        version={definition.workflowVersion}
+        step={selectedStep}
+        versionStatus={versionStatus}
+      />
     </div>
   );
 }

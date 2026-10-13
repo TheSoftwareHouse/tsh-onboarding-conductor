@@ -643,7 +643,7 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
    write an adapter from scratch — [add a KYC provider](#add-a-kyc-provider) below.**
 
 5. **Make it selectable (optional, nothing to register).** An operator can switch a workflow step's
-   connector from the workflow details page
+   connector on one published version or on all of them from the workflow details page
    ([decision 0038](decisions/0038-runtime-connector-selection.md)). One set of rules
    (`ConnectorSelectionRules`, `packages/engine/src/workflows/domain/connector-selection.ts`) decides
    both what the page offers for a step and what a save accepts, so your adapter is offered exactly

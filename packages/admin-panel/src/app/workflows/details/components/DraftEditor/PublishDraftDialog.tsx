@@ -12,6 +12,8 @@ export interface PublishDraftDialogProps {
   version: number;
   isPending: boolean;
   onConfirm: () => void;
+  /** Informational: they never block Publish. */
+  connectorNotes?: string[];
 }
 
 /** Confirms the irreversible publish of a saved draft; failures surface as toasts, not here. */
@@ -23,6 +25,7 @@ export function PublishDraftDialog({
   version,
   isPending,
   onConfirm,
+  connectorNotes = [],
 }: PublishDraftDialogProps): ReactElement {
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !isPending && onOpenChange(next)}>
@@ -52,6 +55,11 @@ export function PublishDraftDialog({
                 Publishing is permanent: a published version cannot be edited or deleted.
               </Typography>
               <Typography variant="body-md">New onboardings will start on this version.</Typography>
+              {connectorNotes.map((note) => (
+                <Typography key={note} variant="meta" className="text-fg-3">
+                  {note}
+                </Typography>
+              ))}
             </div>
             <footer className="flex items-center gap-3 border-t border-border-hair px-6 py-5">
               <Button variant="primary" disabled={isPending} onClick={onConfirm}>

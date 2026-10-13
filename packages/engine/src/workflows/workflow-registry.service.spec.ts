@@ -213,6 +213,13 @@ class InMemoryWorkflowsRepository {
       this.inScope(scopes).find((row) => row.workflowVersionId === workflowVersionId) ?? null,
   );
 
+  findRevisions = jest.fn(
+    async (_manager: unknown, scopes: readonly WorkflowScope[], name: string) =>
+      this.inScope(scopes)
+        .filter((row) => row.workflow.key === name)
+        .sort((left, right) => left.version - right.version),
+  );
+
   listVersions = jest.fn(
     async (_manager: unknown, scopes: readonly WorkflowScope[], name: string) =>
       this.inScope(scopes)
@@ -237,11 +244,12 @@ class InMemoryWorkflowsRepository {
   }
 }
 
-/** Stands in for the selections table: rows are read by family, or all at once for the boot sweep. */
+/** Stands in for the selections table: rows are read by family or version, or all at once for the boot sweep. */
 class InMemoryConnectorSelectionsRepository {
   constructor(
     readonly rows: Array<{
       workflowId: string;
+      version: number;
       stepName: string;
       connectorId: string;
       workflow: { key: string };
@@ -250,6 +258,10 @@ class InMemoryConnectorSelectionsRepository {
 
   findByWorkflowId = jest.fn(async (_manager: unknown, workflowId: string) =>
     this.rows.filter((row) => row.workflowId === workflowId),
+  );
+
+  findByVersion = jest.fn(async (_manager: unknown, workflowId: string, version: number) =>
+    this.rows.filter((row) => row.workflowId === workflowId && row.version === version),
   );
 
   findAll = jest.fn(async () => this.rows);
@@ -630,6 +642,22 @@ describe('WorkflowRegistryService', () => {
 
       expect(definition.workflowVersion).toBe(2);
       expect(definition.steps.every((step) => step.source?.type === 'custom')).toBe(true);
+    });
+
+    it('reports the stored revision number even when the document declares another version', async () => {
+      const seeded = createStoredWorkflow('seeded', 13, 'published');
+      seeded.definition = createWorkflowDefinition({ id: 'seeded', version: 1 });
+      const registry = await createRegistry({
+        files: [],
+        repository: new InMemoryWorkflowsRepository([seeded]),
+      });
+
+      await expect(registry.describeForAdmin('seeded', 13)).resolves.toEqual(
+        expect.objectContaining({ workflowVersion: 13 }),
+      );
+      await expect(registry.describeForAdmin('seeded')).resolves.toEqual(
+        expect.objectContaining({ workflowVersion: 13 }),
+      );
     });
 
     it('serves a valid draft and reports an invalid one as WORKFLOW_INVALID', async () => {
@@ -1101,8 +1129,9 @@ describe('WorkflowRegistryService', () => {
   });
 
   describe('connector selections', () => {
-    const selection = (connectorId: string, stepName = 'collect_email') => ({
+    const selection = (connectorId: string, stepName = 'collect_email', version = 1) => ({
       workflowId: 'wf-base',
+      version,
       stepName,
       connectorId,
       workflow: { key: 'base' },
@@ -1128,7 +1157,7 @@ describe('WorkflowRegistryService', () => {
     const primaryId = (workflow: Workflow): string | undefined =>
       workflow.findStep('collect_email')?.connectors[0].id;
 
-    it('applies the family selection on getById, getByVersionId and resolveForStart', async () => {
+    it('applies the version selection on getById, getByVersionId and resolveForStart', async () => {
       const registry = await createSelectingRegistry();
 
       expect(primaryId(await registry.getById('base', 1))).toBe('mock_kyc_2');
@@ -1136,7 +1165,7 @@ describe('WorkflowRegistryService', () => {
       expect(primaryId((await registry.resolveForStart('base')).workflow)).toBe('mock_kyc_2');
     });
 
-    it('reads the selection per resolution, inside the transaction the caller passes', async () => {
+    it('reads the version selection per resolution, inside the transaction the caller passes', async () => {
       const selections = new InMemoryConnectorSelectionsRepository([selection('mock_kyc_2')]);
       const registry = await createRegistry({
         files: [createWorkflowFile('users')],
@@ -1145,12 +1174,12 @@ describe('WorkflowRegistryService', () => {
         selections,
       });
       const manager = {} as never;
-      selections.findByWorkflowId.mockClear();
+      selections.findByVersion.mockClear();
 
       await registry.getById('base', 1, manager);
       selections.rows.length = 0;
 
-      expect(selections.findByWorkflowId).toHaveBeenCalledWith(manager, 'wf-base');
+      expect(selections.findByVersion).toHaveBeenCalledWith(manager, 'wf-base', 1);
       expect(primaryId(await registry.getById('base', 1))).toBe('mock_kyc_1');
     });
 
@@ -1174,6 +1203,93 @@ describe('WorkflowRegistryService', () => {
           selectableIds: ['mock_kyc_1', 'mock_kyc_2', 'other'],
         }),
       );
+    });
+
+    describe('across versions', () => {
+      const createVersionedRegistry = (rows: ReturnType<typeof selection>[]) =>
+        createRegistry({
+          files: [],
+          connectorExecutionPort: port(KYC_ADAPTERS),
+          repository: new InMemoryWorkflowsRepository([
+            createStoredWorkflow('base', 1, 'published'),
+            createStoredWorkflow('base', 2, 'published'),
+            createStoredWorkflow('base', 3, 'draft'),
+            createStoredWorkflow('base', 4, 'retired'),
+          ]),
+          selections: new InMemoryConnectorSelectionsRepository(rows),
+        });
+      const primaryOf = async (registry: WorkflowRegistryService, version: number) =>
+        (await registry.describeForAdmin('base', version)).steps[0].connectors[0];
+
+      it('resolves a draft with no selections while a v1 row exists', async () => {
+        const registry = await createVersionedRegistry([selection('mock_kyc_2')]);
+
+        const primary = await primaryOf(registry, 3);
+
+        expect(primary).toEqual(
+          expect.objectContaining({ id: 'mock_kyc_1', authoredId: 'mock_kyc_1', selected: false }),
+        );
+      });
+
+      it('does not hand v1 row to v2', async () => {
+        const registry = await createVersionedRegistry([selection('mock_kyc_2')]);
+
+        expect(primaryId(await registry.getById('base', 2))).toBe('mock_kyc_1');
+        expect(primaryId(await registry.getById('base', 1))).toBe('mock_kyc_2');
+      });
+
+      it('projects a retired version its own row', async () => {
+        const registry = await createVersionedRegistry([selection('mock_kyc_2', undefined, 4)]);
+
+        expect(await primaryOf(registry, 4)).toEqual(
+          expect.objectContaining({ id: 'mock_kyc_2', selected: true }),
+        );
+      });
+
+      it('lists versions ascending, without a retired one unless viewed, and the viewed draft as authored', async () => {
+        const registry = await createVersionedRegistry([
+          selection('mock_kyc_2', undefined, 1),
+          selection('mock_kyc_2', undefined, 4),
+        ]);
+        const published = [
+          { version: 1, id: 'mock_kyc_2', authoredId: 'mock_kyc_1', selected: true },
+          { version: 2, id: 'mock_kyc_1', authoredId: 'mock_kyc_1', selected: false },
+        ];
+
+        expect((await primaryOf(registry, 1)).versions).toEqual(published);
+        expect((await primaryOf(registry, 3)).versions).toEqual([
+          ...published,
+          { version: 3, id: 'mock_kyc_1', authoredId: 'mock_kyc_1', selected: false },
+        ]);
+        expect((await primaryOf(registry, 4)).versions).toEqual([
+          ...published,
+          { version: 4, id: 'mock_kyc_2', authoredId: 'mock_kyc_1', selected: true },
+        ]);
+      });
+
+      it('leaves out a published version whose step has several connectors, and reports none for one that is not selectable', async () => {
+        const multi = createStoredWorkflow('base', 2, 'published');
+        const config = (
+          multi.definition.steps as Array<{ name: string; config: { connectors: object[] } }>
+        ).find((step) => step.name === 'collect_email')!.config;
+
+        config.connectors = [
+          ...config.connectors,
+          { ...config.connectors[0], name: 'second', id: 'mock_kyc_2', order: 2 },
+        ];
+        const registry = await createRegistry({
+          files: [],
+          connectorExecutionPort: port(KYC_ADAPTERS),
+          repository: new InMemoryWorkflowsRepository([
+            createStoredWorkflow('base', 1, 'published'),
+            multi,
+          ]),
+          selections: new InMemoryConnectorSelectionsRepository(),
+        });
+
+        expect((await primaryOf(registry, 1)).versions.map(({ version }) => version)).toEqual([1]);
+        expect((await primaryOf(registry, 2)).versions).toEqual([]);
+      });
     });
 
     it('leaves the compile dry run on the authored definition', async () => {
@@ -1218,7 +1334,7 @@ describe('WorkflowRegistryService', () => {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining(
-          'workflow=base step=accept_terms names connector id=removed_kyc, which is not registered',
+          'workflow=base version=1 step=accept_terms names connector id=removed_kyc, which is not registered',
         ),
       );
       expect(await registry.getById('base', 1)).toBeInstanceOf(Workflow);

@@ -58,6 +58,7 @@ const DEFINITION: WorkflowDefinition = {
           authoredId: 'sumsub',
           selected: false,
           selectableIds: [],
+          versions: [],
           name: 'Sumsub',
           type: 'kyc',
           order: 1,

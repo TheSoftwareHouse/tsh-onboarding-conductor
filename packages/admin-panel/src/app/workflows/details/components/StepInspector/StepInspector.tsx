@@ -14,6 +14,7 @@ import { StepTransitions } from './StepTransitions';
 
 export interface StepInspectorProps {
   workflowId: string;
+  version: number;
   step: WorkflowStepDefinition;
   versionStatus: WorkflowVersionStatus | null;
 }
@@ -21,14 +22,13 @@ export interface StepInspectorProps {
 /** The right rail for the selected step, read-only apart from a stored version's connector binding: its kind and status, fields, connectors and transitions. */
 export function StepInspector({
   workflowId,
+  version,
   step,
   versionStatus,
 }: StepInspectorProps): ReactElement {
   const isDraft = versionStatus === WORKFLOW_VERSION_STATUS.draft;
-  const revisions =
-    versionStatus === WORKFLOW_VERSION_STATUS.published || versionStatus === null
-      ? 'published'
-      : 'stored';
+  const isRetired = versionStatus === WORKFLOW_VERSION_STATUS.retired;
+  const readOnly = versionStatus !== null && versionStatus !== WORKFLOW_VERSION_STATUS.published;
 
   return (
     <aside
@@ -59,18 +59,20 @@ export function StepInspector({
           className="flex items-center gap-1.5 leading-natural font-normal tracking-normal"
         >
           <Lock aria-hidden="true" className="size-4" />
-          {isDraft
-            ? 'Read-only here — edit the draft, connectors included, on the JSON tab'
-            : `Shape is read-only — ${revisions} revisions never change shape; the connector binding is editable`}
+          {isDraft && 'Read-only here — edit the draft, connectors included, on the JSON tab'}
+          {isRetired && 'Read-only — a retired version never runs'}
+          {!readOnly &&
+            'Shape is read-only — published revisions never change shape; the connector binding is editable'}
         </Typography>
       </header>
       <StepRequirements step={step} />
       {step.connectors.length > 0 && (
         <StepConnectors
           workflowId={workflowId}
+          version={version}
           stepName={step.name}
           connectors={step.connectors}
-          readOnly={isDraft}
+          readOnly={readOnly}
         />
       )}
       <StepTransitions step={step} />

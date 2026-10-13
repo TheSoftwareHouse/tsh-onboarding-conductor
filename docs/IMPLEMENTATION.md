@@ -260,17 +260,19 @@ classifies itself without a registry lookup — worth the redundancy only becaus
 startup failure rather than a silent disagreement.
 
 **Runtime selection.** An operator can change which adapter a step's connector slot runs without
-publishing a version ([0038](decisions/0038-runtime-connector-selection.md)). A selection is one
-row per workflow family and step (`workflow_connector_selections`, §9); `Workflow` applies it by
-replacing the `id` of the step's primary connector — config, field mapping, retry and error handler
-stay as authored — in every stored version that has the step, so execution, callback resolution and
-the admin projection see the same effective binding
-(`workflows/domain/connector-selection.ts`). It applies only to a step with exactly one connector
-declaration, and never to a fallback. `WorkflowRegistryService.toWorkflow` reads the family's rows on
-every resolution — no cache, so a selection takes effect on the next request on every instance. The
-compile dry run (`POST /v1/admin/workflows/compile`) ignores selections. Choosing the authored id
-stores a row too, a family-wide pin, since the authored id differs between versions; only
-`DELETE` clears it.
+publishing a version ([0038](decisions/0038-runtime-connector-selection.md), scope per
+[0042](decisions/0042-connector-selection-per-version.md)). A selection is one row per workflow
+version and step (`workflow_connector_selections`, §9); `Workflow` applies it by replacing the `id`
+of the step's primary connector — config, field mapping, retry and error handler stay as authored —
+in the version the row names, so execution, callback resolution and the admin projection see the
+same effective binding (`workflows/domain/connector-selection.ts`). It applies only to a step with
+exactly one connector declaration, and never to a fallback. `WorkflowRegistryService.toWorkflow`
+reads the resolved version's rows on every resolution — no cache, so a selection takes effect on the
+next request on every instance — and passes none for a `draft`, so a draft, and a version just
+published from one, runs its authored connector. A `retired` version keeps its rows and projects
+them, though resolution still refuses to run it. The compile dry run
+(`POST /v1/admin/workflows/compile`) ignores selections. Choosing the authored id stores a row too,
+a pin on that version; only `DELETE` clears it.
 
 **One set of rules for the read and the write.** `ConnectorSelectionRules`
 (`workflows/domain/connector-selection.ts`), built by
@@ -280,13 +282,14 @@ the first failing rule from the table below, or nothing; `listSelectableIds(step
 effectiveId)` is the admin projection's `selectableIds`: the authored and effective ids plus every
 selectable adapter `refuse` lets through, judged against the step as authored and sorted. So an id
 the panel offers is an id a save accepts, with one asymmetry: the projection is per version, while
-the write runs the rules across every non-retired version. A step with no connector or more than one
+the write runs the rules across the targeted versions. A step with no connector or more than one
 projects `[]`, a fallback's id is never listed, and a candidate whose `validateDeclaration` throws is
 left out rather than failing the read. Without a port — the compile dry run, a unit test — the list
 is the authored and effective ids alone.
 
-Saving runs `refuse` against **every non-retired version that has the step**, in order, and the
-first refusal names its version (`WORKFLOW_CONNECTOR_SELECTION_INVALID`, §11):
+Saving runs `refuse` against **the targeted versions only**, never a draft, in ascending version
+order, and the first refusal names its version (`WORKFLOW_CONNECTOR_SELECTION_INVALID`, §11); nothing
+is written unless every target accepts (the targets are below the table). The reasons:
 
 | Reason                    | Refused when                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -300,12 +303,29 @@ first refusal names its version (`WORKFLOW_CONNECTOR_SELECTION_INVALID`, §11):
 | `callback_fields_missing` | The step does not declare every field in the adapter's `callbackFields` (below)                        |
 | `declaration_invalid`     | The adapter's `validateDeclaration` throws for the declaration with the id replaced; the message rides |
 
+**Which versions a write targets.** `scope` is required on both writes (`400 VALIDATION_ERROR`
+otherwise). `version` targets that published version: a missing one is `404 WORKFLOW_NOT_FOUND`, a
+`draft` `409 WORKFLOW_VERSION_NOT_PUBLISHED`, a `retired` one `410 WORKFLOW_RETIRED`, and one without
+the step `404 WORKFLOW_STEP_NOT_FOUND`. `all` targets the covered set: every non-retired published
+version whose step of that name has exactly one connector. When none declares the step the answer is
+`404 WORKFLOW_STEP_NOT_FOUND`; when some do but none qualifies, the rules' `multiple_connectors` (or
+`no_connector`) names the highest of them. The write takes the advisory lock
+`${workflowId}:${stepName}`, per family and step, and upserts one row per target in one transaction.
+`DELETE` resolves targets the same way and keeps rows on retired versions.
+
+**The projection per version.** `selected` and `id` on a step's primary connector describe the
+viewed version only: for a `draft`, `selected` is `false` and `id` equals `authoredId`. The connector
+also carries `versions: [{ version, id, authoredId, selected }]`, ascending: the covered set, plus
+the viewed version when it is a draft or retired. It is `[]` for a step a selection cannot address
+and in the compile response. `WorkflowRegistryService.describeForAdmin` builds it from one
+`findRevisions` and one `findByWorkflowId`, and `Workflow.describeDefinition` copies it in.
+
 **The callback-fields guard.** An asynchronous adapter lists the `submittedData` keys its callback
 may emit in `ConnectorAdapter.callbackFields`, and a step bound to it must declare every one in
 `data`, or a verdict carrying one would be refused when it arrived. `normalizeDefinition` runs the
 check for every async connector of a step, fallbacks included, so a hand-written step missing a field
 fails the boot as a `WorkflowConnectorDeclarationInvalidError`; the selection service runs the same
-check per version (`callback_fields_missing`). It is what keeps the stored Sumsub revision 1, which
+check per targeted version (`callback_fields_missing`). It is what keeps the stored Sumsub revision 1, which
 does not declare `kycAttemptCount`, from being switched to Veriff and losing a retry verdict; a typed
 KYC step always passes.
 
@@ -2257,9 +2277,11 @@ not be reconstructible from the audit trail.
 A runtime connector selection (§2) records `workflow.connector_selected` on a `PUT` and
 `workflow.connector_selection_cleared` on a `DELETE` of `/v1/admin/workflows/:workflowId/steps/:stepName/connector`,
 both with entry type `success`, filed under resource type `workflow` with `resourceId` the workflow
-key, after the database commit. A `DELETE` is audited even when no selection existed. Metadata
-carries `workflowId`, `stepName`, `previousConnectorId` and `connectorId` — ids and names, no
-configuration — and goes through the same allowlist as the other families.
+key, one row per write, after the database commit. A `DELETE` is audited even when no selection
+existed. Metadata carries `workflowId`, `stepName`, `connectorId` (`null` on a clear), `scope` and
+`versions: [{ version, previousConnectorId }]` — ids and names, no configuration — and goes through
+the same allowlist as the other families. The allowlist still keeps a top-level
+`previousConnectorId`, so rows written before selections were per version read back.
 
 An operator reconcile of a parked onboarding (§5) writes one of two actions
 (`PENDING_CONNECTOR_ACTIONS`, `AuditService.logPendingConnectorReconcile`), both with actor type
@@ -2376,21 +2398,21 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 so a version is a row rather than half of a composite key — decision record
 [0028](decisions/0028-identity-and-version-tables.md) has the reasoning.
 
-| Table                           | Purpose                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`                   | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, `pending_connector` jsonb (nullable, plain — the connector the onboarding is parked on awaiting a callback, §5), expires_at, completed_at, rejection_reason, timestamps                                                                     |
-| `onboarding_documents`          | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                                             |
-| `client_webhook_outbox`         | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                                      |
-| `audit_log`                     | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                                   |
-| `connectors`                    | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                                    |
-| `workflows`                     | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below                    |
-| `workflow_versions`             | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                                   |
-| `workflow_connector_selections` | the operator's connector choice per family and step: composite PK `(workflow_id, step_name)`, `workflow_id` FK to `workflows` (`ON DELETE CASCADE`, `fk_workflow_connector_selections_workflow`), `connector_id` (checked against `^[a-z0-9_]+$`), `updated_at`, `updated_by`. `step_name` is not a foreign key — it names a step inside the versions' JSON |
-| `agreements`                    | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                                                                                |
-| `agreement_versions`            | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                                        |
-| `onboarding_agreements`         | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                                            |
-| `encryption_keys`               | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                                        |
-| `_engine_alive`                 | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                                                                       |
+| Table                           | Purpose                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`                   | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, `pending_connector` jsonb (nullable, plain — the connector the onboarding is parked on awaiting a callback, §5), expires_at, completed_at, rejection_reason, timestamps                                                                                                                 |
+| `onboarding_documents`          | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                                                                                         |
+| `client_webhook_outbox`         | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                                                                                  |
+| `audit_log`                     | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                                                                               |
+| `connectors`                    | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                                                                                |
+| `workflows`                     | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below                                                                |
+| `workflow_versions`             | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                                                                               |
+| `workflow_connector_selections` | the operator's connector choice per workflow version and step: composite PK `(workflow_id, version, step_name)`, `version` checked `> 0`, `workflow_id` FK to `workflows` (`ON DELETE CASCADE`, `fk_workflow_connector_selections_workflow`), `connector_id` (checked against `^[a-z0-9_]+$`), `updated_at`, `updated_by`. `step_name` is not a foreign key — it names a step inside the versions' JSON |
+| `agreements`                    | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                                                                                                                            |
+| `agreement_versions`            | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                                                                                    |
+| `onboarding_agreements`         | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                                                                                        |
+| `encryption_keys`               | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                                                                                    |
+| `_engine_alive`                 | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                                                                                                                   |
 
 Only `agreements` carries a `current_version_id`. An agreement version is created only by
 `POST /v1/admin/agreements`, which sets the pointer in the same statement that writes the version,
@@ -2433,13 +2455,14 @@ nothing a decorator does not already say. A reference the schema deliberately le
 directions and fails if entity and database ever disagree; see decision record
 [0027](decisions/0027-relations-declared-on-entities.md).
 
-Twelve migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Fourteen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters): `0001_init`, `0002_create_onboardings`,
 `0003_create_onboarding_documents`, `0006_create_client_webhook_outbox`, `0010_create_audit_log`,
 `0013_create_workflows`, `0016_create_connector_settings`, `0022_create_agreements`,
 `0024_create_encryption_keys`, `0028_add_onboardings_in_progress_version_index`,
-`0029_add_workflow_versions_one_draft_index`, `0030_create_workflow_connector_selections` and
-`0031_add_onboardings_pending_connector`. A file under the migrations glob may export nothing but its class:
+`0029_add_workflow_versions_one_draft_index`, `0030_create_workflow_connector_selections`,
+`0031_add_onboardings_pending_connector` and
+`0032_scope_workflow_connector_selections_per_version`. A file under the migrations glob may export nothing but its class:
 TypeORM instantiates every export as a migration.
 
 No migration has ever run against a deployed environment, so the set is folded rather than
@@ -2464,7 +2487,11 @@ partial unique index on `workflow_versions (workflow_id)` where `status = 'draft
 family to one draft ([0034](decisions/0034-admin-authored-workflow-drafts.md)); `0030` creates
 `workflow_connector_selections` with its check constraints, then adds the foreign key separately;
 `0031` adds `onboardings.pending_connector` with a check that it is `NULL` or a JSON object
-([0038](decisions/0038-runtime-connector-selection.md)). The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
+([0038](decisions/0038-runtime-connector-selection.md)); `0032` adds `workflow_connector_selections.version` and moves the primary key to
+`(workflow_id, version, step_name)`, first copying each existing row to every published version
+of its family (a version without the step ignores the row; rows name compiled steps, which the stored document may not list)
+([0042](decisions/0042-connector-selection-per-version.md)); its `down` keeps the highest
+version's row per step. The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
 its fold: on a database created by this migration set there are no rows for it to convert —
 migrations run before the workflow publish — so it could never fire. The project is greenfield with
 no deployed data, so no other backfill runs either. The sequence's gaps — every number from `0001`
@@ -2705,8 +2732,8 @@ values; it renders them into the panel's `/config.js` (§12).
 | PUT    | `/v1/admin/workflows/:workflowId/versions/:version` — replaces a draft with the raw document in the body, which may change its `id` and `version`; `200` with the draft summary; `409` `WORKFLOW_VERSION_NOT_DRAFT`, `WORKFLOW_DRAFT_IN_USE` and the three create codes                                                                                                                                                                                                                   |
 | POST   | `/v1/admin/workflows/:workflowId/versions/:version/publish` — no body; compiles the stored draft and makes it `published`; `200` with the draft summary, `status: 'published'`, and no document; `409` `WORKFLOW_VERSION_NOT_DRAFT`, `WORKFLOW_VERSION_NOT_LATEST` and `WORKFLOW_VERSION_EXISTS` (a workflow file declares the same id and version), plus the compile route's `400 WORKFLOW_INVALID`, `400 WORKFLOW_CONNECTOR_DECLARATION_INVALID` and `409 WORKFLOW_SOURCE_KEY_CONFLICT` |
 | DELETE | `/v1/admin/workflows/:workflowId/versions/:version` — deletes a draft; `204`; `409 WORKFLOW_VERSION_NOT_DRAFT` or `WORKFLOW_DRAFT_IN_USE`                                                                                                                                                                                                                                                                                                                                                 |
-| PUT    | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — body `{ connectorId }`, binds the step's single connector slot to that adapter in every version of the family (§2); `200` with the slot's connector projection from the highest published version                                                                                                                                                                                                                           |
-| DELETE | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — removes the selection, back to the authored connector; `204`, also when none existed                                                                                                                                                                                                                                                                                                                                        |
+| PUT    | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — body `{ connectorId, scope: 'version' \| 'all', version? }` (`version` required exactly when `scope` is `version`), binds the step's single connector slot to that adapter on that published version or on the covered set (§2); `200` with the slot's connector projection, including `versions`, from the target version (the highest covered one for `all`); the refusals are listed in §2                               |
+| DELETE | `/v1/admin/workflows/:workflowId/steps/:stepName/connector?scope=version&version=N` or `?scope=all` — removes the selection on that version or on the covered set, back to the authored connector; `204`, also when none existed; rows on retired versions are kept                                                                                                                                                                                                                       |
 | GET    | `/v1/admin/step-types` — the step-type palette: type, category, `composable`, `configSchema`                                                                                                                                                                                                                                                                                                                                                                                              |
 | GET    | `/v1/admin/step-types/schema` — the workflow JSON Schema as the engine applies it                                                                                                                                                                                                                                                                                                                                                                                                         |
 | GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -3265,16 +3292,23 @@ with Retry. App-wide, the `--font-display` and `--font-body` stacks in
 `tailwind.css` name `Inter Tight Variable` ahead of `Inter Tight`, the family the self-hosted
 variable font registers. The inspector beside it shows the selected step's fields,
 connectors (identity and field mapping) and outgoing transitions. The inspector omits connector
-`config`; the JSON tab shows the stored document, `config` included (0041). Its one editing control is the connector binding. For a step's
-primary connector `StepConnectors` renders a native `<select>` of `selectableIds` — only when more
-than one adapter can serve the slot — showing the effective `id`, with `(authored)` after the id the
-document wrote, disabled while a write is in flight. Changing it calls
-`PUT /v1/admin/workflows/{id}/steps/{step}/connector` (§11) through `workflowMutations.selectConnector`,
-whose meta awaits every read of the family, so the outcome resolves once the new slot is on
-screen; the card shows "Applies to every version of this workflow. Onboardings already waiting on the previous
-connector finish with it." While `selected` is true a quiet "Use authored connector" button calls
-the `DELETE` (`workflowMutations.clearConnector`, same meta). Each outcome is a toast (Toasts, below): "Connector set to {id}" or "Authored connector
-restored", and "Unable to change connector" reading `Version N refused: …`
+`config`; the JSON tab shows the stored document, `config` included (0041). Its one editing control is the connector binding, offered only on a published (or unpinned)
+version; a draft or retired version shows none. For a step's primary connector `StepConnectors`
+renders a native `<select>` of `selectableIds` — only when more than one adapter can serve the
+slot — showing the effective `id`, with `(authored)` after the id the document wrote. Changing it
+only sets local state; nothing is saved until a button is pressed, and the select and every button
+are disabled while a write is in flight. **Save for v{N}** (enabled when the choice differs from the
+effective `id`) calls `PUT /v1/admin/workflows/{id}/steps/{step}/connector` (§11) with
+`{ scope: 'version', version: N }` through `workflowMutations.selectConnector`, whose meta awaits
+every read of the family, so the outcome resolves once the new slot is on screen. **Apply to all
+published versions** appears when the connector's `versions` has two or more entries, is enabled
+while some entry's `id` differs from the choice, and sends `{ scope: 'all' }`. While `selected` is
+true a quiet **Restore on v{N}** calls the `DELETE` with `scope=version` (`workflowMutations.clearConnector`,
+same meta), and **Restore on all versions** appears when two or more versions are covered and one of
+them is selected, with `scope=all`. The card's helper text reads "Saves for this version, or for
+every published version with this step. Drafts and newly published versions run their authored
+connector. Onboardings already waiting on the previous connector finish with it." Each outcome is a toast (Toasts, below): "Connector set to {id} on v{N}" (or "on v1, v2"),
+"Authored connector restored on v{N}" (or "on every version"), and "Unable to change connector" reading `Version N refused: …`
 (`describeConnectorSelectionError`), where `N` is the `workflowVersion` the engine named and the
 rest is the engine's `detail` when it sent one — it names the missing field or the offending config
 key — else the panel's sentence for the `reason`, one per reason the engine declares, else the
@@ -3337,10 +3371,17 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
   parse step: a failure shows in `ValidationResult` and opens no dialog, and the button stays
   enabled, since every click compiles again. A valid result opens `PublishDraftDialog`, titled
   `Publish {name ?? workflowId} v{version}`, warning "Publishing is permanent: a published version
-  cannot be edited or deleted." and "New onboardings will start on this version.", with Cancel and
-  Publish ("Publishing…" while pending). Success toasts "Version N published." and navigates with
+  cannot be edited or deleted." and "New onboardings will start on this version.", then one
+  informational note per primary connector whose other published versions run a selected connector
+  that differs from the draft's authored one ("Step `submit_kyc` runs sumsub_kyc on v1, v2
+  (selected). v3 will run its authored veriff_kyc."), with Cancel and Publish ("Publishing…" while
+  pending). `DraftEditor` reads the draft's own definition (`workflowQueries.detail(id, version)`,
+  enabled while the dialog is open) and `describePublishConnectorNotes` builds the notes; while that
+  read loads or fails the dialog shows none, and a note never disables Publish. Success toasts "Version N published." and navigates with
   `replace` to `/workflows/<id>?version=<N>`, where the page, with `versions(id)` awaited by the
-  factory, shows the published version read-only. Failure shows an error toast and closes the
+  factory, shows the published version read-only. `usePublishDraft` removes the draft's
+  pinned `detail(id, N)` read, exact so `document` stays, once the editor unmounts after that
+  navigation, so the published version's graph does not reuse it. Failure shows an error toast and closes the
   dialog, leaving the draft as it was.
 - **Validate** runs `JSON.parse` (a syntax error shows without calling the engine), then
   `compileWorkflowDocument`. The result renders inline under the editor in `ValidationResult`,
@@ -3353,8 +3394,8 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
   deleted it).
 - **Graph tab** (`DraftGraph`) draws the compiled `workflow` of the shared compile result, with
   `?step` selecting a step as on a published version. Its inspector is wholly read-only:
-  `StepConnectors` gets `readOnly`, so no connector `<select>` or "Use authored connector" is
-  offered, since a selection binds the family's stored versions, not the draft's text; the
+  `StepConnectors` gets `readOnly`, so no connector `<select>` or Restore button is
+  offered, since a selection binds published versions, never the draft's text; the
   header reads "Read-only here — edit the draft, connectors included, on the JSON tab". It never compiles while typing: when the tab
   opens with no result held it runs the same compile as Validate, and shows "Compiling…" meanwhile;
   a syntax error or an engine refusal shows "This draft does not compile. Fix it on the JSON tab."

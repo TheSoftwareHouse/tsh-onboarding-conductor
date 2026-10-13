@@ -37,6 +37,13 @@ const workflowFieldSchema = z.object({
   upload: workflowFieldUploadSchema.nullable().default(null),
 });
 
+const workflowConnectorVersionSchema = z.object({
+  version: z.number(),
+  id: z.string(),
+  authoredId: z.string(),
+  selected: z.boolean(),
+});
+
 const workflowStepConnectorSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -48,7 +55,7 @@ const workflowStepConnectorSchema = z.object({
   optionalFieldMapping: z.record(z.string(), z.string()).default({}),
 });
 
-/** The primary connector also reports the runtime selection; all three keys are absent on an older engine. */
+/** The primary connector also reports the runtime selection; all four keys are absent on an older engine. */
 /** Also parses the slot the selection write answers with. */
 export const workflowPrimaryConnectorSchema = workflowStepConnectorSchema
   .extend({
@@ -56,6 +63,7 @@ export const workflowPrimaryConnectorSchema = workflowStepConnectorSchema
     authoredId: z.string().optional(),
     selected: z.boolean().default(false),
     selectableIds: z.array(z.string()).default([]),
+    versions: z.array(workflowConnectorVersionSchema).default([]),
     fallbacks: z.array(workflowStepConnectorSchema).default([]),
   })
   .transform((connector) => ({ ...connector, authoredId: connector.authoredId ?? connector.id }));
@@ -127,6 +135,9 @@ export type WorkflowFieldUpload = z.infer<typeof workflowFieldUploadSchema>;
 
 /** A connector a step declares: identity and field mapping only, never its config. */
 export type WorkflowStepConnector = z.infer<typeof workflowStepConnectorSchema>;
+
+/** One covered version's read of a step's primary connector. */
+export type WorkflowConnectorVersion = z.infer<typeof workflowConnectorVersionSchema>;
 
 /** A step's primary connector: `id` is the effective adapter, `authoredId` what the document declares. */
 export type WorkflowStepConnectorWithFallbacks = z.infer<typeof workflowPrimaryConnectorSchema>;
