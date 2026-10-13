@@ -1,9 +1,8 @@
 import { AxiosError } from 'axios';
+import type { ApiError } from '@/services/api/api-error';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addEncryptionKey,
-  EncryptionFetchError,
-  EncryptionWriteError,
   ENCRYPTION_ENDPOINTS,
   fetchEncryptionState,
   setEncryptionEnabled,
@@ -145,7 +144,7 @@ describe('fetchEncryptionState', () => {
     );
 
     await expect(fetchEncryptionState()).rejects.toMatchObject({
-      reason: 'invalid-payload' satisfies EncryptionFetchError['reason'],
+      kind: 'invalid-payload',
       message: 'Response contains malformed encryption settings.',
     });
   });
@@ -154,7 +153,7 @@ describe('fetchEncryptionState', () => {
     mockedGet.mockResolvedValueOnce(stateResponse({ keyConfigured: undefined }));
 
     await expect(fetchEncryptionState()).rejects.toMatchObject({
-      reason: 'invalid-payload',
+      kind: 'invalid-payload',
     });
   });
 
@@ -164,7 +163,7 @@ describe('fetchEncryptionState', () => {
       mockedGet.mockRejectedValueOnce(axiosFailure(status));
 
       await expect(fetchEncryptionState()).rejects.toMatchObject({
-        reason: 'request-failed',
+        kind: 'request-failed',
         status,
         message,
       });
@@ -175,7 +174,7 @@ describe('fetchEncryptionState', () => {
     mockedGet.mockRejectedValueOnce(new Error('Network Error'));
 
     await expect(fetchEncryptionState()).rejects.toMatchObject({
-      reason: 'request-failed',
+      kind: 'request-failed',
       message: 'Network Error',
     });
   });
@@ -222,7 +221,7 @@ describe('setEncryptionRotationInterval', () => {
     );
 
     await expect(setEncryptionRotationInterval('1w')).rejects.toMatchObject({
-      name: 'EncryptionWriteError',
+      name: 'ApiError',
       message: 'Response contains malformed encryption settings.',
     });
   });
@@ -234,7 +233,7 @@ describe('setEncryptionRotationInterval', () => {
       code: 'ENCRYPTION_DISABLED',
       status: 409,
       message: 'Encryption is turned off, so there is no key to rotate.',
-    } satisfies Partial<EncryptionWriteError>);
+    } satisfies Partial<ApiError>);
   });
 });
 
@@ -270,7 +269,7 @@ describe('setEncryptionEnabled', () => {
     mockedPatch.mockResolvedValueOnce({ data: { enabled: true } });
 
     await expect(setEncryptionEnabled(true)).rejects.toMatchObject({
-      name: 'EncryptionWriteError',
+      name: 'ApiError',
       code: null,
       message: 'Response contains malformed encryption settings.',
     });
@@ -289,7 +288,7 @@ describe('setEncryptionEnabled', () => {
       status: 503,
       message:
         'The engine has no ENCRYPTION_KEY configured. Set it and restart the engine before turning encryption on.',
-    } satisfies Partial<EncryptionWriteError>);
+    } satisfies Partial<ApiError>);
   });
 
   it('explains a 409 ENCRYPTION_KEY_RING_CONFLICT as a retryable clash', async () => {
@@ -300,14 +299,14 @@ describe('setEncryptionEnabled', () => {
       status: 409,
       message:
         'Another change to the encryption keys landed at the same moment. Reload the page and try again.',
-    } satisfies Partial<EncryptionWriteError>);
+    } satisfies Partial<ApiError>);
   });
 
   it('falls back to the generic message for a 409 the engine did not name', async () => {
     mockedPatch.mockRejectedValueOnce(axiosFailure(409, { code: 'SOMETHING_ELSE' }));
 
     await expect(setEncryptionEnabled(true)).rejects.toMatchObject({
-      code: null,
+      code: 'SOMETHING_ELSE',
       status: 409,
       message: 'Request failed with status 409.',
     });
@@ -328,7 +327,7 @@ describe('setEncryptionEnabled', () => {
     mockedPatch.mockRejectedValueOnce(axiosFailure(400, { code: 'ENCRYPTION_DISABLED' }));
 
     await expect(setEncryptionEnabled(true)).rejects.toMatchObject({
-      code: null,
+      code: 'ENCRYPTION_DISABLED',
       status: 400,
       message: 'Request failed with status 400.',
     });
@@ -394,7 +393,7 @@ describe('addEncryptionKey', () => {
     mockedPost.mockRejectedValueOnce(axiosFailure(409, { code: 'SOMETHING_ELSE' }));
 
     await expect(addEncryptionKey()).rejects.toMatchObject({
-      code: null,
+      code: 'SOMETHING_ELSE',
       status: 409,
       message: 'Request failed with status 409.',
     });

@@ -195,5 +195,50 @@ describe('OnboardingsRepository', () => {
 
       expect(onboarding.scores).toEqual({ risk: 40 });
     });
+
+    it('copies the parked connector from the locked row onto the in-memory entity', async () => {
+      const harness = createHarness();
+      const onboarding = Object.assign(new OnboardingEntity(), {
+        id: 'onboarding-1',
+        pendingConnector: null,
+      });
+      const pendingConnector = {
+        connectorName: 'kyc_step',
+        connectorId: 'veriff_kyc',
+        connectorOrder: 1,
+        providerReference: 'session-1',
+      };
+      (harness.repositoryMock.findOne as jest.Mock).mockResolvedValue(
+        Object.assign(new OnboardingEntity(), { id: 'onboarding-1', pendingConnector }),
+      );
+
+      await harness.sut.lockAndRefreshPreflight(harness.manager, onboarding);
+
+      expect(onboarding.pendingConnector).toEqual(pendingConnector);
+    });
+  });
+
+  describe('createInitial', () => {
+    it('stores the initial row with its parked connector', async () => {
+      const harness = createHarness();
+      const data = {
+        id: 'onboarding-1',
+        workflowVersionId: '01912345-6789-7abc-8def-00000000f001',
+        status: 'awaiting_user',
+        currentStep: 'collect_profile',
+        context: {},
+        expiresAt: null,
+        completedAt: null,
+        rejectionReason: null,
+        scores: {},
+        pendingConnector: null,
+      } as const;
+      (harness.repositoryMock.create as jest.Mock).mockReturnValue(data);
+      (harness.repositoryMock.save as jest.Mock).mockResolvedValue(data);
+
+      await harness.sut.createInitial(harness.manager, data);
+
+      expect(harness.repositoryMock.create).toHaveBeenCalledWith(data);
+    });
   });
 });

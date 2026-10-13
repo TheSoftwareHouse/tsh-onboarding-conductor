@@ -14,6 +14,7 @@ describe('describeAuditResourceType', () => {
       'Callbacks',
       'Connector settings',
       'Admin API',
+      'Workflows',
     ]);
   });
 

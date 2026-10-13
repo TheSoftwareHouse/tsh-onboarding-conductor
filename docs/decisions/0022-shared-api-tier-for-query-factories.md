@@ -4,7 +4,7 @@
 - **Date:** 2026-09-22
 - **Tags:** admin-panel, frontend, data-fetching
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [0036](0036-mutation-factories-with-invalidation-meta.md), its "no mutation-options factory" paragraph, its closing open question, its explicit-`TError` rule and its "typed error class" only
 
 ## Decision
 

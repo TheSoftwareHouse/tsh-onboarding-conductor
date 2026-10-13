@@ -589,7 +589,9 @@ describe('kyc-identity-verification', () => {
       'kycRetryStep',
       'kycReasonCodes',
       'kycCustomerMessage',
+      'kycAttemptCount',
     ]);
+    expect(step.data.kycAttemptCount).toMatchObject({ type: 'number', required: false });
     // Uncapped: a reviewer's comment has no length guarantee, and a cap loses the verdict.
     expect(validationOf(step.data.kycCustomerMessage)).toEqual({});
   });
@@ -643,7 +645,13 @@ describe('kyc-identity-verification', () => {
 });
 
 describe('kyc-identity-verification, given additions', () => {
-  const graphWith = (connector: Record<string, unknown>) => ({
+  const graphWith = (
+    connector: Record<string, unknown>,
+    sumsubKeys: Record<string, unknown> = {
+      levelName: 'level',
+      questionnaireDefinitionId: 'questions',
+    },
+  ) => ({
     id: 'kyc',
     version: 1,
     steps: [
@@ -664,9 +672,8 @@ describe('kyc-identity-verification, given additions', () => {
         type: 'kyc-identity-verification',
         config: {
           connector,
-          levelName: 'level',
+          ...sumsubKeys,
           sourceKey: 'source',
-          questionnaireDefinitionId: 'questions',
           maxAttemptsPerDocSet: 3,
         },
         edges: {
@@ -697,6 +704,23 @@ describe('kyc-identity-verification, given additions', () => {
     expect(connector.fieldMapping.email).toBe('email');
     expect(connector.fieldMapping.firstName).toBe('firstName');
     expect(connector.config).toMatchObject({ lang: 'fr', levelName: 'level' });
+  });
+
+  it('compiles without the Sumsub keys and carries neither in the connector config', () => {
+    const compiled = compileWorkflow(graphWith({ id: 'sumsub_kyc' }, {}));
+    const connector = compiled.steps.find((step) => step.name === 'check')!.connectors![0];
+
+    expect(connector.config).not.toHaveProperty('levelName');
+    expect(connector.config).not.toHaveProperty('questionnaireDefinitionId');
+  });
+
+  it('takes levelName from connector.config when the step omits it', () => {
+    const compiled = compileWorkflow(
+      graphWith({ id: 'sumsub_kyc', config: { levelName: 'from-binding' } }, {}),
+    );
+    const connector = compiled.steps.find((step) => step.name === 'check')!.connectors![0];
+
+    expect(connector.config).toMatchObject({ levelName: 'from-binding' });
   });
 
   it('refuses an addition that would override a derived key', () => {

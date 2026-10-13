@@ -14,6 +14,7 @@ import {
   useAdminOnboardingDetails,
   type UseAdminOnboardingDetailsResult,
 } from './hooks/useAdminOnboardingDetails';
+import { useOnboardingReconcile } from './hooks/useOnboardingReconcile';
 import { useOnboardingReview } from './hooks/useOnboardingReview';
 import { detailsSearchParams, serializeDetailsTab } from './utils/details-search-params';
 
@@ -63,6 +64,7 @@ export function OnboardingDetailsPage(): ReactElement {
   const hasScores = scores.length > 0;
   const openTab = hasScores ? tab : 'history';
   const { pendingAction, submit } = useOnboardingReview(onboardingId);
+  const { isPending: isReconciling, reconcile } = useOnboardingReconcile(onboardingId);
 
   /** The Reload control's own refresh: the page's own reads, plus the audit trail the activity log reads. */
   function handleReload(): void {
@@ -102,6 +104,8 @@ export function OnboardingDetailsPage(): ReactElement {
         isRefreshing={phase === 'loading'}
         pendingAction={pendingAction}
         onReviewSubmit={submit}
+        isReconciling={isReconciling}
+        onReconcile={reconcile}
         statusMessage={describeDetailsStatus(details)}
       />
       {summary !== null && (

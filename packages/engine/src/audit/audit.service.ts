@@ -14,13 +14,18 @@ import {
   CONNECTOR_OUTCOME_ACTIONS,
   CONNECTOR_SETTINGS_ACTIONS,
   CONNECTOR_SETTINGS_RESOURCE_TYPE,
+  WORKFLOW_ACTIONS,
+  WORKFLOW_RESOURCE_TYPE,
   ENCRYPTION_ACTIONS,
   ENCRYPTION_KEY_RESOURCE_TYPE,
   getAuditEntryType,
   isAuditAction,
   ONBOARDING_AUDIT_RESOURCE_TYPE,
   ONBOARDING_REJECTED_ATTEMPT_ACTION,
+  PENDING_CONNECTOR_ACTIONS,
   WEBHOOK_ACTIONS,
+  WORKFLOW_DRAFT_AUDIT_ACTIONS,
+  WORKFLOW_VERSION_AUDIT_RESOURCE_TYPE,
   type AdminAccessAction,
   type AdminAccessActorType,
   type AdminAccessAuditInput,
@@ -45,16 +50,24 @@ import {
   type ConnectorSettingsAuditAction,
   type ConnectorSettingsAuditInput,
   type ConnectorSettingsAuditMetadata,
+  type WorkflowAuditAction,
+  type WorkflowAuditInput,
+  type WorkflowConnectorSelectionAuditMetadata,
   type EncryptionAuditAction,
   type EncryptionAuditInput,
   type EncryptionAuditMetadata,
   type LifecycleAuditInput,
+  type PendingConnectorAuditAction,
+  type PendingConnectorAuditInput,
   type RejectedAttemptAuditInput,
   type RejectedAttemptOperation,
   type RejectedAttemptOutcome,
   type RejectedAttemptAuditMetadata,
   type WebhookAction,
   type WebhookAuditInput,
+  type WorkflowDraftAuditAction,
+  type WorkflowDraftAuditInput,
+  type WorkflowDraftAuditMetadata,
   type OnboardingTransitionAction,
   type WebhookResourceType,
 } from './audit.types';
@@ -86,6 +99,7 @@ const REJECTED_ATTEMPT_OUTCOME_ALLOWLIST: Record<
   submit: [
     'onboarding_not_found',
     'onboarding_completed',
+    'awaiting_connector',
     'retryable_invalid_data',
     'unknown_workflow_evaluation',
   ],
@@ -307,6 +321,34 @@ export class AuditService {
   }
 
   /**
+   * Records one operator binding of a workflow step's connector slot, or its reversal.
+   *
+   * Writes in its own transaction, like `logConnectorSettingsChange`: the selection write it
+   * follows already committed through the selections repository, so this row has no other work
+   * to join. Metadata is limited to {@link WorkflowConnectorSelectionAuditMetadata} and
+   * re-filtered on the way in.
+   */
+  async logWorkflowChange(dataSource: DataSource, input: WorkflowAuditInput): Promise<unknown> {
+    this.assertWorkflowChangeAllowed(input.action);
+
+    return dataSource.transaction((manager) =>
+      this.repository.insert(manager, {
+        actorType: 'operator',
+        actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
+        action: input.action,
+        entryType: getAuditEntryType(input.action),
+        resourceType: WORKFLOW_RESOURCE_TYPE,
+        resourceId: input.resourceId,
+        metadata: this.filterWorkflowMetadata(input.metadata),
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      }),
+    );
+  }
+
+  /**
    * Records one step of the encryption story: an operator turning encryption on or off, adding a
    * key, the key that add supersedes, or a step of the background sweep.
    *
@@ -464,6 +506,57 @@ export class AuditService {
     });
   }
 
+  /**
+   * Records one workflow draft write: created, updated or deleted.
+   *
+   * Writes on the caller's manager, so the row stands or falls with the draft write it describes.
+   * The actor is always the operator behind the request.
+   */
+  async logWorkflowDraft(manager: EntityManager, input: WorkflowDraftAuditInput): Promise<unknown> {
+    this.assertWorkflowDraftAllowed(input.action);
+
+    return this.repository.insert(manager, {
+      actorType: 'operator',
+      actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
+      action: input.action,
+      entryType: getAuditEntryType(input.action),
+      resourceType: WORKFLOW_VERSION_AUDIT_RESOURCE_TYPE,
+      resourceId: input.resourceId,
+      metadata: this.filterWorkflowDraftMetadata(input.metadata),
+      before: null,
+      after: null,
+      hashPrev: null,
+      hashSelf: null,
+    });
+  }
+
+  /**
+   * Records an operator's reconcile of a parked connector, on the caller's manager: the applied
+   * verdict stands or falls with the state transition it rode in on, and the no-op row is cheap
+   * enough to join whatever the caller holds. Names the operator, never the engine — the engine
+   * would have waited.
+   */
+  async logPendingConnectorReconcile(
+    manager: EntityManager,
+    input: PendingConnectorAuditInput,
+  ): Promise<unknown> {
+    this.assertPendingConnectorAllowed(input.action);
+
+    return this.repository.insert(manager, {
+      actorType: 'operator',
+      actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
+      action: input.action,
+      entryType: getAuditEntryType(input.action),
+      resourceType: ONBOARDING_AUDIT_RESOURCE_TYPE,
+      resourceId: input.resourceId,
+      metadata: input.metadata,
+      before: null,
+      after: null,
+      hashPrev: null,
+      hashSelf: null,
+    });
+  }
+
   async logWebhook(manager: EntityManager, input: WebhookAuditInput): Promise<unknown> {
     this.assertWebhookAllowed(input);
 
@@ -569,6 +662,10 @@ export class AuditService {
       return this.filterConnectorSettingsMetadata(metadata as ConnectorSettingsAuditMetadata);
     }
 
+    if (action !== undefined && this.isWorkflowAction(action)) {
+      return this.filterWorkflowMetadata(metadata as WorkflowConnectorSelectionAuditMetadata);
+    }
+
     if (action !== undefined && this.isConnectorFailureAction(action)) {
       return this.filterConnectorFailureMetadata(metadata as ConnectorFailureAuditMetadata);
     }
@@ -583,6 +680,16 @@ export class AuditService {
 
     if (action !== undefined && this.isAgreementAction(action)) {
       return this.filterAgreementMetadata(action, metadata as AgreementAuditMetadata);
+    }
+
+    if (action !== undefined && this.isWorkflowDraftAction(action)) {
+      return this.filterWorkflowDraftMetadata(metadata as WorkflowDraftAuditMetadata);
+    }
+
+    // Written as given: connector ids, an order, an outcome and the callback's own data, which
+    // the webhook family already stores as is.
+    if (action !== undefined && this.isPendingConnectorAction(action)) {
+      return metadata;
     }
 
     if (action !== undefined && this.isEncryptionAction(action)) {
@@ -665,6 +772,18 @@ export class AuditService {
     return { connectorId: metadata.connectorId, keys: metadata.keys };
   }
 
+  /** Allowlists workflow connector-selection metadata on the way in and again on the way out. */
+  private filterWorkflowMetadata(
+    metadata: WorkflowConnectorSelectionAuditMetadata,
+  ): WorkflowConnectorSelectionAuditMetadata {
+    return {
+      workflowId: metadata.workflowId,
+      stepName: metadata.stepName,
+      previousConnectorId: metadata.previousConnectorId,
+      connectorId: metadata.connectorId,
+    };
+  }
+
   /**
    * Allowlists encryption metadata both on the way in and again on the way out through the admin
    * list endpoint, mirroring `filterAdminAccessMetadata`'s style. Optional fields are dropped
@@ -730,6 +849,26 @@ export class AuditService {
       version: link.version,
       origin: link.origin,
     } as AgreementLinkedAuditMetadata | AgreementAcceptedAuditMetadata;
+  }
+
+  /** Allowlists draft metadata to the identifiers; the rename pair is dropped when absent. */
+  private filterWorkflowDraftMetadata(
+    metadata: WorkflowDraftAuditMetadata,
+  ): WorkflowDraftAuditMetadata {
+    const safeMetadata: WorkflowDraftAuditMetadata = {
+      workflowId: metadata.workflowId,
+      version: metadata.version,
+    };
+
+    if (metadata.previousWorkflowId !== undefined) {
+      safeMetadata.previousWorkflowId = metadata.previousWorkflowId;
+    }
+
+    if (metadata.previousVersion !== undefined) {
+      safeMetadata.previousVersion = metadata.previousVersion;
+    }
+
+    return safeMetadata;
   }
 
   /**
@@ -881,6 +1020,18 @@ export class AuditService {
     }
   }
 
+  private assertWorkflowChangeAllowed(action: WorkflowAuditAction): void {
+    if (!isAuditAction(WORKFLOW_ACTIONS, action)) {
+      throw new Error(`Unsupported workflow audit action: ${action}`);
+    }
+  }
+
+  private assertPendingConnectorAllowed(action: PendingConnectorAuditAction): void {
+    if (!isAuditAction(PENDING_CONNECTOR_ACTIONS, action)) {
+      throw new Error(`Unsupported pending connector audit action: ${action}`);
+    }
+  }
+
   private assertEncryptionAllowed(action: EncryptionAuditAction): void {
     if (!isAuditAction(ENCRYPTION_ACTIONS, action)) {
       throw new Error(`Unsupported encryption audit action: ${action}`);
@@ -902,6 +1053,12 @@ export class AuditService {
   private assertApiFailureAllowed(action: ApiFailureAuditAction): void {
     if (!isAuditAction(API_FAILURE_ACTIONS, action)) {
       throw new Error(`Unsupported api failure audit action: ${action}`);
+    }
+  }
+
+  private assertWorkflowDraftAllowed(action: WorkflowDraftAuditAction): void {
+    if (!isAuditAction(WORKFLOW_DRAFT_AUDIT_ACTIONS, action)) {
+      throw new Error(`Unsupported workflow draft audit action: ${action}`);
     }
   }
 
@@ -927,6 +1084,10 @@ export class AuditService {
     return isAuditAction(CONNECTOR_SETTINGS_ACTIONS, action);
   }
 
+  private isWorkflowAction(action: string): action is WorkflowAuditAction {
+    return isAuditAction(WORKFLOW_ACTIONS, action);
+  }
+
   private isConnectorFailureAction(action: string): action is ConnectorFailureAuditAction {
     return isAuditAction(CONNECTOR_FAILURE_ACTIONS, action);
   }
@@ -941,6 +1102,14 @@ export class AuditService {
 
   private isAgreementAction(action: string): action is AgreementAuditAction {
     return Object.prototype.hasOwnProperty.call(AGREEMENT_RESOURCE_ALLOWLIST, action);
+  }
+
+  private isWorkflowDraftAction(action: string): action is WorkflowDraftAuditAction {
+    return isAuditAction(WORKFLOW_DRAFT_AUDIT_ACTIONS, action);
+  }
+
+  private isPendingConnectorAction(action: string): action is PendingConnectorAuditAction {
+    return isAuditAction(PENDING_CONNECTOR_ACTIONS, action);
   }
 
   private isEncryptionAction(action: string): action is EncryptionAuditAction {

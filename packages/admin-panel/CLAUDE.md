@@ -77,10 +77,14 @@ field-level validation are not toasts.
 
 ## Forms
 
-`react-hook-form` is the panel's form library (ADR 0019): one `useForm` per `ConnectorCard`. No
-`zod` resolver. `rules` enforce `isRequired` only for `source === 'unset'`, since a stored box is
-always empty — the engine alone judges the merged result. `connector-settings-form.ts` owns the
-trim-compare and deletion rule; filter panels stay outside RHF.
+`react-hook-form` is the panel's form library (ADR 0019); filter panels stay outside it.
+
+- **Connector cards:** one `useForm` per `ConnectorCard` and no `zod` resolver, because the engine
+  alone judges connector settings. `rules` enforce `isRequired` only for `source === 'unset'`,
+  since a stored box is always empty. `connector-settings-form.ts` owns the trim-compare and
+  deletion rule.
+- **A form that checks input client-side** states its rules once as a `zod` schema through
+  `zodResolver`, and submits the schema's output (ADR 0035; `app/workflows/utils/new-draft-schema.ts`).
 
 ## Data fetching
 
@@ -90,9 +94,14 @@ A domain is one or more fetch/write modules plus exactly one `<domain>Queries` f
 
 - Keys are hierarchical (`all()` → `lists()` → `list(filters)`); no key is built outside this tier.
 - `queryFn` closes over its argument rather than re-reading `queryKey`.
-- `queryOptions` takes `TError` explicitly, or the typed error degrades to `Error`.
-- Mutations are plain functions called from a route's `useMutation` (5.74.0 has no
-  `mutationOptions`); a write refreshes by invalidating, never `removeQueries`.
+- Failures are `ApiError` (`src/services/api/api-error.ts`), registered as `defaultError`; factories take no generics; detail properties are read through the domain's reader.
+- The one `Register` augmentation is `src/react-query-register.ts`. A new meta field is a type-alias section in `AppMutationMeta` plus a `MutationCache` handler.
+- A write is a factory in `<domain>-mutations.ts` built with `@/services/query-client/mutation-options`
+  and spread into the route's `useMutation` (ADR 0036). Its success invalidations go in its `meta`
+  (`awaits` / `invalidates`); a hook spec asserting them builds its client with `createQueryClient()`.
+- Invalidation that reads the cache and `removeQueries` stay in the hook; `removeQueries` only what
+  the write deleted, once the editor unmounts (`useRemoveVersionOnUnmount`), never while it is
+  still mounted.
 - This tier never imports from `src/app/` (ADR 0022).
 
 ## Structure

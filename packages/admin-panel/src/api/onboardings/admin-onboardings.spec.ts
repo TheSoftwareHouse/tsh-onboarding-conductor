@@ -1,10 +1,10 @@
 import { AxiosError, AxiosHeaders } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
+import { ApiError } from '@/services/api/api-error';
 import {
   ADMIN_ONBOARDINGS_ENDPOINT,
   ADMIN_ONBOARDING_STATUSES,
-  AdminOnboardingsFetchError,
   fetchAdminOnboardingById,
   fetchAdminOnboardings,
   type AdminOnboardingQueryFilters,
@@ -29,9 +29,9 @@ async function expectFetchError(
     await promise;
     throw new Error('Expected promise to reject');
   } catch (error) {
-    expect(error).toBeInstanceOf(AdminOnboardingsFetchError);
-    const typedError = error as AdminOnboardingsFetchError;
-    expect(typedError.reason).toBe(reason);
+    expect(error).toBeInstanceOf(ApiError);
+    const typedError = error as ApiError;
+    expect(typedError.kind).toBe(reason);
     if (message !== undefined) {
       expect(typedError.message).toBe(message);
     }
@@ -49,6 +49,7 @@ const VALID_RECORD: AdminOnboardingSummary = {
   updatedAt: '2026-07-02T00:00:00.000Z',
   completedAt: null,
   scores: {},
+  pendingConnector: null,
 };
 
 /** The window the endpoint reports for a default, unfiltered first page. */
@@ -63,6 +64,9 @@ const DEFAULT_PAGE_PARAMS: AdminOnboardingQueryFilters = {
   workflowVersion: null,
   currentStep: null,
   onboardingId: null,
+  parked: null,
+  pendingConnectorId: null,
+  parkedBefore: null,
 };
 
 function paginatedBody(
@@ -163,6 +167,9 @@ describe('fetchAdminOnboardings', () => {
       workflowVersion: '7',
       currentStep: 'collect-documents',
       onboardingId: '018f1e2a-1111-7000-8000-000000000001',
+      parked: true,
+      pendingConnectorId: 'veriff_kyc',
+      parkedBefore: '2026-07-01T00:00:00.000Z',
     });
 
     expect(mockedGet).toHaveBeenCalledWith(ADMIN_ONBOARDINGS_ENDPOINT, {
@@ -173,6 +180,9 @@ describe('fetchAdminOnboardings', () => {
         workflowVersion: '7',
         currentStep: 'collect-documents',
         onboardingId: '018f1e2a-1111-7000-8000-000000000001',
+        parked: true,
+        pendingConnectorId: 'veriff_kyc',
+        parkedBefore: '2026-07-01T00:00:00.000Z',
       },
     });
   });
@@ -211,6 +221,50 @@ describe('fetchAdminOnboardings', () => {
     });
   });
 
+  it('parses the connector a record is parked on through onto the projected record', async () => {
+    const pendingConnector = {
+      connectorId: 'veriff_kyc',
+      connectorName: 'Veriff',
+      connectorOrder: 0,
+      parkedAt: '2026-07-01T12:00:00.000Z',
+    };
+    mockedGet.mockResolvedValueOnce(
+      axiosResponse(paginatedBody([{ ...VALID_RECORD, pendingConnector }])),
+    );
+
+    await expect(fetchAdminOnboardings(defaultQueryFilters())).resolves.toEqual({
+      records: [{ ...VALID_RECORD, pendingConnector }],
+      pagination: FIRST_PAGE_WINDOW,
+    });
+  });
+
+  it('accepts a park the engine recorded without an instant', async () => {
+    const pendingConnector = {
+      connectorId: 'veriff_kyc',
+      connectorName: 'Veriff',
+      connectorOrder: 0,
+      parkedAt: null,
+    };
+    mockedGet.mockResolvedValueOnce(
+      axiosResponse(paginatedBody([{ ...VALID_RECORD, pendingConnector }])),
+    );
+
+    await expect(fetchAdminOnboardings(defaultQueryFilters())).resolves.toMatchObject({
+      records: [{ pendingConnector }],
+    });
+  });
+
+  it('defaults pendingConnector to null for a response with no such key', async () => {
+    const rawRecord: Record<string, unknown> = { ...VALID_RECORD };
+    delete rawRecord.pendingConnector;
+    mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([rawRecord])));
+
+    await expect(fetchAdminOnboardings(defaultQueryFilters())).resolves.toEqual({
+      records: [VALID_RECORD],
+      pagination: FIRST_PAGE_WINDOW,
+    });
+  });
+
   it('defaults scores to an empty map for a response with no scores key', async () => {
     const rawRecord: Record<string, unknown> = { ...VALID_RECORD };
     delete rawRecord.scores;
@@ -237,9 +291,9 @@ describe('fetchAdminOnboardings', () => {
       await fetchAdminOnboardings(defaultQueryFilters());
       throw new Error('Expected promise to reject');
     } catch (error) {
-      expect(error).toBeInstanceOf(AdminOnboardingsFetchError);
-      const typedError = error as AdminOnboardingsFetchError;
-      expect(typedError.reason).toBe('request-failed');
+      expect(error).toBeInstanceOf(ApiError);
+      const typedError = error as ApiError;
+      expect(typedError.kind).toBe('request-failed');
       expect(typedError.message).toBe('Request failed with status 500.');
       expect(typedError.status).toBe(500);
     }

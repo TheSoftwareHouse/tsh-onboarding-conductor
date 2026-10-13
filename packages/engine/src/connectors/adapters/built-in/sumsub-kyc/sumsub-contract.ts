@@ -10,6 +10,8 @@ import { KYC_OUTCOMES, KYC_RETRY_TARGETS } from '@tsh/ddl-schema';
  * ports — so `@tsh/ddl-schema` owns the declaration and this file only names it for the adapter.
  */
 
+export const SUMSUB_KYC_CONNECTOR_ID = 'sumsub_kyc';
+
 /**
  * The four outcomes the adapter ever reports. The adapter never chooses the next step: every one
  * of these maps to `ConnectorExecutionResult.accepted()`, and the workflow document does all

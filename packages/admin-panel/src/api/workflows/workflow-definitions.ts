@@ -1,6 +1,5 @@
-import { isAxiosError } from 'axios';
 import { z } from 'zod';
-import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { invalidPayloadError, toApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
 
 /** The engine root for admin workflow reads, shared by the definition and list modules. */
@@ -49,6 +48,18 @@ const workflowStepConnectorSchema = z.object({
   optionalFieldMapping: z.record(z.string(), z.string()).default({}),
 });
 
+/** The primary connector also reports the runtime selection; all three keys are absent on an older engine. */
+/** Also parses the slot the selection write answers with. */
+export const workflowPrimaryConnectorSchema = workflowStepConnectorSchema
+  .extend({
+    // What the document declares; `id` is the adapter effectively serving the slot.
+    authoredId: z.string().optional(),
+    selected: z.boolean().default(false),
+    selectableIds: z.array(z.string()).default([]),
+    fallbacks: z.array(workflowStepConnectorSchema).default([]),
+  })
+  .transform((connector) => ({ ...connector, authoredId: connector.authoredId ?? connector.id }));
+
 const workflowStepSchema = z.object({
   name: z.string().min(1),
   status: z.string().min(1),
@@ -57,13 +68,7 @@ const workflowStepSchema = z.object({
   // The new step keys are absent on an engine build that predates them.
   source: workflowStepSourceSchema.nullable().default(null),
   fields: z.array(workflowFieldSchema).default([]),
-  connectors: z
-    .array(
-      workflowStepConnectorSchema.extend({
-        fallbacks: z.array(workflowStepConnectorSchema).default([]),
-      }),
-    )
-    .default([]),
+  connectors: z.array(workflowPrimaryConnectorSchema).default([]),
 });
 
 const workflowScoreSchema = z.object({
@@ -123,9 +128,8 @@ export type WorkflowFieldUpload = z.infer<typeof workflowFieldUploadSchema>;
 /** A connector a step declares: identity and field mapping only, never its config. */
 export type WorkflowStepConnector = z.infer<typeof workflowStepConnectorSchema>;
 
-export type WorkflowStepConnectorWithFallbacks = WorkflowStepConnector & {
-  fallbacks: WorkflowStepConnector[];
-};
+/** A step's primary connector: `id` is the effective adapter, `authoredId` what the document declares. */
+export type WorkflowStepConnectorWithFallbacks = z.infer<typeof workflowPrimaryConnectorSchema>;
 
 export interface WorkflowStepDefinition {
   name: string;
@@ -157,49 +161,27 @@ export interface WorkflowDefinition {
   steps: WorkflowStepDefinition[];
 }
 
-export type WorkflowDefinitionFetchErrorReason = 'request-failed' | 'invalid-payload';
-
-export class WorkflowDefinitionFetchError extends Error {
-  readonly reason: WorkflowDefinitionFetchErrorReason;
-  readonly status?: number;
-
-  constructor(reason: WorkflowDefinitionFetchErrorReason, message: string, status?: number) {
-    super(message);
-    this.name = 'WorkflowDefinitionFetchError';
-    this.reason = reason;
-    this.status = status;
-  }
-}
-
 /**
  * Reads one workflow's declared shape, pinned to `workflowVersion` when given; unpinned, the engine
- * serves the highest published version, else the highest of any status.
+ * serves the highest published version.
  */
 export async function fetchWorkflowDefinition(
   workflowId: string,
   workflowVersion?: number,
 ): Promise<WorkflowDefinition> {
+  const workflowPath = `${ADMIN_WORKFLOWS_ENDPOINT}/${encodeURIComponent(workflowId)}`;
   let response;
   try {
     response = await httpClient.get<unknown>(
-      `${ADMIN_WORKFLOWS_ENDPOINT}/${encodeURIComponent(workflowId)}`,
-      { params: { version: workflowVersion } },
+      workflowVersion === undefined ? workflowPath : `${workflowPath}/versions/${workflowVersion}`,
     );
   } catch (cause) {
-    const status = isAxiosError(cause) ? cause.response?.status : undefined;
-    throw new WorkflowDefinitionFetchError(
-      'request-failed',
-      describeRequestFailure(status, cause, 'workflows'),
-      status,
-    );
+    throw toApiError(cause, 'workflows');
   }
 
   const parsed = workflowDefinitionSchema.safeParse(response.data);
   if (!parsed.success) {
-    throw new WorkflowDefinitionFetchError(
-      'invalid-payload',
-      'Response contains a malformed workflow definition.',
-    );
+    throw invalidPayloadError('Response contains a malformed workflow definition.');
   }
 
   return parsed.data;

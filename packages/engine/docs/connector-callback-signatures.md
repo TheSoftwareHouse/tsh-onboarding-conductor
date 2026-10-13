@@ -72,6 +72,12 @@ PUT /v1/admin/connectors/acme_kyc
 {"settings":{"callbackSigningSecret":"<current>"}}
 ```
 
+`callbackSigningSecret` is the default key. An adapter overrides it with `secretSettingKey` on its
+`callbackAuth`, naming the `settingsSchema` key that holds the inbound secret. This is for a
+provider that signs both directions with one secret: the adapter points `secretSettingKey` at the
+setting it already uses for outbound requests (for example `sharedSecretKey`) instead of declaring
+a second, duplicate secret. When it is declared, `callbackSigningSecret` is not consulted.
+
 A provider-side rotation window needs both the outgoing and the incoming secret to verify, so the
 value may be a comma-separated list; every entry is tried, with no early exit. A secret containing
 a comma cannot be stored, which no provider-generated hex or base64 secret does.

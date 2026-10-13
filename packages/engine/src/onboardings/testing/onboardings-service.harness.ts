@@ -54,6 +54,7 @@ export const createOnboarding = (overrides: Partial<OnboardingEntity> = {}): Onb
     expiresAt: null,
     completedAt: null,
     scores: {},
+    pendingConnector: null,
     ...overrides,
   });
 
@@ -191,6 +192,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
           completedAt: null,
           rejectionReason: null,
           scores: {},
+          pendingConnector: null,
         },
         { status: 'success', target: 'confirm_identity' },
       ),
@@ -206,6 +208,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
           completedAt: null,
           rejectionReason: null,
           scores: {},
+          pendingConnector: null,
         },
         { status: 'manual.approve', target: 'approved' },
       ),

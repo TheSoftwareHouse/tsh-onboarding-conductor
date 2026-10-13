@@ -1,5 +1,8 @@
 import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
-import { MockAsyncCallbackConnector } from './mock-async-callback.connector';
+import {
+  MockAsyncCallback2Connector,
+  MockAsyncCallbackConnector,
+} from './mock-async-callback.connector';
 
 const encodeUtf8 = (value: string): Uint8Array => new TextEncoder().encode(value);
 
@@ -13,6 +16,29 @@ describe('MockAsyncCallbackConnector', () => {
     expect(connector.supportsAsyncCallback).toBe(true);
   });
 
+  it('registers a second instance under its own id that keeps its own initiations', async () => {
+    const first = new MockAsyncCallbackConnector();
+    const second = new MockAsyncCallback2Connector();
+
+    expect(second.name).toBe('mock_async_callback_2');
+    expect(second.id).toBe('mock_async_callback_2');
+    expect(second.type).toBe('custom');
+    expect(second.supportsAsyncCallback).toBe(true);
+
+    await second.execute({
+      declaration: { order: 1, config: {} },
+      execution: { onboardingId: 'onboarding-2', stepName: 'accept_terms' },
+      context: {},
+      payload: {},
+      payloadFieldSources: {},
+    });
+
+    expect(first.getLatestInitiation()).toBeUndefined();
+    expect(second.getLatestInitiation()).toEqual(
+      expect.objectContaining({ onboardingId: 'onboarding-2', connectorOrder: 1 }),
+    );
+  });
+
   it('creates and stores an opaque provider reference during initiation', async () => {
     const connector = new MockAsyncCallbackConnector();
 
@@ -24,7 +50,11 @@ describe('MockAsyncCallbackConnector', () => {
         payload: {},
         payloadFieldSources: {},
       }),
-    ).resolves.toEqual(ConnectorExecutionResult.accepted());
+    ).resolves.toEqual(
+      ConnectorExecutionResult.accepted({
+        providerReference: connector.getLatestInitiation()?.providerReference,
+      }),
+    );
 
     const initiation = connector.getLatestInitiation();
     expect(initiation).toEqual(
@@ -88,8 +118,55 @@ describe('MockAsyncCallbackConnector', () => {
     ).resolves.toEqual({
       onboardingId: 'onboarding-1',
       submittedData: { acceptedTerms: true },
-      resolvedConnector: { connectorOrder: 2 },
+      resolvedConnector: {
+        connectorOrder: 2,
+        pendingConnector: {
+          connectorName: 'mock_async_callback',
+          connectorId: 'mock_async_callback',
+          connectorOrder: 2,
+          providerReference: initiation!.providerReference,
+        },
+      },
       result: ConnectorExecutionResult.accepted(),
+    });
+  });
+
+  it('answers a reconcile with still_pending until a test sets the verdict, then with the callback', async () => {
+    const connector = new MockAsyncCallbackConnector();
+    await connector.execute({
+      declaration: { order: 2, config: {} },
+      execution: { onboardingId: 'onboarding-1', stepName: 'accept_terms' },
+      context: {},
+      payload: {},
+      payloadFieldSources: {},
+    });
+    const initiation = connector.getLatestInitiation()!;
+
+    await expect(connector.reconcilePending({ onboardingId: 'onboarding-1' })).resolves.toEqual({
+      outcome: 'still_pending',
+    });
+
+    connector.setReconcileOutcome(initiation.providerReference, {
+      status: 'accepted',
+      submittedData: { acceptedTerms: true },
+    });
+
+    await expect(connector.reconcilePending({ onboardingId: 'onboarding-1' })).resolves.toEqual({
+      outcome: 'resolved',
+      callback: {
+        onboardingId: 'onboarding-1',
+        submittedData: { acceptedTerms: true },
+        resolvedConnector: {
+          connectorOrder: 2,
+          pendingConnector: {
+            connectorName: 'mock_async_callback',
+            connectorId: 'mock_async_callback',
+            connectorOrder: 2,
+            providerReference: initiation.providerReference,
+          },
+        },
+        result: ConnectorExecutionResult.accepted(),
+      },
     });
   });
 

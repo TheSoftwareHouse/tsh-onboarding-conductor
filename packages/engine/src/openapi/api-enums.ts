@@ -65,6 +65,24 @@ export const AGREEMENT_TYPE_ENUM: ApiEnum = {
     'than of one version, so every version published under one `key` classifies the same way.',
 };
 
+export const PENDING_CONNECTOR_RECONCILE_OUTCOMES = [
+  'applied',
+  'still_pending',
+  'superseded',
+] as const;
+
+export type PendingConnectorReconcileOutcome =
+  (typeof PENDING_CONNECTOR_RECONCILE_OUTCOMES)[number];
+
+export const PENDING_CONNECTOR_RECONCILE_OUTCOME_ENUM: ApiEnum = {
+  enum: [...PENDING_CONNECTOR_RECONCILE_OUTCOMES],
+  enumName: 'PendingConnectorReconcileOutcome',
+  description:
+    'What an operator reconcile did: `applied` moved the onboarding with the verdict the ' +
+    'provider holds, `still_pending` found the provider undecided and changed nothing, ' +
+    '`superseded` found the onboarding no longer parked on that attempt and changed nothing.',
+};
+
 export const ONBOARDING_AGREEMENT_STATUS_ENUM: ApiEnum = {
   enum: [...ONBOARDING_AGREEMENT_STATUSES],
   enumName: 'OnboardingAgreementStatus',
@@ -98,6 +116,7 @@ export const API_ENUMS: readonly ApiEnum[] = [
   CONNECTOR_SCOPE_ENUM,
   AGREEMENT_TYPE_ENUM,
   ONBOARDING_AGREEMENT_STATUS_ENUM,
+  PENDING_CONNECTOR_RECONCILE_OUTCOME_ENUM,
   WORKFLOW_SCOPE_ENUM,
   ENCRYPTION_KEY_ROTATION_INTERVAL_ENUM,
 ];

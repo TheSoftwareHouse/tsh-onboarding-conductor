@@ -153,6 +153,35 @@ export class WorkflowStepConnectorResponseDto {
 
 export class WorkflowStepConnectorWithFallbacksResponseDto extends WorkflowStepConnectorResponseDto {
   @ApiProperty({
+    description:
+      'The connector id the workflow document authored. Differs from `id` while an operator ' +
+      'selection is in force.',
+    example: 'sumsub_kyc',
+  })
+  authoredId!: string;
+
+  @ApiProperty({
+    description:
+      'True when an operator selection replaces the authored connector on this step, in every ' +
+      'stored version of the workflow that has the step.',
+  })
+  selected!: boolean;
+
+  @ApiProperty({
+    type: String,
+    isArray: true,
+    description:
+      'The connector ids a selection on this step would be accepted with, for this version, ' +
+      'sorted: the authored and effective ids, plus every registered connector that passes the ' +
+      'same rules the write applies — same `type`, callback-capable for an asynchronous step, ' +
+      'every one of its callback fields declared by the step, its own declaration rules ' +
+      'satisfied, and not already a fallback here. Empty when the step declares no connector ' +
+      'or more than one, since no selection can address it.',
+    example: ['sumsub_kyc', 'veriff_kyc'],
+  })
+  selectableIds!: string[];
+
+  @ApiProperty({
     type: () => WorkflowStepConnectorResponseDto,
     isArray: true,
     description: 'The chain behind this connector, in declared order.',

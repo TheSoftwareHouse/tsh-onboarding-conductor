@@ -530,6 +530,12 @@ describe('Admin endpoint authentication (e2e)', () => {
       // they join the admin surface rather than the end user's own flow.
       ['OnboardingsController.listAgreements', OnboardingsController.prototype.listAgreements],
       ['OnboardingsController.linkAgreement', OnboardingsController.prototype.linkAgreement],
+      // An operator reads a parked provider's verdict back on someone else's onboarding, so it sits
+      // with the other admin actions.
+      [
+        'OnboardingsController.reconcilePendingConnector',
+        OnboardingsController.prototype.reconcilePendingConnector,
+      ],
       ['AuditController.list', AuditController.prototype.list],
     ];
 

@@ -20,6 +20,7 @@ import {
   type ConnectorOutcomeAuditAction,
   type ConnectorOutcomeAuditMetadata,
 } from '../audit/audit.types';
+import { CONNECTOR_ADAPTER_SCOPES, type ConnectorAdapterScopes } from './connector-adapter-scope';
 import {
   CONNECTOR_MOCK_SUBSTITUTIONS,
   type ConnectorMockSubstitutions,
@@ -45,7 +46,10 @@ import {
   type ConnectorFailure,
 } from './ports/connector-error-handler.port';
 import { ConnectorExecutionResult } from './ports/connector-execution-result';
-import type { ConnectorExecutionPort } from './ports/connector-execution.port';
+import type {
+  ConnectorAdapterSummary,
+  ConnectorExecutionPort,
+} from './ports/connector-execution.port';
 
 /**
  * How long one connector slot — a primary and every fallback behind it — may spend waiting
@@ -149,6 +153,10 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
     @Optional()
     @Inject(CONNECTOR_MOCK_SUBSTITUTIONS)
     private readonly mockSubstitutions: ConnectorMockSubstitutions = new Map(),
+    /** Which group registered each adapter; an adapter it does not list reports `users`. */
+    @Optional()
+    @Inject(CONNECTOR_ADAPTER_SCOPES)
+    private readonly adapterScopes: ConnectorAdapterScopes = new Map(),
   ) {}
 
   async execute(
@@ -217,6 +225,16 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
         adapter?.validateDeclaration?.(candidate);
       }
     }
+  }
+
+  listAdapters(): readonly ConnectorAdapterSummary[] {
+    return this.connectors.map((adapter) => ({
+      id: adapter.id,
+      type: adapter.type,
+      supportsAsyncCallback: adapter.supportsAsyncCallback === true,
+      scope: this.adapterScopes.get(adapter.id) ?? 'users',
+      callbackFields: adapter.callbackFields ?? [],
+    }));
   }
 
   findAdapterById(
@@ -321,10 +339,13 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
         return executionResult;
       }
 
+      const providerReference = executionResult.metadata?.providerReference;
+
       return ConnectorExecutionResult.pending({
         connectorName: declaration.name,
         connectorId: declaration.id,
         connectorOrder: declaration.order,
+        ...(typeof providerReference === 'string' ? { providerReference } : {}),
       });
     } catch (error) {
       return this.handleConnectorFailure(slot, chainIndex, attempt, error);

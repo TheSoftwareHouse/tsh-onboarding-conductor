@@ -1,24 +1,19 @@
 import { useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { connectorMutations } from '@/api/connectors/connector-mutations';
 import { connectorQueries } from '@/api/connectors/connector-queries';
-import {
-  ConnectorSettingsWriteError,
-  deleteConnectorSettings,
-  patchConnectorSettings,
-  type Connector,
-  type ConnectorsFetchError,
-} from '@/api/connectors/connectors';
+import type { Connector } from '@/api/connectors/connectors';
+import { ApiError } from '@/services/api/api-error';
 
 /** Outcome a card reacts to directly, without a second subscription to mutation state. */
-export type ConnectorWriteOutcome =
-  { ok: true } | { ok: false; error: ConnectorSettingsWriteError };
+export type ConnectorWriteOutcome = { ok: true } | { ok: false; error: ApiError };
 
 export interface UseConnectorsResult {
   isPending: boolean;
   isError: boolean;
   isSuccess: boolean;
   connectors: Connector[];
-  error: ConnectorsFetchError | null;
+  error: ApiError | null;
   refetch: () => void;
   saveSettings: (
     connectorId: string,
@@ -37,22 +32,10 @@ export interface UseConnectorsResult {
  * never clobbers what the operator typed with stale server data.
  */
 export function useConnectors(): UseConnectorsResult {
-  const { data, isPending, isError, isSuccess, error, refetch } = useQuery<
-    Connector[],
-    ConnectorsFetchError
-  >(connectorQueries.list());
+  const { data, isPending, isError, isSuccess, error, refetch } = useQuery(connectorQueries.list());
 
-  const saveMutation = useMutation<
-    Connector,
-    ConnectorSettingsWriteError,
-    { connectorId: string; changes: Record<string, string | null> }
-  >({
-    mutationFn: ({ connectorId, changes }) => patchConnectorSettings(connectorId, changes),
-  });
-
-  const clearMutation = useMutation<void, ConnectorSettingsWriteError, string>({
-    mutationFn: (connectorId) => deleteConnectorSettings(connectorId),
-  });
+  const saveMutation = useMutation(connectorMutations.save());
+  const clearMutation = useMutation(connectorMutations.clear());
 
   const saveSettings = useCallback(
     async (
@@ -61,34 +44,26 @@ export function useConnectors(): UseConnectorsResult {
     ): Promise<ConnectorWriteOutcome> => {
       try {
         await saveMutation.mutateAsync({ connectorId, changes });
-        refetch();
         return { ok: true };
       } catch (cause) {
-        const error =
-          cause instanceof ConnectorSettingsWriteError
-            ? cause
-            : new ConnectorSettingsWriteError('Request failed.');
+        const error = cause instanceof ApiError ? cause : new ApiError('Request failed.');
         return { ok: false, error };
       }
     },
-    [refetch, saveMutation],
+    [saveMutation],
   );
 
   const clearSettings = useCallback(
     async (connectorId: string): Promise<ConnectorWriteOutcome> => {
       try {
         await clearMutation.mutateAsync(connectorId);
-        refetch();
         return { ok: true };
       } catch (cause) {
-        const error =
-          cause instanceof ConnectorSettingsWriteError
-            ? cause
-            : new ConnectorSettingsWriteError('Request failed.');
+        const error = cause instanceof ApiError ? cause : new ApiError('Request failed.');
         return { ok: false, error };
       }
     },
-    [refetch, clearMutation],
+    [clearMutation],
   );
 
   return {

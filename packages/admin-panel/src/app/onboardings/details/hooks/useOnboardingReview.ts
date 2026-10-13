@@ -1,14 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { HttpStatusCode } from 'axios';
-import { auditQueries } from '@/api/audit/audit-queries';
-import { onboardingQueries } from '@/api/onboardings/onboarding-queries';
 import {
-  OnboardingReviewError,
-  submitOnboardingReview,
-  type ManualReviewAction,
-  type ManualReviewOutcome,
-} from '@/api/onboardings/onboarding-review';
+  onboardingMutations,
+  reviewInvalidationKeys,
+} from '@/api/onboardings/onboarding-mutations';
+import { type ManualReviewAction } from '@/api/onboardings/onboarding-review';
 import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
 import { REVIEW_ERROR_TITLE, REVIEW_SUCCESS_TITLE } from '../constants/review-toasts';
 
@@ -23,25 +20,16 @@ export function useOnboardingReview(onboardingId: string): UseOnboardingReviewRe
   const queryClient = useQueryClient();
   const [pendingAction, setPendingAction] = useState<ManualReviewAction | null>(null);
 
-  function invalidate(): void {
-    for (const queryKey of [
-      onboardingQueries.detail(onboardingId).queryKey,
-      onboardingQueries.lists(),
-      auditQueries.all(),
-    ]) {
-      void queryClient.invalidateQueries({ queryKey });
-    }
-  }
-
-  const mutation = useMutation<ManualReviewOutcome, OnboardingReviewError, ManualReviewAction>({
-    mutationFn: (action) => submitOnboardingReview(onboardingId, action),
+  const mutation = useMutation({
+    ...onboardingMutations.review(onboardingId),
     onSuccess: (_, action) => {
-      invalidate();
       showSuccessToast(REVIEW_SUCCESS_TITLE[action]);
     },
     onError: (error) => {
       if (error.status === HttpStatusCode.Conflict) {
-        invalidate();
+        for (const queryKey of reviewInvalidationKeys(onboardingId)) {
+          void queryClient.invalidateQueries({ queryKey });
+        }
       }
       showErrorToast(REVIEW_ERROR_TITLE, error.message);
     },

@@ -12,6 +12,7 @@ describe('WorkflowEvaluationResult', () => {
         completedAt: new Date('2026-07-20T09:00:00.000Z'),
         rejectionReason: 'ATTEMPTS_EXHAUSTED',
         scores: {},
+        pendingConnector: null,
       },
       'ATTEMPTS_EXHAUSTED',
     );
@@ -30,6 +31,7 @@ describe('WorkflowEvaluationResult', () => {
         completedAt: new Date('2026-07-20T09:00:00.000Z'),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
       undefined as unknown as Parameters<typeof WorkflowEvaluationResult.rejected>[3],
     );
@@ -48,6 +50,7 @@ describe('WorkflowEvaluationResult', () => {
         completedAt: null,
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     );
     const terminalInvalidResult = WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
@@ -58,6 +61,7 @@ describe('WorkflowEvaluationResult', () => {
         completedAt: new Date('2026-07-20T09:00:00.000Z'),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
     const retryableResult = WorkflowEvaluationResult.retryableInvalidData(
@@ -79,5 +83,32 @@ describe('WorkflowEvaluationResult', () => {
     expect(retryableResult.getNextState()).toBeUndefined();
     expect(retryableResult.getAppliedStep()).toBe('collect_email');
     expect(retryableResult.getErrors()).toEqual({ email: ['INVALID'] });
+  });
+
+  it('carries the parked connector in the next state of a parked evaluation', () => {
+    const pending = {
+      connectorName: 'kyc_step',
+      connectorId: 'veriff_kyc',
+      connectorOrder: 1,
+      providerReference: 'session-1',
+    };
+
+    const result = WorkflowEvaluationResult.parkedAsyncCallback(
+      {},
+      'kyc',
+      {
+        context: {},
+        status: 'awaiting_user',
+        currentStep: 'kyc',
+        completedAt: null,
+        rejectionReason: null,
+        scores: {},
+        pendingConnector: pending,
+      },
+      pending,
+    );
+
+    expect(result.getNextState()?.pendingConnector).toEqual(pending);
+    expect(result.getPendingConnector()).toEqual(pending);
   });
 });

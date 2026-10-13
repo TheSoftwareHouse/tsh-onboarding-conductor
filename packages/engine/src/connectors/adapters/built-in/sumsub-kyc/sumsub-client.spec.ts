@@ -213,6 +213,49 @@ describe('SumsubClient', () => {
     );
   });
 
+  it('warns with the HTTP status on a 401 and still throws SumsubUnavailableException', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const client = new SumsubClient(createConfigService());
+    fetchMock.mockResolvedValueOnce(
+      createResponse({ status: 401, bodyText: JSON.stringify({ description: 'bad token' }) }),
+    );
+
+    await expect(client.findApplicantStatus(credentials(), 'applicant-1')).rejects.toBeInstanceOf(
+      SumsubUnavailableException,
+    );
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'SUMSUB_RESPONSE_ERROR method=GET path=/resources/applicants/applicant-1/status status=401',
+    );
+  });
+
+  it('warns with the error name on a network failure and throws SumsubUnavailableException', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const client = new SumsubClient(createConfigService());
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed: https://leaked.example'));
+
+    await expect(client.findApplicantStatus(credentials(), 'applicant-1')).rejects.toBeInstanceOf(
+      SumsubUnavailableException,
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      'SUMSUB_REQUEST_FAILED method=GET path=/resources/applicants/applicant-1/status error=TypeError timeoutMs=1000',
+    );
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('leaked');
+  });
+
+  it('warns with TimeoutError on a timeout and throws SumsubUnavailableException', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const client = new SumsubClient(createConfigService());
+    fetchMock.mockRejectedValueOnce(new DOMException('timed out', 'TimeoutError'));
+
+    await expect(client.resetStep(credentials(), 'applicant-1', 'IDENTITY')).rejects.toBeInstanceOf(
+      SumsubUnavailableException,
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      'SUMSUB_REQUEST_FAILED method=POST path=/resources/applicants/applicant-1/resetStep/IDENTITY error=TimeoutError timeoutMs=1000',
+    );
+  });
+
   it('findLevel selects the configured level by name and returns undefined when absent', async () => {
     const client = new SumsubClient(createConfigService());
     fetchMock.mockResolvedValueOnce(
@@ -349,6 +392,7 @@ describe('SumsubClient', () => {
 
   it('never logs a secret, a signature, or a request body', async () => {
     const debugSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const client = new SumsubClient(createConfigService());
     const secretKey = 'super-secret-value';
     const bodyMarker = 'unique-body-marker-xyz';
@@ -371,10 +415,19 @@ describe('SumsubClient', () => {
       fileContent: Buffer.from([1, 2, 3]),
     });
 
+    fetchMock.mockResolvedValueOnce(
+      createResponse({ status: 401, bodyText: JSON.stringify({ description: bodyMarker }) }),
+    );
+    await expect(
+      client.findApplicantStatus(credentials(secretKey), 'applicant-1'),
+    ).rejects.toBeInstanceOf(SumsubUnavailableException);
+
     const [, firstInit] = fetchMock.mock.calls[0] as FetchCallArgs;
     const signature = firstInit.headers['X-App-Access-Sig'];
 
-    const loggedMessages = debugSpy.mock.calls.map((call) => call.join(' '));
+    const loggedMessages = [...debugSpy.mock.calls, ...warnSpy.mock.calls].map((call) =>
+      call.join(' '),
+    );
 
     expect(loggedMessages.length).toBeGreaterThan(0);
     for (const message of loggedMessages) {

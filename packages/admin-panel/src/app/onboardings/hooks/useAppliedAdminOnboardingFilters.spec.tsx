@@ -22,6 +22,9 @@ const DEFAULT_WINDOW = {
   workflowVersion: null,
   currentStep: null,
   onboardingId: null,
+  parked: null,
+  pendingConnectorId: null,
+  parkedBefore: null,
 };
 
 interface Harness {

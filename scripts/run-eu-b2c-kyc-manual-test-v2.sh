@@ -85,6 +85,15 @@ ASK_TIMEOUT=${ASK_TIMEOUT:-120}
 AUTO_CONFIRM=${AUTO_CONFIRM:-''}
 WORKFLOW_ID=eu-b2c-individual-kyc-eea-v2-local
 
+# The agreement families the workflow declares, as key:type pairs. The engine refuses to start an
+# onboarding whose workflow names a family with no published version, so section 6b publishes the
+# ones the database does not have yet. Keep this list in step with the root "agreements" array in
+# workflows/users/$WORKFLOW_ID.workflow.json.
+AGREEMENTS=(
+  'eu-b2c-terms:terms_and_conditions'
+  'eu-b2c-privacy-notice:privacy_notice'
+)
+
 # The account-system stub the local workflow's provision_account step calls. Section 6 starts it
 # unless something is already answering on $STUB, and only what this run started is stopped again.
 STUB_SCRIPT=${STUB_SCRIPT:-$SCRIPT_DIR/eu-b2c-individual-kyc-workflow/host-stubs.cjs}
@@ -101,6 +110,7 @@ DOCUMENT_ID=''
 STUB_PID=''
 
 tmp_workflow=$(mktemp)
+tmp_agreement=$(mktemp)
 STUB_LOG=$(mktemp)
 
 # --- output -------------------------------------------------------------------
@@ -119,7 +129,7 @@ die() { printf '\n%sFAILED: %s%s\n' "$RED" "$*" "$RESET" >&2; exit 1; }
 # Stop the stub this run started — one that was already listening belongs to whoever started it
 # and is left alone. Its log outlives the run: it is the only record of what the engine sent.
 cleanup() {
-  rm -f "$tmp_workflow"
+  rm -f "$tmp_workflow" "$tmp_agreement"
 
   if [[ -n "$STUB_PID" ]] && kill -0 "$STUB_PID" 2>/dev/null; then
     kill "$STUB_PID" 2>/dev/null || true
@@ -277,6 +287,46 @@ start_stub() {
   die "the provisioning stub did not answer on $STUB within ${STUB_START_TIMEOUT}s — see $STUB_LOG"
 }
 
+# ensure_agreement_published <key> <type>: give the agreement family a published version if it has
+# none. The engine resolves every family a workflow declares when an onboarding starts and answers
+# 503 AGREEMENT_NOT_PUBLISHED if one has nothing published, so this is a prerequisite of call 1
+# rather than a nicety.
+#
+# A family that already has a version is left as it stands. Publishing again would not fail — it
+# would cut the next version, put every onboarding from an earlier run out of date and enqueue a
+# webhook for each of them — so skipping is what makes a second run behave like the first.
+ensure_agreement_published() {
+  local key=$1 type=$2 status
+
+  status=$(curl -sS -o "$tmp_agreement" -w '%{http_code}' -G "$API/v1/admin/agreements" \
+    --data-urlencode "key=$key" --data-urlencode 'limit=1')
+
+  case "$status" in
+    200) ;;
+    401 | 403 | 503)
+      info "admin auth is on (HTTP $status) — cannot publish $key; call 1 will tell"
+
+      return 0
+      ;;
+    *)
+      die "listing agreement $key answered HTTP $status: $(head -c 200 "$tmp_agreement")"
+      ;;
+  esac
+
+  if [[ "$(jq -r '.meta.pagination.total // 0' "$tmp_agreement")" != 0 ]]; then
+    ok "$key is published (version $(jq -r '.items[0].version' "$tmp_agreement"))"
+
+    return 0
+  fi
+
+  info "$key has nothing published — publishing it as $type"
+  status=$(curl -sS -o "$tmp_agreement" -w '%{http_code}' -X POST "$API/v1/admin/agreements" \
+    -H 'content-type: application/json' -d "{\"key\":\"$key\",\"type\":\"$type\"}")
+  [[ "$status" == 201 ]] \
+    || die "publishing $key answered HTTP $status: $(head -c 200 "$tmp_agreement")"
+  ok "$key is published (version $(jq -r '.version' "$tmp_agreement"))"
+}
+
 state() {
   curl -sS "$API/v1/onboardings/$ID/state"
 }
@@ -398,6 +448,16 @@ case "$workflow_status" in
     ;;
 esac
 
+# --- 6b. agreement families ----------------------------------------------------
+
+# Numbered 6b because the manual walkthrough has no step of its own for it: publishing is done
+# once, before the first run, not per onboarding — but a fresh database has nothing published.
+section "6b. Agreement families"
+
+for agreement in "${AGREEMENTS[@]}"; do
+  ensure_agreement_published "${agreement%%:*}" "${agreement#*:}"
+done
+
 # The engine runs in Compose and reaches this as http://host.docker.internal:$STUB_PORT, so on
 # macOS the first run may raise the firewall's "accept incoming connections" prompt.
 start_stub
@@ -491,7 +551,8 @@ submit "{\"selfieDocument\":\"$DOCUMENT_ID\"}" submit_kyc
 section "25. Call 19 — fire the KYC submission"
 
 # submit_kyc comes back as currentStep: the connector is parked on the callback, not failing.
-# Sent exactly once — a second empty submit re-runs the whole submission.
+# Sent exactly once — while the step is parked a second empty submit is refused with
+# 409 ONBOARDING_AWAITING_CONNECTOR rather than re-running the submission.
 submit '{}' submit_kyc
 
 # --- 26. the Sumsub verdict ---------------------------------------------------

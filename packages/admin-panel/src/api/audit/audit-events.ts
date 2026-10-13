@@ -1,7 +1,6 @@
-import { isAxiosError } from 'axios';
 import { z } from 'zod';
 import { ONBOARDING_AUDIT_RESOURCE_TYPE } from '@/lib/audit-search-params';
-import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { invalidPayloadError, toApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
 import { createPaginatedResponseSchema } from '@/services/api/paginated-response';
 import { periodStartInstant } from '@/lib/datetime-period';
@@ -28,7 +27,7 @@ export function isAuditActorType(actorType: string): actorType is AuditActorType
 
 /**
  * Resource types the engine files audit rows under, mirroring `ONBOARDING_AUDIT_RESOURCE_TYPE`,
- * `WebhookResourceType`, `ADMIN_ACCESS_RESOURCE_TYPE` and `CONNECTOR_SETTINGS_RESOURCE_TYPE` in
+ * `WebhookResourceType`, `ADMIN_ACCESS_RESOURCE_TYPE` and `CONNECTOR_SETTINGS_RESOURCE_TYPE` and the `workflow` type in
  * `packages/engine/src/audit/audit.types.ts`. Kept as a local literal for the same reason as
  * `AUDIT_ACTOR_TYPES`: the engine package does not belong in a browser bundle.
  */
@@ -38,6 +37,7 @@ export const AUDIT_RESOURCE_TYPES = [
   'provider_callback',
   'connector_settings',
   'admin_endpoint',
+  'workflow',
 ] as const;
 
 export type AuditResourceType = (typeof AUDIT_RESOURCE_TYPES)[number];
@@ -62,20 +62,6 @@ const auditEventSchema = z.object({
 });
 
 const listAuditEventsResponseSchema = createPaginatedResponseSchema(auditEventSchema);
-
-export type AuditEventsFetchErrorReason = 'request-failed' | 'invalid-payload';
-
-export class AuditEventsFetchError extends Error {
-  readonly reason: AuditEventsFetchErrorReason;
-  readonly status?: number;
-
-  constructor(reason: AuditEventsFetchErrorReason, message: string, status?: number) {
-    super(message);
-    this.name = 'AuditEventsFetchError';
-    this.reason = reason;
-    this.status = status;
-  }
-}
 
 /** One audit trail entry as returned by the admin audit endpoint. */
 export interface AuditEvent {
@@ -160,20 +146,12 @@ export async function fetchAuditEvents(filters: AuditEventQueryFilters): Promise
       params: toRequestParams(filters),
     });
   } catch (cause) {
-    const status = isAxiosError(cause) ? cause.response?.status : undefined;
-    throw new AuditEventsFetchError(
-      'request-failed',
-      describeRequestFailure(status, cause, 'the audit log'),
-      status,
-    );
+    throw toApiError(cause, 'the audit log');
   }
 
   const parsedPayload = listAuditEventsResponseSchema.safeParse(response.data);
   if (!parsedPayload.success) {
-    throw new AuditEventsFetchError(
-      'invalid-payload',
-      'Response contains a malformed audit event.',
-    );
+    throw invalidPayloadError('Response contains a malformed audit event.');
   }
 
   return {

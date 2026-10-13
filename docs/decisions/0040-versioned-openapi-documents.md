@@ -1,4 +1,4 @@
-# 0034. Each minor version's OpenAPI document is archived by the generator and rendered by the site
+# 0040. Each minor version's OpenAPI document is archived by the generator and rendered by the site
 
 - **Status:** Accepted
 - **Date:** 2026-10-07

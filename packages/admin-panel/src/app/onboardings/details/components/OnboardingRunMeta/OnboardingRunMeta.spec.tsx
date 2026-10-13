@@ -20,6 +20,7 @@ const BASE_SUMMARY: AdminOnboardingSummary = {
   updatedAt: '2026-09-02T11:48:00.000Z',
   completedAt: null,
   scores: {},
+  pendingConnector: null,
 };
 
 const NOW = new Date('2026-09-03T13:14:00.000Z');
@@ -44,6 +45,62 @@ describe('OnboardingRunMeta', () => {
     expect(screen.getByText('3 d 4 h')).toBeInTheDocument();
     expect(screen.getByText('Expires')).toBeInTheDocument();
     expect(screen.getByText(formatDateTime(BASE_SUMMARY.expiresAt!))).toBeInTheDocument();
+  });
+
+  it('omits the Parked item when the onboarding is not waiting on a connector', () => {
+    render(
+      <OnboardingRunMeta
+        summary={BASE_SUMMARY}
+        lastTransitionOccurredAt="2026-09-02T11:48:00.000Z"
+        now={NOW}
+      />,
+    );
+
+    expect(screen.queryByText(/^Parked on /)).not.toBeInTheDocument();
+  });
+
+  it('shows how long the onboarding has been parked on its connector', () => {
+    render(
+      <OnboardingRunMeta
+        summary={{
+          ...BASE_SUMMARY,
+          pendingConnector: {
+            connectorId: 'veriff_kyc',
+            connectorName: 'Veriff',
+            connectorOrder: 0,
+            parkedAt: '2026-09-03T10:14:00.000Z',
+          },
+        }}
+        lastTransitionOccurredAt="2026-09-02T11:48:00.000Z"
+        now={NOW}
+      />,
+    );
+
+    expect(screen.getByText('Parked on Veriff')).toBeInTheDocument();
+    expect(screen.getByText('3 h')).toBeInTheDocument();
+  });
+
+  it('measures a park recorded without an instant from the last update', () => {
+    render(
+      <OnboardingRunMeta
+        summary={{
+          ...BASE_SUMMARY,
+          pendingConnector: {
+            connectorId: 'veriff_kyc',
+            connectorName: 'Veriff',
+            connectorOrder: 0,
+            parkedAt: null,
+          },
+        }}
+        lastTransitionOccurredAt={null}
+        now={NOW}
+      />,
+    );
+
+    expect(screen.getByText('Parked on Veriff')).toBeInTheDocument();
+    // `updatedAt` is 2026-09-02T11:48Z, a day and an hour before NOW — the same span as "In manual_review"
+    // would show, so the item is told apart by its label.
+    expect(screen.getAllByText('1 d 1 h')).toHaveLength(1);
   });
 
   it('omits the In item when there is no current step', () => {

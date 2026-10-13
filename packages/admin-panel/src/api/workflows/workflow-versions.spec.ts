@@ -51,7 +51,7 @@ describe('fetchWorkflowVersions', () => {
     mockedGet.mockResolvedValueOnce({ data: { items: [{ ...VERSIONS[0], status: 'scheduled' }] } });
 
     await expect(fetchWorkflowVersions('kyc')).rejects.toMatchObject({
-      reason: 'invalid-payload',
+      kind: 'invalid-payload',
       message: 'Response contains a malformed workflow versions list.',
     });
   });
@@ -62,7 +62,7 @@ describe('fetchWorkflowVersions', () => {
     mockedGet.mockRejectedValueOnce(axiosError);
 
     await expect(fetchWorkflowVersions('kyc')).rejects.toMatchObject({
-      reason: 'request-failed',
+      kind: 'request-failed',
       status: 404,
     });
   });
@@ -71,7 +71,7 @@ describe('fetchWorkflowVersions', () => {
     mockedGet.mockRejectedValueOnce(new Error('Network Error'));
 
     await expect(fetchWorkflowVersions('kyc')).rejects.toMatchObject({
-      reason: 'request-failed',
+      kind: 'request-failed',
       message: 'Network Error',
     });
   });

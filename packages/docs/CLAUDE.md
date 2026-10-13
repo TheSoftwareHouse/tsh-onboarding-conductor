@@ -10,7 +10,7 @@ instances, each with its own sidebar under `sidebars/`:
   Docusaurus' docs versioning: the current document is the `current` version at `/api`, and each
   minor archived under `packages/shared/openapi/versions/<major.minor>/` is a version at
   `/api/<major.minor>`, generated from its frozen document by an OpenAPI plugin entry of its own
-  (`docs/decisions/0034-versioned-openapi-documents.md`). `openapi-versions.ts` is the one place
+  (`docs/decisions/0040-versioned-openapi-documents.md`). `openapi-versions.ts` is the one place
   that knows where the documents and the generated versioning files are; the config and the
   scripts import it.
 - **Fixtures** (`docs/fixtures`, served at `/fixtures`) — generated from `workflows/fixtures` and

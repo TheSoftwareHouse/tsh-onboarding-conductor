@@ -23,6 +23,7 @@ interface TestFormValues {
 function TextFormFieldHarness({
   defaultValue = '',
   disabled = false,
+  autoComplete,
   error,
   isRequired,
   rules,
@@ -30,6 +31,7 @@ function TextFormFieldHarness({
 }: {
   defaultValue?: string;
   disabled?: boolean;
+  autoComplete?: string;
   error?: string;
   isRequired?: boolean;
   rules?: UseControllerProps<TestFormValues>['rules'];
@@ -48,6 +50,7 @@ function TextFormFieldHarness({
         controlId="api-key"
         label="apiKey"
         disabled={disabled}
+        autoComplete={autoComplete}
         isRequired={isRequired}
         rules={rules}
       />
@@ -88,6 +91,15 @@ describe('TextFormField', () => {
     render(<TextFormFieldHarness defaultValue="sk-live" disabled />);
 
     expect(screen.getByLabelText('apiKey')).toBeDisabled();
+  });
+
+  it('forwards autoComplete, and leaves it to the browser when omitted', () => {
+    const { unmount } = render(<TextFormFieldHarness autoComplete="off" />);
+    expect(screen.getByLabelText('apiKey')).toHaveAttribute('autocomplete', 'off');
+    unmount();
+
+    render(<TextFormFieldHarness />);
+    expect(screen.getByLabelText('apiKey')).not.toHaveAttribute('autocomplete');
   });
 
   it('sets aria-required only when isRequired is set', () => {

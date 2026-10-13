@@ -119,6 +119,14 @@ export const CONNECTOR_SETTINGS_ACTIONS = [
 
 export type ConnectorSettingsAuditAction = (typeof CONNECTOR_SETTINGS_ACTIONS)[number];
 
+/** An operator binding a workflow step's connector slot to another adapter, or reverting it. */
+export const WORKFLOW_ACTIONS = [
+  'workflow.connector_selected',
+  'workflow.connector_selection_cleared',
+] as const;
+
+export type WorkflowAuditAction = (typeof WORKFLOW_ACTIONS)[number];
+
 /**
  * One decision a connector's error handler returned: a retry, a fallback taking over, a
  * swallowed failure, or a propagated one. Recorded for `PROPAGATE` too - a decision the engine
@@ -171,6 +179,28 @@ export const AGREEMENT_AUDIT_ACTIONS = [
 
 export type AgreementAuditAction = (typeof AGREEMENT_AUDIT_ACTIONS)[number];
 
+/** An operator creating, replacing or deleting a workflow draft through the admin API (ADR 0034). */
+export const WORKFLOW_DRAFT_AUDIT_ACTIONS = [
+  'workflow_draft.created',
+  'workflow_draft.updated',
+  'workflow_draft.deleted',
+] as const;
+
+export type WorkflowDraftAuditAction = (typeof WORKFLOW_DRAFT_AUDIT_ACTIONS)[number];
+
+/**
+ * An operator asking the engine to read a parked attempt's verdict back from its provider,
+ * instead of waiting for the callback. `reconciled` is the verdict applied through the submit
+ * path, written where a callback would write `webhook.inbound_callback_applied`; `reconcile_noop`
+ * is the ask that changed nothing — the provider had not decided, or the park had moved on.
+ */
+export const PENDING_CONNECTOR_ACTIONS = [
+  'onboarding.pending_connector_reconciled',
+  'onboarding.pending_connector_reconcile_noop',
+] as const;
+
+export type PendingConnectorAuditAction = (typeof PENDING_CONNECTOR_ACTIONS)[number];
+
 /**
  * The key ring's story: an operator turning encryption on (which creates the first key) or off
  * (which retires the active one), an operator adding a key, the previous key that add
@@ -209,10 +239,13 @@ export type AuditAction =
   | WebhookAction
   | AdminAccessAction
   | ConnectorSettingsAuditAction
+  | WorkflowAuditAction
   | ConnectorFailureAuditAction
   | ConnectorOutcomeAuditAction
   | ApiFailureAuditAction
   | AgreementAuditAction
+  | WorkflowDraftAuditAction
+  | PendingConnectorAuditAction
   | EncryptionAuditAction;
 
 /**
@@ -275,6 +308,10 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   'connector_settings.updated': 'success',
   'connector_settings.deleted': 'success',
 
+  // Workflow connector bindings.
+  'workflow.connector_selected': 'success',
+  'workflow.connector_selection_cleared': 'success',
+
   // Connector error-handler decisions: recovered or not, the call decided about failed.
   'connector.failure_retried': 'failed',
   'connector.failure_fell_back': 'failed',
@@ -295,6 +332,14 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   'agreement.version_published': 'success',
   'agreement.linked': 'success',
   'agreement.accepted': 'success',
+
+  // Workflow drafts: each write went through.
+  'workflow_draft.created': 'success',
+  'workflow_draft.updated': 'success',
+  'workflow_draft.deleted': 'success',
+  // An operator's reconcile: the verdict it applied, or the ask that found nothing to apply.
+  'onboarding.pending_connector_reconciled': 'success',
+  'onboarding.pending_connector_reconcile_noop': 'observed',
 
   // Encryption: turning it on or off, adding and superseding a key, and each sweep reaching its
   // target all go through as intended.
@@ -348,6 +393,7 @@ export type RejectedAttemptOperation = 'submit' | 'manual_review';
 export type RejectedAttemptOutcome =
   | 'onboarding_not_found'
   | 'onboarding_completed'
+  | 'awaiting_connector'
   | 'retryable_invalid_data'
   | 'unknown_workflow_evaluation'
   | 'unsupported_action'
@@ -465,6 +511,24 @@ export type ConnectorSettingsAuditInput = {
   actorId: string;
   resourceId: string;
   metadata: ConnectorSettingsAuditMetadata;
+};
+
+export const WORKFLOW_RESOURCE_TYPE = 'workflow';
+
+/** `resourceId` is the workflow key; `connectorId` is `null` when the selection was cleared. */
+export type WorkflowConnectorSelectionAuditMetadata = {
+  workflowId: string;
+  stepName: string;
+  previousConnectorId: string | null;
+  connectorId: string | null;
+};
+
+export type WorkflowAuditInput = {
+  action: WorkflowAuditAction;
+  /** The operator who made the change, or the unknown-actor constant. */
+  actorId: string;
+  resourceId: string;
+  metadata: WorkflowConnectorSelectionAuditMetadata;
 };
 
 /** These rows are filed against the onboarding they happened to, reusing the same resource type. */
@@ -622,6 +686,59 @@ export type AgreementAuditInput =
       /** The onboarding the link belongs to. */
       resourceId: string;
       metadata: AgreementAcceptedAuditMetadata;
+    };
+
+/** The draft's `workflow_versions` row is the resource every draft row is filed against. */
+export const WORKFLOW_VERSION_AUDIT_RESOURCE_TYPE = 'workflow_version';
+
+/** Identifiers only: the document, which may hold connector config, is never logged. */
+export type WorkflowDraftAuditMetadata = {
+  workflowId: string;
+  version: number;
+  /** Set only when an update moved the draft to another id or version. */
+  previousWorkflowId?: string;
+  previousVersion?: number;
+};
+
+export type WorkflowDraftAuditInput = {
+  action: WorkflowDraftAuditAction;
+  /** The operator who made the change, or the unknown-actor constant. */
+  actorId: string;
+  /** The draft's `workflow_versions` id. */
+  resourceId: string;
+  metadata: WorkflowDraftAuditMetadata;
+};
+
+/** Why a reconcile applied nothing. */
+export type PendingConnectorReconcileNoopOutcome = 'still_pending' | 'superseded';
+
+export type PendingConnectorReconciledAuditMetadata = {
+  connectorId: string;
+  connectorOrder: number;
+  providerIdentity: string;
+  submittedData: unknown;
+  connectorExecutionResult: Record<string, unknown>;
+};
+
+export type PendingConnectorReconcileNoopAuditMetadata = {
+  connectorId: string;
+  connectorOrder: number;
+  outcome: PendingConnectorReconcileNoopOutcome;
+};
+
+/** Both rows name the operator who asked and file against the onboarding they asked about. */
+export type PendingConnectorAuditInput =
+  | {
+      action: 'onboarding.pending_connector_reconciled';
+      actorId: string;
+      resourceId: string;
+      metadata: PendingConnectorReconciledAuditMetadata;
+    }
+  | {
+      action: 'onboarding.pending_connector_reconcile_noop';
+      actorId: string;
+      resourceId: string;
+      metadata: PendingConnectorReconcileNoopAuditMetadata;
     };
 
 /** The key row every rotation event is filed against. */

@@ -12,7 +12,7 @@ export interface OnboardingRunMetaProps {
   now?: Date;
 }
 
-/** The run-meta band: Started, Last update, the current step's running duration, Total and Expires. */
+/** The run-meta band: Started, Last update, the current step's running duration, how long it has been parked on a connector, Total and Expires. */
 export function OnboardingRunMeta({
   summary,
   lastTransitionOccurredAt,
@@ -29,6 +29,14 @@ export function OnboardingRunMeta({
           label={`In ${summary.currentStep}`}
           value={formatDuration(lastTransitionOccurredAt ?? summary.createdAt, nowIso)}
           highlighted
+        />
+      )}
+      {summary.pendingConnector !== null && (
+        <MetaStripItem
+          label={`Parked on ${summary.pendingConnector.connectorName}`}
+          // A park the engine recorded without an instant is measured from the row's last change,
+          // which is the park itself unless something else touched the row since.
+          value={formatDuration(summary.pendingConnector.parkedAt ?? summary.updatedAt, nowIso)}
         />
       )}
       <MetaStripItem

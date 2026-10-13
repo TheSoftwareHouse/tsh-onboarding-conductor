@@ -79,8 +79,12 @@ lets you make quietly.
   reservation, `POST /v1/onboardings/:id/documents`, when a live pending one already holds that
   step's file field — complete it or let its 300 s lapse — and `DOCUMENT_UPLOAD_EXPIRED` on the
   completion, `POST /v1/onboardings/:id/documents/:documentId/complete`, when the reservation timed
-  out before the bytes were confirmed. Every other 4xx ends the attempt; `409 ONBOARDING_COMPLETED`
-  in particular is permanent. **Recoverable describes what the BFF does next, never what the
+  out before the bytes were confirmed. One 409 is neither recoverable nor terminal:
+  `ONBOARDING_AWAITING_CONNECTOR` means the step is parked on a provider (a KYC check the customer
+  already started), so the BFF waits and polls `/state` — never resubmits, since a resubmit would
+  open a second provider attempt, which is exactly what the engine is refusing. Every other 4xx
+  ends the attempt; `409 ONBOARDING_COMPLETED` in particular is permanent. **Recoverable describes
+  what the BFF does next, never what the
   customer is shown**: the engine's `{code, message}` is not relayed verbatim in any of these cases,
   the BFF answers in its own error contract.
 - **The presigned upload URL points at the engine's own storage host.** Under Compose it is
@@ -156,7 +160,8 @@ the service's job, so the mapping stays in one readable place.
 
 **Step 5 — Map errors deliberately.** Walk the code table in the contract reference and decide each
 one: `INVALID_STEP_DATA` becomes the BFF's own field-error response, `ONBOARDING_NOT_FOUND` a 404,
-`ONBOARDING_COMPLETED` a 409, everything else a 502. An unmapped code must fail loudly in a test,
+`ONBOARDING_COMPLETED` a 409, `ONBOARDING_AWAITING_CONNECTOR` a "still waiting" answer that keeps
+the client polling `/state`, everything else a 502. An unmapped code must fail loudly in a test,
 not fall through to a generic branch.
 
 **Step 6 — Prove it against a running engine.** Unit tests with a stubbed client prove the mapping;
@@ -174,7 +179,7 @@ and say which engine routes the BFF now depends on.
 - [ ] Every engine route the client calls is public, and no admin route is proxied
 - [ ] The client's timeout is derived from the slowest workflow's connector chain, and is configured, not defaulted
 - [ ] `/state` is re-fetched after every submit, completion and webhook
-- [ ] `INVALID_STEP_DATA` and `INVALID_DOCUMENT_UPLOAD` re-render; the two upload 409s re-reserve; every other 4xx ends the attempt
+- [ ] `INVALID_STEP_DATA` and `INVALID_DOCUMENT_UPLOAD` re-render; the two upload 409s re-reserve; `ONBOARDING_AWAITING_CONNECTOR` waits and polls `/state`; every other 4xx ends the attempt
 - [ ] A 400 with no `code` is handled, and never rendered to a customer
 - [ ] No branch keys on a hard-coded step name; rendering comes from the `/state` descriptor
 - [ ] Engine 5xx and transport failures surface as the BFF's own 502, never verbatim

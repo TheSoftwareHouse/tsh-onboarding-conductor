@@ -404,6 +404,107 @@ describe('WorkflowConnectorExecutorService', () => {
     });
   });
 
+  it('copies a string providerReference of the accepted initiation into the pending connector', async () => {
+    const asyncConnector = createConnector('adapter_one', 'mock_kyc_1', true);
+    asyncConnector.execute.mockResolvedValue(
+      ConnectorExecutionResult.accepted({ providerReference: 'session-1', other: 'ignored' }),
+    );
+    const service = createService([asyncConnector] as ConnectorAdapterCollection);
+
+    const result = await service.execute(
+      [
+        declaration({
+          name: 'declaration_one',
+          id: 'mock_kyc_1',
+          type: 'kyc',
+          order: 1,
+          async: true,
+          fieldMapping: {},
+        }),
+      ],
+      {},
+      { onboardingId: 'onboarding-123', stepName: 'step' },
+    );
+
+    expect(result.pending).toEqual({
+      connectorName: 'declaration_one',
+      connectorId: 'mock_kyc_1',
+      connectorOrder: 1,
+      providerReference: 'session-1',
+    });
+  });
+
+  it.each([[undefined], [{ providerReference: 42 }]])(
+    'leaves providerReference off the pending connector when the initiation reports %p',
+    async (metadata) => {
+      const asyncConnector = createConnector('adapter_one', 'mock_kyc_1', true);
+      asyncConnector.execute.mockResolvedValue(ConnectorExecutionResult.accepted(metadata));
+      const service = createService([asyncConnector] as ConnectorAdapterCollection);
+
+      const result = await service.execute(
+        [
+          declaration({
+            name: 'declaration_one',
+            id: 'mock_kyc_1',
+            type: 'kyc',
+            order: 1,
+            async: true,
+            fieldMapping: {},
+          }),
+        ],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+
+      expect(result.pending).not.toHaveProperty('providerReference');
+    },
+  );
+
+  describe('listAdapters', () => {
+    it('describes every registration with its scope, capability and callback fields', () => {
+      const callbackAdapter = {
+        ...createConnector('Callback', 'veriff_kyc', true),
+        type: 'kyc',
+        callbackFields: ['kycOutcome'],
+      } as ConnectorAdapter;
+      const syncAdapter = {
+        ...createConnector('Sync', 'smtp'),
+        type: 'email_delivery',
+      } as ConnectorAdapter;
+      const service = new WorkflowConnectorExecutorService(
+        [callbackAdapter, syncAdapter],
+        defaultErrorHandlers(),
+        createAuditServiceMock(),
+        {} as DataSource,
+        undefined,
+        new Map([['veriff_kyc', 'built-in']]),
+      );
+
+      expect(service.listAdapters()).toEqual([
+        {
+          id: 'veriff_kyc',
+          type: 'kyc',
+          supportsAsyncCallback: true,
+          scope: 'built-in',
+          callbackFields: ['kycOutcome'],
+        },
+        {
+          id: 'smtp',
+          type: 'email_delivery',
+          supportsAsyncCallback: false,
+          scope: 'users',
+          callbackFields: [],
+        },
+      ]);
+    });
+
+    it('reports every adapter as a user adapter when no scopes were provided', () => {
+      const service = createService([createConnector('One', 'one')] as ConnectorAdapterCollection);
+
+      expect(service.listAdapters().map(({ scope }) => scope)).toEqual(['users']);
+    });
+  });
+
   it('returns non-accepted async initiation result and does not run later connectors', async () => {
     const asyncConnector = createConnector('adapter_one', 'mock_kyc_1', true);
     const laterConnector = createConnector('adapter_two', 'mock_kyc_2');

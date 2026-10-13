@@ -34,6 +34,7 @@ const RESOURCE_TYPE_LABELS: Record<AuditResourceType, string> = {
   provider_callback: 'Callbacks',
   connector_settings: 'Connector settings',
   admin_endpoint: 'Admin API',
+  workflow: 'Workflows',
 };
 
 /** Human-readable resource type label, falling back to the raw value for an unrecognized one. */

@@ -92,6 +92,7 @@ const RELOAD_FIXTURE: AdminOnboardingFixtureRecord[] = [
     updatedAt: '2026-07-08T00:00:00.000Z',
     completedAt: '2026-07-09T00:00:00.000Z',
     scores: {},
+    pendingConnector: null,
     context: { hidden: 'fixture-context-row-four' },
   },
 ];

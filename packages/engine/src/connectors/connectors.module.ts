@@ -23,8 +23,16 @@ import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.conne
 import { SmtpConnector } from './adapters/built-in/smtp.connector';
 import { SumsubKycConnector } from './adapters/built-in/sumsub-kyc.connector';
 import { SumsubClient } from './adapters/built-in/sumsub-kyc/sumsub-client';
+import { SumsubKycProvider } from './adapters/built-in/sumsub-kyc/sumsub-kyc.provider';
+import { VeriffKycConnector } from './adapters/built-in/veriff-kyc.connector';
+import { VeriffClient } from './adapters/built-in/veriff-kyc/veriff-client';
+import { VeriffKycProvider } from './adapters/built-in/veriff-kyc/veriff-kyc.provider';
+import { VeriffMediaFitter } from './adapters/built-in/veriff-kyc/veriff-media-fitter';
 import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
-import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
+import {
+  MockAsyncCallback2Connector,
+  MockAsyncCallbackConnector,
+} from './adapters/fixtures/mock-async-callback.connector';
 import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
 import { MockKyc1Connector, MockKyc2Connector } from './adapters/fixtures/mock-kyc.connector';
 import { MockSumsubFileUploadConnector } from './adapters/fixtures/mock-sumsub-file-upload.connector';
@@ -70,6 +78,7 @@ const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
   SendgridEmailConnector,
   SmtpConnector,
   SumsubKycConnector,
+  VeriffKycConnector,
   TwilioVerifyConnector,
 ] as const;
 
@@ -80,6 +89,7 @@ const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
  */
 const FIXTURE_CONNECTOR_ADAPTER_PROVIDERS = [
   MockAsyncCallbackConnector,
+  MockAsyncCallback2Connector,
   MockEmailDeliveryConnector,
   MockEmailVerificationConnector,
   MockKyc1Connector,
@@ -190,6 +200,10 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
     ConnectorSettingsService,
     ConnectorSettingsAdminService,
     SumsubClient,
+    SumsubKycProvider,
+    VeriffClient,
+    VeriffMediaFitter,
+    VeriffKycProvider,
     ...CONNECTOR_ADAPTER_PROVIDERS,
     {
       provide: CONNECTOR_ADAPTER_COLLECTION,

@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import { AuditLogEntity } from '../audit/entity/audit-log.entity';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
+import { WorkflowConnectorSelectionEntity } from '../workflows/entity/workflow-connector-selection.entity';
 import { WorkflowEntity } from '../workflows/entity/workflow.entity';
 import { WorkflowVersionEntity } from '../workflows/entity/workflow-version.entity';
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
@@ -48,6 +49,8 @@ const createTestConfigModule = (overrides: Record<string, unknown> = {}) =>
         HTTP_CONNECTOR_SECRETS: '{}',
         SUMSUB_BASE_URL: 'https://api.sumsub.com',
         SUMSUB_TIMEOUT_MS: 10000,
+        VERIFF_BASE_URL: 'https://stationapi.veriff.com',
+        VERIFF_TIMEOUT_MS: 10000,
         ...overrides,
       }),
     ],
@@ -92,6 +95,8 @@ const compileConnectorsModule = (configModule: DynamicModule | Promise<DynamicMo
     .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
     .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
     .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+    .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+    .useValue({ find: jest.fn(), findOne: jest.fn() })
     .overrideProvider(getRepositoryToken(AuditLogEntity))
     .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
     .overrideProvider(OBJECT_STORAGE_PORT)
@@ -138,6 +143,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -166,6 +173,37 @@ describe('ConnectorsModule', () => {
     });
   });
 
+  it('registers mock_async_callback_2 as a callback-capable custom adapter', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
+    })
+      .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorEntity))
+      .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(OnboardingEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(AuditLogEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
+      .overrideProvider(OBJECT_STORAGE_PORT)
+      .useValue(testStoragePort)
+      .compile();
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
+      readonly { id: string; type: string; supportsAsyncCallback?: boolean }[] | undefined;
+    const adapters =
+      adapterCollection?.filter((adapter) => adapter.id === 'mock_async_callback_2') ?? [];
+
+    expect(adapters).toHaveLength(1);
+    expect(adapters[0]).toMatchObject({ type: 'custom', supportsAsyncCallback: true });
+  });
+
   it('registers the Twilio Verify adapter exactly once and without async-callback support', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
@@ -180,6 +218,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -218,6 +258,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -252,6 +294,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -290,6 +334,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -328,6 +374,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -354,6 +402,8 @@ describe('ConnectorsModule', () => {
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
         .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+        .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn() })
         .overrideProvider(getRepositoryToken(AuditLogEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)
@@ -377,6 +427,8 @@ describe('ConnectorsModule', () => {
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
         .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+        .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn() })
         .overrideProvider(getRepositoryToken(AuditLogEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)
@@ -407,6 +459,8 @@ describe('ConnectorsModule', () => {
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
         .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+        .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn() })
         .overrideProvider(getRepositoryToken(AuditLogEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)
@@ -456,6 +510,8 @@ describe('ConnectorsModule', () => {
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
         .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+        .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn() })
         .overrideProvider(getRepositoryToken(AuditLogEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)
@@ -484,6 +540,33 @@ describe('ConnectorsModule', () => {
     expect(byId('mock_email_delivery')?.callbackAuth).toMatchObject({ kind: 'none' });
   });
 
+  it('registers the Veriff KYC adapter exactly once, callback-capable and signed over x-hmac-signature', async () => {
+    const moduleRef = await compileConnectorsModule(testConfigModule);
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
+      strict: false,
+    }) as readonly ConnectorAdapter[];
+    const veriffAdapters = adapterCollection.filter((adapter) => adapter.id === 'veriff_kyc');
+
+    expect(veriffAdapters).toHaveLength(1);
+    expect(veriffAdapters[0]).toMatchObject({
+      name: 'veriff_kyc',
+      type: 'kyc',
+      supportsAsyncCallback: true,
+      callbackAuth: {
+        kind: 'hmac',
+        algorithm: 'sha256',
+        signatureHeader: 'x-hmac-signature',
+        encoding: 'hex',
+        secretSettingKey: 'sharedSecretKey',
+      },
+    });
+    expect(veriffAdapters[0].settingsSchema?.fields.map((field) => field.key)).toEqual([
+      'apiKey',
+      'sharedSecretKey',
+    ]);
+  });
+
   it('resolves the scope map, reporting shipped adapters as built-in and mocks as fixtures', async () => {
     const moduleRef = await compileConnectorsModule(testConfigModule);
 
@@ -496,6 +579,7 @@ describe('ConnectorsModule', () => {
     expect(scopes?.get('twilio_verify')).toBe('built-in');
     expect(scopes?.get('smtp')).toBe('built-in');
     expect(scopes?.get('http_request')).toBe('built-in');
+    expect(scopes?.get('veriff_kyc')).toBe('built-in');
     expect(scopes?.get('mock_email_delivery')).toBe('fixtures');
     expect(scopes?.get('mock_phone_verification')).toBe('fixtures');
   });

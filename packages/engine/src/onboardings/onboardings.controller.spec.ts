@@ -4,6 +4,7 @@ import { OnboardingsService } from './onboardings.service';
 import { DocumentUploadService } from './document-upload.service';
 import { OnboardingStateService } from './onboarding-state.service';
 import { OnboardingTransitionsService } from './onboarding-transitions.service';
+import { PendingConnectorReconcileService } from './pending-connector-reconcile.service';
 
 describe('OnboardingsController', () => {
   it('calls manualReview with the onboarding id and validated trigger from route params', async () => {
@@ -21,6 +22,7 @@ describe('OnboardingsController', () => {
       documentUploadService,
       {} as OnboardingStateService,
       {} as OnboardingTransitionsService,
+      {} as PendingConnectorReconcileService,
     );
 
     await expect(controller.review({ id: 'onboarding-id', action: 'approve' })).resolves.toEqual({
@@ -50,6 +52,7 @@ describe('OnboardingsController', () => {
       {} as DocumentUploadService,
       onboardingStateService as unknown as OnboardingStateService,
       {} as OnboardingTransitionsService,
+      {} as PendingConnectorReconcileService,
     );
 
     await expect(controller.getState('onboarding-id')).resolves.toEqual(state);
@@ -67,6 +70,7 @@ describe('OnboardingsController', () => {
       {} as DocumentUploadService,
       {} as OnboardingStateService,
       {} as OnboardingTransitionsService,
+      {} as PendingConnectorReconcileService,
     );
 
     await expect(controller.getForAdmin('onboarding-id')).resolves.toBe(summary);
@@ -84,10 +88,36 @@ describe('OnboardingsController', () => {
       {} as DocumentUploadService,
       {} as OnboardingStateService,
       onboardingTransitionsService as unknown as OnboardingTransitionsService,
+      {} as PendingConnectorReconcileService,
     );
 
     await expect(controller.listTransitions('onboarding-id')).resolves.toBe(trail);
     expect(onboardingTransitionsService.listTransitions).toHaveBeenCalledWith('onboarding-id');
+  });
+
+  it("reconciles the parked connector of the onboarding in the route param as the token's operator", async () => {
+    const outcome = { outcome: 'still_pending', onboarding: { onboardingId: 'onboarding-id' } };
+    const pendingConnectorReconcileService = {
+      reconcile: jest.fn().mockResolvedValue(outcome),
+    } as unknown as jest.Mocked<Pick<PendingConnectorReconcileService, 'reconcile'>>;
+
+    const controller = new OnboardingsController(
+      {} as OnboardingsService,
+      {} as DocumentUploadService,
+      {} as OnboardingStateService,
+      {} as OnboardingTransitionsService,
+      pendingConnectorReconcileService as unknown as PendingConnectorReconcileService,
+    );
+
+    await expect(
+      controller.reconcilePendingConnector('onboarding-id', {
+        adminTokenClaims: { oid: 'operator-oid', preferred_username: 'op@tsh.io' },
+      } as never),
+    ).resolves.toBe(outcome);
+    expect(pendingConnectorReconcileService.reconcile).toHaveBeenCalledWith(
+      'onboarding-id',
+      'operator-oid',
+    );
   });
 
   describe('the onboarding-scoped agreement routes', () => {
@@ -97,6 +127,7 @@ describe('OnboardingsController', () => {
         {} as DocumentUploadService,
         {} as OnboardingStateService,
         {} as OnboardingTransitionsService,
+        {} as PendingConnectorReconcileService,
       );
 
     it('lists the agreements of the onboarding in the route param', async () => {

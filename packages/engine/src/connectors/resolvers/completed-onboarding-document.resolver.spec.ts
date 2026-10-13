@@ -8,6 +8,8 @@ describe('CompletedOnboardingDocumentResolver', () => {
         finalObjectKey: 'final/object',
         verifiedEtag: '"etag-1"',
         verifiedSizeBytes: 128,
+        verifiedContentType: 'image/png',
+        requestedContentType: 'image/jpeg',
       }),
     };
     const resolver = new CompletedOnboardingDocumentResolver(repository as never);
@@ -22,6 +24,7 @@ describe('CompletedOnboardingDocumentResolver', () => {
       finalObjectKey: 'final/object',
       verifiedEtag: '"etag-1"',
       verifiedSizeBytes: 128,
+      contentType: 'image/png',
     });
 
     expect(repository.findOne).toHaveBeenCalledWith({
@@ -73,5 +76,33 @@ describe('CompletedOnboardingDocumentResolver', () => {
         sourceField: 'identityDocument',
       }),
     ).resolves.toBeUndefined();
+  });
+
+  const resolveWithContentTypes = (verified: string | null, requested: string | null) => {
+    const repository = {
+      findOne: jest.fn().mockResolvedValue({
+        finalObjectKey: 'final/object',
+        verifiedEtag: '"etag-1"',
+        verifiedSizeBytes: 128,
+        verifiedContentType: verified,
+        requestedContentType: requested,
+      }),
+    };
+
+    return new CompletedOnboardingDocumentResolver(repository as never).resolve({
+      documentId: 'document-1',
+      onboardingId: 'onboarding-1',
+      sourceField: 'identityDocument',
+    });
+  };
+
+  it('falls back to the requested content type when none was verified', async () => {
+    await expect(resolveWithContentTypes(null, ' image/jpeg ')).resolves.toMatchObject({
+      contentType: 'image/jpeg',
+    });
+  });
+
+  it('treats a document with no content type as unresolved', async () => {
+    await expect(resolveWithContentTypes(null, null)).resolves.toBeUndefined();
   });
 });

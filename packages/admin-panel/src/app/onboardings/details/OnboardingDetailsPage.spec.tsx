@@ -1,7 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from '@/services/query-client/create-query-client';
+import { ApiError } from '@/services/api/api-error';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +13,8 @@ import {
 } from '@/api/onboardings/admin-onboardings';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { fetchAuditEvents } from '@/api/audit/audit-events';
-import { OnboardingReviewError, submitOnboardingReview } from '@/api/onboardings/onboarding-review';
+import { reconcilePendingConnector } from '@/api/onboardings/onboarding-reconcile';
+import { submitOnboardingReview } from '@/api/onboardings/onboarding-review';
 import {
   fetchOnboardingTransitions,
   type OnboardingTransition,
@@ -53,6 +56,13 @@ vi.mock('@/api/onboardings/onboarding-review', async (importOriginal) => {
   return { ...actual, submitOnboardingReview: vi.fn() };
 });
 
+vi.mock('@/api/onboardings/onboarding-reconcile', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/onboardings/onboarding-reconcile')>();
+
+  return { ...actual, reconcilePendingConnector: vi.fn() };
+});
+
+const mockedReconcile = vi.mocked(reconcilePendingConnector);
 const mockedFetchOnboarding = vi.mocked(fetchAdminOnboardingById);
 const mockedFetchTransitions = vi.mocked(fetchOnboardingTransitions);
 const mockedFetchWorkflowDefinition = vi.mocked(fetchWorkflowDefinition);
@@ -124,6 +134,7 @@ const SUMMARY: AdminOnboardingSummary = {
   updatedAt: '2026-07-01T12:00:00.000Z',
   completedAt: '2026-07-01T12:00:00.000Z',
   scores: {},
+  pendingConnector: null,
 };
 
 /** The same onboarding, carrying a score the fixture workflow declares bounds for. */
@@ -135,6 +146,20 @@ const SUMMARY_AWAITING_REVIEW: AdminOnboardingSummary = {
   status: 'awaiting_manual_review',
   currentStep: 'review-documents',
   completedAt: null,
+};
+
+/** Parked on a KYC connector, waiting for the provider's verdict. */
+const SUMMARY_PARKED: AdminOnboardingSummary = {
+  ...SUMMARY,
+  status: 'awaiting_user',
+  currentStep: 'collect-documents',
+  completedAt: null,
+  pendingConnector: {
+    connectorId: 'veriff_kyc',
+    connectorName: 'Veriff',
+    connectorOrder: 0,
+    parkedAt: '2026-07-01T11:00:00.000Z',
+  },
 };
 
 function move(overrides: Partial<OnboardingTransition>): OnboardingTransition {
@@ -183,17 +208,7 @@ function trail(
 }
 
 function createTestQueryClient(): QueryClient {
-  return new QueryClient({
-    defaultOptions: {
-      // Matches QueryProvider.tsx's defaults, so a remounted band reads its cache as the app does.
-      queries: {
-        retry: false,
-        refetchOnWindowFocus: false,
-        refetchOnMount: (query) => query.state.isInvalidated,
-      },
-      mutations: { retry: false },
-    },
-  });
+  return createQueryClient();
 }
 
 /**
@@ -248,6 +263,7 @@ beforeEach(() => {
   mockedFetchWorkflowDefinition.mockReset();
   mockedFetchActivity.mockReset();
   mockedSubmitReview.mockReset();
+  mockedReconcile.mockReset();
   // Most cases are about the record and the trail; the definition and the activity log are
   // enrichments this page must not depend on to show its main status.
   mockedFetchWorkflowDefinition.mockRejectedValue(new Error('Request failed with status 403.'));
@@ -514,7 +530,7 @@ describe('OnboardingDetailsPage', () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY_AWAITING_REVIEW);
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
     mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
-    let rejectSubmit: (error: OnboardingReviewError) => void = () => {};
+    let rejectSubmit: (error: ApiError) => void = () => {};
     mockedSubmitReview.mockReturnValueOnce(
       new Promise((_resolve, reject) => {
         rejectSubmit = reject;
@@ -526,7 +542,7 @@ describe('OnboardingDetailsPage', () => {
 
     expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
 
-    rejectSubmit(new OnboardingReviewError('Request failed with status 503.', 503));
+    rejectSubmit(new ApiError('Request failed with status 503.', { status: 503 }));
 
     const toast = await findToast('Unable to record the review decision:');
     expect(toast).toHaveTextContent('Request failed with status 503.');
@@ -543,7 +559,7 @@ describe('OnboardingDetailsPage', () => {
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL, true));
     mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
     mockedSubmitReview.mockRejectedValue(
-      new OnboardingReviewError('Request failed with status 409.', 409),
+      new ApiError('Request failed with status 409.', { status: 409 }),
     );
 
     renderPage();
@@ -569,7 +585,7 @@ describe('OnboardingDetailsPage', () => {
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
     mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
     mockedSubmitReview.mockRejectedValueOnce(
-      new OnboardingReviewError('Request failed with status 409.', 409),
+      new ApiError('Request failed with status 409.', { status: 409 }),
     );
     mockedSubmitReview.mockResolvedValueOnce({ status: 'approved', currentStep: null });
 
@@ -583,5 +599,97 @@ describe('OnboardingDetailsPage', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Approve' }));
 
     expect(await screen.findByText('Onboarding approved.')).toBeInTheDocument();
+  });
+
+  it('offers the provider check only while parked, and shows the park in the run meta', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY_PARKED);
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: 'Check provider' })).toBeEnabled();
+    expect(screen.getByText('Parked on Veriff')).toBeInTheDocument();
+  });
+
+  it('offers no provider check for an onboarding that is not parked', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Path taken' });
+    expect(screen.queryByRole('button', { name: 'Check provider' })).not.toBeInTheDocument();
+  });
+
+  it('shows the answered summary without re-reading it, re-reads the trail and the activity log, and raises a success toast once the verdict is applied', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY_PARKED);
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+    mockedReconcile.mockResolvedValue({ outcome: 'applied', onboarding: SUMMARY });
+
+    renderPage();
+    await waitFor(() => expect(mockedFetchActivity).toHaveBeenCalledTimes(1));
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Check provider' }));
+
+    expect(mockedReconcile).toHaveBeenCalledWith(ONBOARDING_ID);
+    await waitFor(() => {
+      expect(mockedFetchTransitions).toHaveBeenCalledTimes(2);
+      expect(mockedFetchActivity).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchOnboarding).toHaveBeenCalledTimes(1);
+    const toast = await findToast('Verdict applied.');
+    expect(toast).toHaveAttribute('data-type', 'success');
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Check provider' })).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('Approved')).toBeInTheDocument();
+  });
+
+  it('keeps Reload inert while the provider is being asked, then raises the error toast', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY_PARKED);
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+    let rejectReconcile: (error: ApiError) => void = () => {};
+    mockedReconcile.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectReconcile = reject;
+      }),
+    );
+
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: 'Check provider' }));
+
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Check provider' })).toBeDisabled();
+
+    rejectReconcile(new ApiError('Request failed with status 503.', { status: 503 }));
+
+    const toast = await findToast('Unable to check the provider:');
+    expect(toast).toHaveTextContent('Request failed with status 503.');
+    // The toast is raised from `onError`, one render before the mutation reports itself settled.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Reload' })).toBeEnabled();
+    });
+    expect(screen.getByRole('button', { name: 'Check provider' })).toBeEnabled();
+  });
+
+  it('re-reads the page after a provider check refused with a 409', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY_PARKED);
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+    mockedReconcile.mockRejectedValue(
+      new ApiError('Request failed with status 409.', { status: 409 }),
+    );
+
+    renderPage();
+    await waitFor(() => expect(mockedFetchActivity).toHaveBeenCalledTimes(1));
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Check provider' }));
+
+    await waitFor(() => {
+      expect(mockedFetchOnboarding).toHaveBeenCalledTimes(2);
+      expect(mockedFetchTransitions).toHaveBeenCalledTimes(2);
+      expect(mockedFetchActivity).toHaveBeenCalledTimes(2);
+    });
+    const toast = await findToast('Unable to check the provider:');
+    expect(toast).toHaveTextContent('Request failed with status 409.');
   });
 });

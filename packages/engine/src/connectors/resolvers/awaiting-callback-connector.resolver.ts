@@ -1,7 +1,11 @@
-import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import type { NormalizedWorkflowConnectorFallback } from '@tsh/ddl-schema';
+import type {
+  NormalizedWorkflowConnectorDeclaration,
+  NormalizedWorkflowConnectorFallback,
+} from '@tsh/ddl-schema';
+import type { ConnectorPendingExecution } from '../ports/connector-execution-result';
 import { OnboardingEntity } from '../../onboardings/entity/onboarding.entity';
 import { WorkflowRegistryService } from '../../workflows/workflow-registry.service';
 
@@ -15,6 +19,7 @@ export type AwaitingCallbackConnectorResolution = Readonly<{
   connectorOrder: number;
   onboarding: OnboardingEntity;
   connector: NormalizedWorkflowConnectorFallback;
+  pendingConnector: ConnectorPendingExecution;
 }>;
 
 export type AwaitingCallbackConnectorResolutionInput = {
@@ -23,14 +28,19 @@ export type AwaitingCallbackConnectorResolutionInput = {
 };
 
 /**
- * Derives the parked connector's declaration and `connectorOrder` for a callback from data the
- * engine already holds — the parked connector itself is never persisted. `undefined` also
- * doubles as the redelivery guard: once the first delivery has advanced the step, a redelivery
- * no longer finds the connector on the current step and resolves to `undefined` instead of
- * erroring.
+ * Resolves the parked connector's declaration and `connectorOrder` for a callback from the park
+ * persisted on the onboarding (`pendingConnector`): an operator may switch the step's connector
+ * while an onboarding waits, and the callback must still reach the provider the park happened
+ * on. Only the park answers — an onboarding on the step but not parked (a retry verdict cleared
+ * the park and the client has not resubmitted) resolves to `undefined`, so a late decision for
+ * an attempt it no longer waits on cannot decide it. `undefined` also doubles as the redelivery
+ * guard: once the first delivery has advanced the step, a redelivery no longer finds the
+ * connector on the current step and resolves to `undefined` instead of erroring.
  */
 @Injectable()
 export class AwaitingCallbackConnectorResolver {
+  private readonly logger = new Logger(AwaitingCallbackConnectorResolver.name);
+
   constructor(
     @InjectRepository(OnboardingEntity)
     private readonly onboardingsRepository: Repository<OnboardingEntity>,
@@ -69,16 +79,48 @@ export class AwaitingCallbackConnectorResolver {
       return undefined;
     }
 
-    // Every fallback shares its primary's `order`, so matching against the flattened chain already
-    // resolves to the right `connectorOrder` whichever link matched — and to the matched
-    // declaration's own `config`, which is what a caller such as Sumsub's callback handler reads.
-    const connector = step.connectors
-      .flatMap<NormalizedWorkflowConnectorFallback>((declaration) => [
-        declaration,
-        ...declaration.fallbacks,
-      ])
-      .find((candidate) => candidate.id === input.connectorId);
+    const pending = onboarding.pendingConnector;
 
-    return connector ? { connectorOrder: connector.order, onboarding, connector } : undefined;
+    if (pending === null) {
+      this.logger.warn(
+        `AWAITING_CALLBACK_PARK_NOT_RECORDED onboardingId=${onboarding.id} ` +
+          `connectorId=${input.connectorId} step=${onboarding.currentStep}`,
+      );
+
+      return undefined;
+    }
+
+    return this.resolvePersisted(onboarding, step.connectors, pending, input.connectorId);
+  }
+
+  private resolvePersisted(
+    onboarding: OnboardingEntity,
+    declarations: readonly NormalizedWorkflowConnectorDeclaration[],
+    pending: ConnectorPendingExecution,
+    connectorId: string,
+  ): AwaitingCallbackConnectorResolution | undefined {
+    if (pending.connectorId !== connectorId) {
+      return undefined;
+    }
+
+    const slot = declarations.find((declaration) => declaration.order === pending.connectorOrder);
+
+    if (!slot) {
+      return undefined;
+    }
+
+    // The park happened on the provider the slot named then. When an operator has switched the
+    // slot's primary since, that provider is no longer in the chain; the primary's authored
+    // config and field mapping are provider-neutral and survive the switch, so they stand in.
+    const connector =
+      [slot, ...slot.fallbacks].find((candidate) => candidate.id === pending.connectorId) ??
+      ({ ...slot, id: pending.connectorId } satisfies NormalizedWorkflowConnectorFallback);
+
+    return {
+      connectorOrder: pending.connectorOrder,
+      onboarding,
+      connector,
+      pendingConnector: pending,
+    };
   }
 }

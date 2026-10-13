@@ -1,6 +1,9 @@
 import type { ReactElement } from 'react';
 import type { WorkflowStepDefinition } from '@/api/workflows/workflow-definitions';
-import type { WorkflowVersionStatus } from '@/api/workflows/workflow-versions';
+import {
+  WORKFLOW_VERSION_STATUS,
+  type WorkflowVersionStatus,
+} from '@/api/workflows/workflow-versions';
 import { Chip } from '@/components/ui/Chip/Chip';
 import { Lock } from '@/components/ui/icons';
 import { Typography } from '@/components/ui/Typography/Typography';
@@ -10,14 +13,21 @@ import { StepRequirements } from './StepRequirements';
 import { StepTransitions } from './StepTransitions';
 
 export interface StepInspectorProps {
+  workflowId: string;
   step: WorkflowStepDefinition;
   versionStatus: WorkflowVersionStatus | null;
 }
 
-/** The read-only right rail for the selected step: its kind and status, fields, connectors and transitions. */
-export function StepInspector({ step, versionStatus }: StepInspectorProps): ReactElement {
+/** The right rail for the selected step, read-only apart from its connector binding: its kind and status, fields, connectors and transitions. */
+export function StepInspector({
+  workflowId,
+  step,
+  versionStatus,
+}: StepInspectorProps): ReactElement {
   const revisions =
-    versionStatus === 'published' || versionStatus === null ? 'published' : 'stored';
+    versionStatus === WORKFLOW_VERSION_STATUS.published || versionStatus === null
+      ? 'published'
+      : 'stored';
 
   return (
     <aside
@@ -48,11 +58,14 @@ export function StepInspector({ step, versionStatus }: StepInspectorProps): Reac
           className="flex items-center gap-1.5 leading-natural font-normal tracking-normal"
         >
           <Lock aria-hidden="true" className="size-4" />
-          Read-only — {revisions} revisions never change shape
+          Shape is read-only — {revisions} revisions never change shape; the connector binding is
+          editable
         </Typography>
       </header>
       <StepRequirements step={step} />
-      {step.connectors.length > 0 && <StepConnectors connectors={step.connectors} />}
+      {step.connectors.length > 0 && (
+        <StepConnectors workflowId={workflowId} stepName={step.name} connectors={step.connectors} />
+      )}
       <StepTransitions step={step} />
     </aside>
   );

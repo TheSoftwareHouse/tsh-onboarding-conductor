@@ -323,6 +323,7 @@ describe('OnboardingsController (e2e)', () => {
       rejectionReason: null,
       scores: {},
       agreementStatus: 'not_accepted',
+      pendingConnector: null,
       ...summary,
     }));
 
@@ -3814,8 +3815,8 @@ describe('OnboardingsController (e2e)', () => {
     );
 
     // Each table's later `ALTER`s are folded into its creating migration (Task 4.0), so the
-    // surviving set is exactly these ten — and the gaps in the numbering are history, not an
-    // omission.
+    // surviving set is exactly these thirteen — and the gaps in the numbering are history, not an
+    // omission. 0029, 0030 and 0031 post-date the fold and are additive.
     expect(migrations).toEqual([
       { name: '0001_init' },
       { name: '0002_create_onboardings_1735689600000' },
@@ -3827,6 +3828,9 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0022_create_agreements_2052172800000' },
       { name: '0024_create_encryption_keys_2052345600000' },
       { name: '0028_add_onboardings_in_progress_version_index_2052691200000' },
+      { name: '0029_add_workflow_versions_one_draft_index_2052777600000' },
+      { name: '0030_create_workflow_connector_selections_2052864000000' },
+      { name: '0031_add_onboardings_pending_connector_2052950400000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3850,6 +3854,7 @@ describe('OnboardingsController (e2e)', () => {
       { table_name: 'onboarding_agreements' },
       { table_name: 'onboarding_documents' },
       { table_name: 'onboardings' },
+      { table_name: 'workflow_connector_selections' },
       { table_name: 'workflow_versions' },
       { table_name: 'workflows' },
     ]);
@@ -3949,6 +3954,13 @@ describe('OnboardingsController (e2e)', () => {
         is_nullable: 'NO',
         column_default: "'{}'::jsonb",
       },
+      {
+        column_name: 'pending_connector',
+        data_type: 'jsonb',
+        udt_name: 'jsonb',
+        is_nullable: 'YES',
+        column_default: null,
+      },
     ];
 
     expect(byColumnName(columns)).toEqual(byColumnName(expectedColumns));
@@ -4019,6 +4031,11 @@ describe('OnboardingsController (e2e)', () => {
           conname: 'chk_onboardings_rejection_reason_terminal',
           definition: expect.stringContaining('rejection_reason IS NULL'),
         }),
+        {
+          conname: 'chk_onboardings_pending_connector_object',
+          definition:
+            "CHECK (((pending_connector IS NULL) OR (jsonb_typeof(pending_connector) = 'object'::text)))",
+        },
       ]),
     );
   });
