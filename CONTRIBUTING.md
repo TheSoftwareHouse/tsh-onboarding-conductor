@@ -21,8 +21,8 @@ Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT
 
 Follow the [README quick start](README.md#getting-started): Node 24, pnpm 11, Docker, then
 `cp .env.dist .env`, `pnpm bootstrap`, `pnpm stack:up`. A fresh copy of `.env.dist` runs without any
-third-party account. A stack you created before the migration set was folded in September 2026
-cannot boot the current engine — its `migrations` table already lists the folded numbers — so run
+third-party account. A stack you created before the migrations were folded into one in October 2026
+cannot boot the current engine — its `migrations` table lists the old migration names — so run
 `pnpm stack:reset` once, which throws the local databases away, before `pnpm stack:up`.
 
 Use the root-level commands rather than calling `docker compose`, `jest`, `tsc` or `playwright`
@@ -59,16 +59,49 @@ tool by hand produces confusing failures.
 
 ## Versioning
 
-Nothing to do as an author: every merge into `main` is released automatically
-(`.github/workflows/release.yml`, [decision 0046](docs/decisions/0046-commit-driven-versioning.md)).
-The squash title becomes the `CHANGELOG.md` line, so keep it a clear Conventional Commit. The
-repository squashes with the commit or PR title: for a one-commit PR GitHub proposes that commit's
-title, so check the title at merge time. The squash body holds every inner commit's message, so a
-`BREAKING CHANGE:` footer in any commit of the PR bumps the minor; edit the message at merge to drop
-it. A
-`!` after the type (`feat!:`) or a `BREAKING CHANGE:` footer bumps the minor version while the
-product is `0.x`, the major from `1.0`; everything else bumps the patch. To jump to a specific
-version, set it by hand in every `package.json` in the pull request and it is released as it is.
+Every merge into `main` is released automatically: `.github/workflows/release.yml` bumps the version,
+adds a `CHANGELOG.md` entry and tags `vX.Y.Z`
+([decision 0046](docs/decisions/0046-commit-driven-versioning.md)). You add nothing to the pull
+request — no version change, no changelog edit.
+
+### Write the title
+
+The squash-merge title becomes the changelog line, so write it as a Conventional Commit:
+
+```text
+feat(engine): postal code field type (#123)
+```
+
+- `feat` is listed under **Features**, `fix` under **Fixes**, any other type — or a title that is
+  not a Conventional Commit — under **Other changes**. The scope is shown in bold and `(#123)`
+  becomes a link to the pull request.
+- Check the title in the merge dialog. For a pull request with one commit, GitHub proposes that
+  commit's title instead of the pull request's.
+
+### How the version moves
+
+| The merge is… | While `0.x` | From `1.0.0` |
+| ------------- | ----------- | ------------ |
+| not breaking  | patch       | patch        |
+| breaking      | minor       | major        |
+
+A merge is breaking when the title has `!` after the type (`feat(api)!: drop the v0 routes`) or the
+squash message has a line starting `BREAKING CHANGE:`. The squash message carries the message of
+every commit in the pull request, so a footer left in a work-in-progress commit counts too — delete
+it in the merge dialog if the change is not breaking.
+
+### Jump to a specific version
+
+To release, say, `1.0.0` instead of the next patch:
+
+1. Set `"version": "1.0.0"` in every `package.json` — the root one and each one under `packages/`.
+2. Run `pnpm openapi:generate`, so the OpenAPI document carries the same version; `pnpm test` fails
+   until it does.
+3. Optionally write the `## 1.0.0` entry in `CHANGELOG.md` yourself. If you don't, one is generated
+   from the pull request title.
+
+The merge is released as exactly that version, with no further bump. It must be `X.Y.Z` (no
+`-rc.1` suffix) and not a version that was already released.
 
 ## Checks
 
