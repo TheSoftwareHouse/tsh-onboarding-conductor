@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import { useEffect, type ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ReactFlowProvider } from '@xyflow/react';
 import { HttpStatusCode } from 'axios';
@@ -156,9 +156,22 @@ export function WorkflowDetailsPage(): ReactElement {
     isError: isVersionsError,
     isSuccess: isVersionsSuccess,
     isFetching: isVersionsFetching,
+    isFetchedAfterMount: isVersionsFetchedAfterMount,
     error: versionsError,
     refetch: refetchVersions,
   } = useQuery(workflowQueries.versions(workflowId));
+  // A cached list predates any version published elsewhere since, so it is re-read before a pinned version is called missing.
+  const isVersionsStale =
+    params.version !== null &&
+    isVersionsSuccess &&
+    !isVersionsFetchedAfterMount &&
+    !versions.some((entry) => entry.version === params.version);
+
+  useEffect(() => {
+    if (isVersionsStale) {
+      void refetchVersions({ cancelRefetch: false });
+    }
+  }, [isVersionsStale, refetchVersions]);
   // The unpinned read serves only published versions, so a family without one opens its draft.
   const fallbackDraft =
     params.version === null &&
@@ -174,7 +187,7 @@ export function WorkflowDetailsPage(): ReactElement {
       (requestedStatus === undefined && isVersionsFetching));
   // Judged on a settled list only, so a refetch after a write never flashes it.
   const missingVersionMessage =
-    isVersionsSuccess && !isVersionsFetching
+    isVersionsSuccess && !isVersionsFetching && !isVersionsStale
       ? findMissingVersionMessage(versions, params.version)
       : null;
   const {
@@ -183,7 +196,7 @@ export function WorkflowDetailsPage(): ReactElement {
     refetch: refetchDetails,
   } = useQuery({
     ...workflowQueries.detail(workflowId, requestedVersion ?? undefined),
-    enabled: !holdDetails && missingVersionMessage === null,
+    enabled: !holdDetails && !isVersionsStale && missingVersionMessage === null,
   });
   const version = requestedVersion ?? details?.workflowVersion ?? null;
   const versionStatus = versions.find((entry) => entry.version === version)?.status ?? null;
@@ -219,7 +232,9 @@ export function WorkflowDetailsPage(): ReactElement {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {renderHeader()}
-      {isVersionsPending && <StatusRegion className="px-8 py-6">Loading workflow…</StatusRegion>}
+      {(isVersionsPending || isVersionsStale) && (
+        <StatusRegion className="px-8 py-6">Loading workflow…</StatusRegion>
+      )}
       {isVersionsError && (
         <VersionsFailure
           workflowId={workflowId}
@@ -233,7 +248,7 @@ export function WorkflowDetailsPage(): ReactElement {
           {missingVersionMessage} Choose one from the version list.
         </StatusRegion>
       )}
-      {isVersionsSuccess && missingVersionMessage === null && (
+      {isVersionsSuccess && !isVersionsStale && missingVersionMessage === null && (
         <VersionTabs
           key={version}
           value={params.view ?? 'graph'}

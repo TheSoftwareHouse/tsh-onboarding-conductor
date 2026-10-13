@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/services/api/api-error';
 import { createQueryClient } from '@/services/query-client/create-query-client';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
@@ -17,6 +17,7 @@ import {
   fetchWorkflowDocument,
   type WorkflowVersionDocument,
 } from '@/api/workflows/workflow-drafts';
+import { workflowQueries } from '@/api/workflows/workflow-queries';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { WorkflowDetailsPage } from './WorkflowDetailsPage';
 
@@ -133,13 +134,13 @@ function versions(...entries: Array<[number, WorkflowVersion['status']]>): Workf
   }));
 }
 
-function renderPage(search = ''): void {
+function renderPage(search = '', client: QueryClient = createQueryClient()): void {
   window.history.replaceState({}, '', `${ADMIN_ROUTES.workflows.details(WORKFLOW_ID)}${search}`);
 
   render(
     <BrowserRouter>
       <NuqsAdapter>
-        <QueryClientProvider client={createQueryClient()}>
+        <QueryClientProvider client={client}>
           <Routes>
             <Route path={ADMIN_ROUTES.workflows.detailsPattern} element={<WorkflowDetailsPage />} />
           </Routes>
@@ -358,6 +359,50 @@ describe('WorkflowDetailsPage', () => {
 
     expect(await screen.findByText(/Version 9 does not exist/)).toBeInTheDocument();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(mockedFetchDocument).not.toHaveBeenCalled();
+  });
+
+  it('re-reads a cached versions list that lacks the pinned version before calling it missing', async () => {
+    const client = createQueryClient();
+    client.setQueryData(workflowQueries.versions(WORKFLOW_ID).queryKey, versions([2, 'published']));
+    mockedFetchVersions.mockResolvedValue(versions([3, 'published'], [2, 'published']));
+    renderPage('?version=3', client);
+
+    expect(await findInspectorHeading('collect')).toBeInTheDocument();
+    expect(mockedFetchVersions).toHaveBeenCalledTimes(1);
+    expect(mockedFetchDefinition).toHaveBeenCalledWith(WORKFLOW_ID, 3);
+    expect(screen.queryByText(/Version 3 does not exist/)).not.toBeInTheDocument();
+  });
+
+  it('reports a pinned version missing from a re-read cached list without reading it', async () => {
+    const client = createQueryClient();
+    client.setQueryData(workflowQueries.versions(WORKFLOW_ID).queryKey, versions([2, 'published']));
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+    renderPage('?version=9', client);
+
+    expect(await screen.findByText(/Version 9 does not exist/)).toBeInTheDocument();
+    expect(mockedFetchVersions).toHaveBeenCalledTimes(1);
+    expect(mockedFetchDefinition).not.toHaveBeenCalled();
+  });
+
+  it('shows the loading state, not the tabs, while a stale cached list is re-read on the JSON tab', async () => {
+    const client = createQueryClient();
+    client.setQueryData(workflowQueries.versions(WORKFLOW_ID).queryKey, versions([2, 'published']));
+    mockedFetchVersions.mockReturnValue(new Promise(() => undefined));
+    renderPage('?version=9&view=json', client);
+
+    expect(await screen.findByText('Loading workflow…')).toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(mockedFetchDocument).not.toHaveBeenCalled();
+  });
+
+  it('reports a pinned version missing from a re-read cached list on the JSON tab without reading a document', async () => {
+    const client = createQueryClient();
+    client.setQueryData(workflowQueries.versions(WORKFLOW_ID).queryKey, versions([2, 'published']));
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+    renderPage('?version=9&view=json', client);
+
+    expect(await screen.findByText(/Version 9 does not exist/)).toBeInTheDocument();
     expect(mockedFetchDocument).not.toHaveBeenCalled();
   });
 

@@ -705,6 +705,16 @@ describe('DraftEditor', () => {
       expect(mockedCompile).toHaveBeenCalledTimes(2);
     });
 
+    it('sends no second compile for Graph while the Publish compile is in flight', async () => {
+      mockedCompile.mockReturnValue(new Promise(() => undefined));
+      renderEditor({ staysMounted: true });
+      await editorText();
+      await clickPublish();
+      await userEvent.click(screen.getByRole('tab', { name: 'Graph' }));
+
+      expect(mockedCompile).toHaveBeenCalledTimes(1);
+    });
+
     it('opens the dialog on a valid compile', async () => {
       mockedCompile.mockResolvedValue({ ...COMPILATION, stepCount: 3 });
       renderEditor();

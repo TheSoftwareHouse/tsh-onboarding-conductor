@@ -84,7 +84,7 @@ export class WorkflowRegistryService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     const scopes = this.getActiveScopes();
     const manager = this.dataSource.manager;
-    const files = this.workflowFileLoaderService.load(scopes);
+    const files = await this.workflowFileLoaderService.load(scopes);
 
     // Validated before the publish, not after: an invalid file must fail the boot
     // without ever reaching the table, so fixing or removing it is enough to

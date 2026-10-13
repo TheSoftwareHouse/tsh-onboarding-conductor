@@ -1,8 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { AdminWorkflowDraftResponseDto } from './admin-workflow-draft.response.dto';
+import { AdminWorkflowRevisionResponseDto } from './admin-workflow-revision.response.dto';
 
 /** A revision of any status together with its stored document, exactly as it was saved. */
-export class AdminWorkflowVersionDocumentResponseDto extends AdminWorkflowDraftResponseDto {
+export class AdminWorkflowVersionDocumentResponseDto extends AdminWorkflowRevisionResponseDto {
   @ApiProperty({
     type: 'object',
     additionalProperties: true,

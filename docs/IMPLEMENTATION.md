@@ -896,7 +896,10 @@ transaction:
    `409 WORKFLOW_VERSION_NOT_LATEST`, carrying `workflowId`, `version` and `latestPublishedVersion`.
 4. A workflow file declaring the same `id` and `version` answers `409 WORKFLOW_VERSION_EXISTS`:
    startup skips such a file while the row is a draft, but would compare it with a published row
-   and fail the boot when the two differ.
+   and fail the boot when the two differ. The scope directories are read asynchronously and only each
+   file's `id` and `version` are compared; a file that does not parse is skipped, left for the next
+   boot to refuse, rather than failing the publish. A file that cannot be read fails the publish
+   instead, since skipping it could let a shadowed version through.
 5. The stored document goes through the compile route's full compile on the transaction's snapshot,
    including the `sourceKey` sweep over non-draft rows: `400 WORKFLOW_INVALID`,
    `400 WORKFLOW_CONNECTOR_DECLARATION_INVALID` or `409 WORKFLOW_SOURCE_KEY_CONFLICT`. The row stays
@@ -3263,7 +3266,8 @@ sidebar keeps Workflows active while it is open. It reads `workflowQueries.versi
 highest `published` version. Without `?version=`, a family with no published version opens its draft, if it has one. Once the versions list has settled, a `?version=` the family
 does not hold, or no `?version=` with nothing published or drafted, replaces the tabs with "Version N does not exist." or
 "This workflow has no published version." and keeps the picker; neither tab renders, and no pinned definition or document
-is read. A 404 on the definition read itself, the list being stale, gives the same message inside the Graph tab. A
+is read. A list served from cache that lacks the pinned version is re-read once first, since a
+version may have been published elsewhere since; the page shows its loading state meanwhile. A 404 on the definition read itself, the list being stale, gives the same message inside the Graph tab. A
 `retired` version is listed and selectable. `version`, `step` and `view` live in the URL (nuqs, `history: 'replace'`, `shallow: false`); an
 unknown `step` falls back to the definition's `initialStep`, and switching version clears `step`
 and `view`, so every version opens on its initial step and its default tab. `?view=graph|json` picks

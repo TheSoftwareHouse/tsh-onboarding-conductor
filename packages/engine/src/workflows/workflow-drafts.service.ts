@@ -187,9 +187,11 @@ export class WorkflowDraftsService {
       }
 
       // Boot skips a file shadowing a draft, but would refuse it against a published row.
-      const isShadowed = this.workflowFileLoaderService
-        .load(this.workflowRegistryService.getActiveScopes())
-        .some((file) => file.workflowId === workflowId && file.version === version);
+      const isShadowed = await this.workflowFileLoaderService.hasRevision(
+        this.workflowRegistryService.getActiveScopes(),
+        workflowId,
+        version,
+      );
 
       if (isShadowed) {
         throw new WorkflowVersionExistsException(workflowId, version);

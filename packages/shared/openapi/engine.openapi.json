@@ -6250,13 +6250,13 @@
         "properties": {
           "workflowId": {
             "type": "string",
-            "description": "The workflow id the draft belongs to.",
+            "description": "The workflow id the revision belongs to.",
             "example": "my-onboarding"
           },
           "version": {
             "type": "integer",
             "minimum": 1,
-            "description": "The revision number of the draft."
+            "description": "The revision number."
           },
           "status": {
             "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run.",
@@ -6436,17 +6436,16 @@
         "properties": {
           "workflowId": {
             "type": "string",
-            "description": "The workflow id the draft belongs to.",
+            "description": "The workflow id the revision belongs to.",
             "example": "my-onboarding"
           },
           "version": {
             "type": "integer",
             "minimum": 1,
-            "description": "The revision number of the draft."
+            "description": "The revision number."
           },
           "status": {
             "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run.",
-            "example": "draft",
             "allOf": [
               {
                 "$ref": "#/components/schemas/WorkflowVersionStatus"
@@ -6489,13 +6488,13 @@
         "properties": {
           "workflowId": {
             "type": "string",
-            "description": "The workflow id the version belongs to.",
+            "description": "The workflow id the revision belongs to.",
             "example": "my-onboarding"
           },
           "version": {
             "type": "integer",
             "minimum": 1,
-            "description": "The revision number that was published."
+            "description": "The revision number."
           },
           "status": {
             "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run.",

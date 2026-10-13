@@ -131,8 +131,8 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
     setOutcome(null);
   }
 
-  // Validate and the Graph tab share this: the result is kept only if the text has not changed since.
-  function compileText(): void {
+  // Validate, Publish and the Graph tab share this: the result is kept only if the text has not changed since.
+  function compileText(onValid?: () => void): void {
     const parsed = parseWorkflowDocument(text);
     if (!parsed.ok) {
       setOutcome({ kind: 'syntax', message: parsed.message });
@@ -150,6 +150,7 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
       onSuccess: ({ stepCount, workflow }) => {
         if (isCurrent()) {
           setOutcome({ kind: 'valid', stepCount, workflow });
+          onValid?.();
         }
       },
       onError: (failure) => {
@@ -185,23 +186,9 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
     });
   }
 
-  // A save never compiles, so a saved draft can still be invalid: compile the stored document first.
+  // A save never compiles, so a saved draft can still be invalid; Publish is disabled while dirty, so `text` is the stored document.
   function handlePublish(): void {
-    const sentRevision = textRevision.current;
-    const isCurrent = (): boolean => textRevision.current === sentRevision;
-    validateMutation.mutate(storedDocument, {
-      onSuccess: ({ stepCount, workflow }) => {
-        if (isCurrent()) {
-          setOutcome({ kind: 'valid', stepCount, workflow });
-          setIsPublishModalOpen(true);
-        }
-      },
-      onError: (failure) => {
-        if (isCurrent()) {
-          setOutcome({ kind: 'invalid', error: failure });
-        }
-      },
-    });
+    compileText(() => setIsPublishModalOpen(true));
   }
 
   function handleConfirmPublish(): void {
@@ -213,7 +200,7 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
       <Button variant="quiet" disabled={!dirty || busy} onClick={handleDiscard}>
         Discard
       </Button>
-      <Button variant="outline" disabled={busy} onClick={compileText}>
+      <Button variant="outline" disabled={busy} onClick={() => compileText()}>
         {validateMutation.isPending ? 'Validating…' : 'Validate'}
       </Button>
       <Button variant="outline" disabled={!dirty || busy} onClick={handleSave}>

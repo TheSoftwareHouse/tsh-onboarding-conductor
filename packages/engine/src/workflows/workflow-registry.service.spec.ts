@@ -302,7 +302,7 @@ describe('WorkflowRegistryService', () => {
         {
           provide: WorkflowFileLoaderService,
           useValue: {
-            load: jest.fn((scopes: readonly WorkflowScope[]) =>
+            load: jest.fn(async (scopes: readonly WorkflowScope[]) =>
               options.files.filter((file) => scopes.includes(file.scope)),
             ),
           },
@@ -1449,7 +1449,7 @@ describe('WorkflowRegistryService', () => {
     } as unknown as ConfigService);
 
     const registry = await createRegistry({
-      files: fileLoader.load(),
+      files: await fileLoader.load(),
       connectorExecutionPort,
       repository: new InMemoryWorkflowsRepository(),
     });
