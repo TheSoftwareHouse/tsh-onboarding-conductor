@@ -173,18 +173,40 @@ describe('checked-in workflows', () => {
     },
   );
 
-  it('claims a source key of its own for every fixture', () => {
-    const sourceKeys = fixtures.flatMap((workflow) =>
-      everyConnector(workflow.normalized)
-        .map(({ connector }) => connector.config.sourceKey)
-        .filter((key): key is string => typeof key === 'string')
-        .map((key) => [key, workflow.normalized.id] as const),
-    );
-    const workflowIdBySourceKey = new Map<string, string>();
+  it('claims every source key for one family, whichever scope declares it', () => {
+    // Revisions of a family share their source keys; a fork that keeps the original's key is
+    // refused at boot with DuplicateWorkflowSourceKeyError, so it has to fail here first.
+    const familiesBySourceKey = new Map<string, Set<string>>();
 
-    for (const [key, id] of sourceKeys) {
-      expect(workflowIdBySourceKey.get(key) ?? id).toBe(id);
-      workflowIdBySourceKey.set(key, id);
+    for (const workflow of everything) {
+      for (const { connector } of everyConnector(workflow.normalized)) {
+        for (const declaration of [connector, ...connector.fallbacks]) {
+          const key = declaration.config.sourceKey;
+
+          if (typeof key === 'string') {
+            familiesBySourceKey.set(
+              key,
+              new Set([...(familiesBySourceKey.get(key) ?? []), workflow.normalized.id]),
+            );
+          }
+        }
+      }
     }
+
+    expect(familiesBySourceKey.size).toBeGreaterThan(1);
+    expect(
+      [...familiesBySourceKey]
+        .filter(([, families]) => families.size > 1)
+        .map(([key, families]) => [key, [...families]]),
+    ).toEqual([]);
   });
+
+  // The docs site keys a fixture's description and `/fixtures/<stem>` URL by file stem and titles
+  // the page by id, so the two must agree.
+  it.each(fixtures.map((workflow) => [workflow.file, workflow] as const))(
+    '%s is named after its id',
+    (file, workflow) => {
+      expect(file).toBe(`${workflow.normalized.id}.workflow.json`);
+    },
+  );
 });

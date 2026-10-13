@@ -1,12 +1,11 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `feat/veriff-kyc-connector` at `e2b12b2` (2026-10-12) with the pull-request
-review fixes on top of it — the callback-only submit guard (§2 "The callback-fields guard", §3) and
-images-only uploads at Veriff (§4) — plus the phase-2 documentation of runtime connector selection
-and the persisted parked connector (§2, §4, §5, §8, §9, §11, §12;
-[0038](decisions/0038-runtime-connector-selection.md)) on top of the KYC connector kernel and the
-`veriff_kyc` provider (§4). Bump this when that work lands. Typed steps as the only authored form (§2.1,
-[0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
+**Status:** describes `main` at `c386315` (2026-10-12), where the KYC connector kernel, the
+`veriff_kyc` provider (§4) and runtime connector selection
+([0038](decisions/0038-runtime-connector-selection.md)) have landed, plus `feat/workfow-cleanup` on
+top of it: each fixture ships once as `custom` steps (§2 `fixtures/`) and the fixtures site gives
+every workflow file one page (§13). Bump this when that work lands. Typed steps as the only authored
+form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -1024,7 +1023,8 @@ any untyped document converts to; a new fixture is written in specialized step t
 lives here: a suite that needs a one-off flow writes it into a temporary `WORKFLOWS_USERS_DIR`
 instead.
 `packages/engine/src/workflows/checked-in-workflows.spec.ts` runs the adapters' load-time config
-checks over every checked-in file.
+checks over every checked-in file, holds every connector `sourceKey` to one family across all three
+scopes, and holds each fixture's file name to its `id`, which the fixtures site keys its URL by.
 
 | File                                 | Connector types                               | Demonstrates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -3783,11 +3783,11 @@ by side, and its request and response samples come from a real run), **API**
 (`docs/api`, generated from `packages/shared/openapi/engine.openapi.json` by
 `docusaurus-plugin-openapi-docs`, grouped by the document's audience tags, plus three hand-written
 overview pages) and **Fixtures** (`docs/fixtures`, written by `scripts/generate-fixtures.mjs`, which
-compiles every workflow file the way the engine does: one page per example in `workflows/fixtures`,
-`/fixtures/<name>`, showing the specialized form and its compiled step map first and then the same
-flow as `custom` steps with the `workflow:compile` commands that produce it and, where the two forms
-compile differently, the steps that differ; one page per built-in revision, each naming the other;
-plus a gallery with connector-type filters). Generated pages are
+compiles every workflow file the way the engine does: one page per file in `workflows/fixtures` and
+`workflows/built-in`, at `/fixtures/<file stem>` and titled by the document's `id`, showing an
+at-a-glance table, the authored steps with what each compiles to when the file uses specialized
+types, the compiled step map and the file itself; a built-in page also links the revision written
+in the other form, revision 1 and its `-v2`; plus a gallery with connector-type filters). Generated pages are
 never committed: `start`, `build` and `typecheck` regenerate them first — clearing the previous
 output before generating, because the OpenAPI plugin never overwrites a file that exists — and
 `.gitignore` excludes them, so the spec and the workflow files remain the only sources. Search is
