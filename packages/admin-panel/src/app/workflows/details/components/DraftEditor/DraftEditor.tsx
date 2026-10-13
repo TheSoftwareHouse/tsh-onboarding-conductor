@@ -8,11 +8,13 @@ import { Button } from '@/components/ui/Button/Button';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
 import { formatDateTime } from '@/lib/format-date-time';
 import { useDeleteDraft } from '../../hooks/useDeleteDraft';
+import { usePublishDraft } from '../../hooks/usePublishDraft';
 import { useSaveDraft } from '../../hooks/useSaveDraft';
 import { useValidateDraft } from '../../hooks/useValidateDraft';
 import { parseWorkflowDocument } from '../../utils/parse-workflow-document';
 import { DeleteDraftAction } from './DeleteDraftAction';
 import { JsonEditor } from './JsonEditor';
+import { PublishDraftDialog } from './PublishDraftDialog';
 import { ValidationResult, type ValidationOutcome } from './ValidationResult';
 
 export interface DraftHeaderSlots {
@@ -55,9 +57,11 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
   const validateMutation = useValidateDraft();
   const saveMutation = useSaveDraft(workflowId, version);
   const deleteMutation = useDeleteDraft(workflowId, version);
+  const publishMutation = usePublishDraft(workflowId, version);
   // `null` means the editor shows the saved document untouched.
   const [edited, setEdited] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<ValidationOutcome | null>(null);
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
 
   if (draft === undefined) {
     const failure = isError ? readFailureMessage(error) : null;
@@ -79,10 +83,15 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
     );
   }
 
-  const saved = JSON.stringify(draft.document, null, JSON_INDENT);
+  const { document: storedDocument } = draft;
+  const saved = JSON.stringify(storedDocument, null, JSON_INDENT);
   const text = edited ?? saved;
   const dirty = edited !== null && edited !== saved;
-  const busy = validateMutation.isPending || saveMutation.isPending || deleteMutation.isPending;
+  const busy =
+    validateMutation.isPending ||
+    saveMutation.isPending ||
+    deleteMutation.isPending ||
+    publishMutation.isPending;
 
   function handleChange(next: string): void {
     setEdited(next);
@@ -124,6 +133,21 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
     });
   }
 
+  // A save never compiles, so a saved draft can still be invalid: compile the stored document first.
+  function handlePublish(): void {
+    validateMutation.mutate(storedDocument, {
+      onSuccess: ({ stepCount }) => {
+        setOutcome({ kind: 'valid', stepCount });
+        setIsPublishModalOpen(true);
+      },
+      onError: (failure) => setOutcome({ kind: 'invalid', error: failure }),
+    });
+  }
+
+  function handleConfirmPublish(): void {
+    publishMutation.mutate(undefined, { onError: () => setIsPublishModalOpen(false) });
+  }
+
   const actions = (
     <>
       <Button variant="quiet" disabled={!dirty || busy} onClick={handleDiscard}>
@@ -135,6 +159,9 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
       <Button variant="outline" disabled={!dirty || busy} onClick={handleSave}>
         {saveMutation.isPending ? 'Saving…' : 'Save draft'}
       </Button>
+      <Button variant="primary" disabled={busy || dirty} onClick={handlePublish}>
+        Publish
+      </Button>
       <DeleteDraftAction disabled={busy} onConfirm={() => deleteMutation.mutate()} />
     </>
   );
@@ -145,7 +172,7 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
         name: draft.name,
         actions,
         note: dirty ? (
-          <span className="text-fg-1">Unsaved changes</span>
+          <span className="text-fg-1">Unsaved changes · save to publish</span>
         ) : (
           `Editing · draft saved ${formatDateTime(draft.updatedAt)}`
         ),
@@ -154,6 +181,15 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
         <JsonEditor value={text} onChange={handleChange} label="Workflow document (JSON)" />
         <ValidationResult outcome={outcome} />
       </div>
+      <PublishDraftDialog
+        open={isPublishModalOpen}
+        onOpenChange={setIsPublishModalOpen}
+        workflowId={workflowId}
+        name={draft.name}
+        version={version}
+        isPending={publishMutation.isPending}
+        onConfirm={handleConfirmPublish}
+      />
     </>
   );
 }

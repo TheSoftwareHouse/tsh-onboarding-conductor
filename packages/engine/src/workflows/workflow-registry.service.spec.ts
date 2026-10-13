@@ -1,3 +1,4 @@
+import type { EntityManager } from 'typeorm';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Logger, NotFoundException } from '@nestjs/common';
@@ -949,6 +950,16 @@ describe('WorkflowRegistryService', () => {
   });
 
   describe('sourceKey uniqueness', () => {
+    it('reads the stored workflows through a manager passed to validateDefinition', async () => {
+      const repository = new InMemoryWorkflowsRepository();
+      const registry = await createRegistry({ files: [], repository });
+      const manager = {} as EntityManager;
+
+      await registry.validateDefinition(createWorkflowDefinition({ id: 'fresh' }), manager);
+
+      expect(repository.findAll).toHaveBeenLastCalledWith(manager, expect.anything());
+    });
+
     it('fails startup when two workflow documents declare the same sourceKey', async () => {
       const registryPromise = createRegistry({
         files: [

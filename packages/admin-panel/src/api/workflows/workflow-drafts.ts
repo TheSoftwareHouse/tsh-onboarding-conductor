@@ -13,6 +13,7 @@ export const WORKFLOW_DRAFT_ERROR_CODES = [
   'WORKFLOW_SCOPE_CONFLICT',
   'WORKFLOW_DRAFT_IN_USE',
   'WORKFLOW_VERSION_NOT_DRAFT',
+  'WORKFLOW_VERSION_NOT_LATEST',
   'WORKFLOW_INVALID',
   'WORKFLOW_CONNECTOR_DECLARATION_INVALID',
   'WORKFLOW_SOURCE_KEY_CONFLICT',
@@ -57,6 +58,10 @@ const workflowDraftSchema = z.object({
   updatedAt: z.string(),
 });
 
+const workflowPublicationSchema = workflowDraftSchema.extend({
+  status: z.literal(WORKFLOW_VERSION_STATUS.published),
+});
+
 const workflowDraftDocumentSchema = workflowDraftSchema.extend({
   document: z.record(z.string(), z.unknown()),
 });
@@ -67,6 +72,9 @@ const workflowCompilationSchema = z.object({
 });
 
 export type WorkflowDraft = z.infer<typeof workflowDraftSchema>;
+
+/** A draft after publishing: the same summary, now `published`. */
+export type WorkflowPublication = z.infer<typeof workflowPublicationSchema>;
 
 /** A draft with its authored document, verbatim; it may not compile. */
 export type WorkflowDraftDocument = z.infer<typeof workflowDraftDocumentSchema>;
@@ -133,6 +141,17 @@ export async function updateWorkflowDraft(
 
 export async function deleteWorkflowDraft(workflowId: string, version: number): Promise<void> {
   await requestPayload(() => httpClient.delete<unknown>(draftPath(workflowId, version)));
+}
+
+/** Publishes a stored draft; the engine refuses one at or below a published version with 409 NOT_LATEST. */
+export async function publishWorkflowDraft(
+  workflowId: string,
+  version: number,
+): Promise<WorkflowPublication> {
+  const payload = await requestPayload(() =>
+    httpClient.post<unknown>(`${draftPath(workflowId, version)}/publish`),
+  );
+  return parseOrThrow(workflowPublicationSchema, payload);
 }
 
 /** Dry-runs the engine's compiler over a document without storing anything. */

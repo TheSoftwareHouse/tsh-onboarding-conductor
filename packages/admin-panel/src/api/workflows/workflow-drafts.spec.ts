@@ -5,6 +5,7 @@ import {
   createWorkflowDraft,
   deleteWorkflowDraft,
   fetchWorkflowDocument,
+  publishWorkflowDraft,
   updateWorkflowDraft,
   readDraftError,
   type WorkflowDraftErrorCode,
@@ -90,6 +91,22 @@ describe('workflow draft requests', () => {
     expect(mockedDelete).toHaveBeenCalledWith('/v1/admin/workflows/kyc/versions/2');
   });
 
+  it('posts to the encoded publish path with no body and returns the publication', async () => {
+    const published = { ...DRAFT, status: 'published' };
+    mockedPost.mockResolvedValueOnce({ data: published });
+
+    await expect(publishWorkflowDraft('kyc basic', 2)).resolves.toEqual(published);
+    expect(mockedPost).toHaveBeenCalledWith('/v1/admin/workflows/kyc%20basic/versions/2/publish');
+  });
+
+  it('rejects a publication whose status is still draft as malformed', async () => {
+    mockedPost.mockResolvedValueOnce({ data: DRAFT });
+
+    const error = await catchError(publishWorkflowDraft('kyc', 2));
+
+    expect(error.message).toBe('Response contains a malformed workflow draft.');
+  });
+
   it('compiles a document and reports its authored step count', async () => {
     mockedPost.mockResolvedValueOnce({
       data: { definition: {}, steps: [{}, {}], workflow: {} },
@@ -107,6 +124,7 @@ describe('draft ApiError', () => {
     'WORKFLOW_SCOPE_CONFLICT',
     'WORKFLOW_DRAFT_IN_USE',
     'WORKFLOW_VERSION_NOT_DRAFT',
+    'WORKFLOW_VERSION_NOT_LATEST',
   ];
 
   it.each(CONFLICT_CODES)('parses the 409 code %s', async (code) => {
@@ -120,6 +138,22 @@ describe('draft ApiError', () => {
     expect(error.message).toBe(code);
     expect(error.status).toBe(409);
     expect(error.body).toMatchObject({ status: 'published' });
+  });
+
+  it('reads NOT_LATEST from a publish refusal', async () => {
+    mockedPost.mockRejectedValueOnce(
+      axiosFailure(409, {
+        code: 'WORKFLOW_VERSION_NOT_LATEST',
+        message: 'WORKFLOW_VERSION_NOT_LATEST',
+        workflowId: 'kyc',
+        version: 2,
+        latestPublishedVersion: 3,
+      }),
+    );
+
+    const error = await catchError(publishWorkflowDraft('kyc', 2));
+
+    expect(readDraftError(error)?.code).toBe('WORKFLOW_VERSION_NOT_LATEST');
   });
 
   it('keeps the reason and path of a 400 WORKFLOW_INVALID', async () => {

@@ -1,4 +1,5 @@
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
+import type { EntityManager } from 'typeorm';
 import { ConnectorSelectionRules } from './domain/connector-selection';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
 import { WorkflowConnectorDeclarationInvalidError } from './errors/workflow-connector-declaration-invalid.error';
@@ -74,8 +75,17 @@ describe('WorkflowCompilationService', () => {
       expect.objectContaining({ name: 'email', type: 'text', required: true, persist: true }),
     ]);
     // The registry is handed the authored document: its checks are the ones startup would run.
-    expect(registry.validateDefinition).toHaveBeenCalledWith(authored);
+    expect(registry.validateDefinition).toHaveBeenCalledWith(authored, undefined);
     expect(registry.createConnectorSelectionRules).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands a passed manager on to the registry', async () => {
+    const { service, registry } = createService();
+    const manager = {} as EntityManager;
+
+    await service.compile(authored, manager);
+
+    expect(registry.validateDefinition).toHaveBeenCalledWith(authored, manager);
   });
 
   it('refuses a document still written as untyped steps, naming the step that lacks a type', async () => {

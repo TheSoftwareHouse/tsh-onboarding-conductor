@@ -507,7 +507,7 @@ export class AuditService {
   }
 
   /**
-   * Records one workflow draft write: created, updated or deleted.
+   * Records one workflow draft write: created, updated, deleted or published.
    *
    * Writes on the caller's manager, so the row stands or falls with the draft write it describes.
    * The actor is always the operator behind the request.

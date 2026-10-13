@@ -371,10 +371,14 @@ export class WorkflowRegistryService implements OnModuleInit {
    */
   async validateDefinition(
     definition: Readonly<Record<string, unknown>>,
+    manager?: EntityManager,
   ): Promise<NormalizedWorkflowDefinition> {
     const normalized = this.normalizeDefinition(definition);
     const storedWorkflows = (
-      await this.workflowsRepository.findAll(this.dataSource.manager, this.getActiveScopes())
+      await this.workflowsRepository.findAll(
+        manager ?? this.dataSource.manager,
+        this.getActiveScopes(),
+      )
     ).filter((storedWorkflow) => storedWorkflow.status !== DRAFT_WORKFLOW_STATUS);
     const sourceKeyDeclarations = storedWorkflows.flatMap((storedWorkflow) =>
       this.collectSourceKeys(

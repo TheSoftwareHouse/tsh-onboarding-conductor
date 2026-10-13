@@ -139,6 +139,7 @@ describe('OpenAPI document', () => {
         'POST /v1/admin/encryption/reencryption',
         'POST /v1/admin/workflows',
         'POST /v1/admin/workflows/compile',
+        'POST /v1/admin/workflows/{workflowId}/versions/{version}/publish',
         'POST /v1/onboardings',
         'POST /v1/onboardings/{id}/agreements',
         'POST /v1/onboardings/{id}/agreements/{agreementId}/accept',

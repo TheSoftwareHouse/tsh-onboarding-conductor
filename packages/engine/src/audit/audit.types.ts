@@ -179,11 +179,12 @@ export const AGREEMENT_AUDIT_ACTIONS = [
 
 export type AgreementAuditAction = (typeof AGREEMENT_AUDIT_ACTIONS)[number];
 
-/** An operator creating, replacing or deleting a workflow draft through the admin API (ADR 0034). */
+/** An operator creating, replacing, deleting or publishing a workflow draft through the admin API (ADR 0034). */
 export const WORKFLOW_DRAFT_AUDIT_ACTIONS = [
   'workflow_draft.created',
   'workflow_draft.updated',
   'workflow_draft.deleted',
+  'workflow_draft.published',
 ] as const;
 
 export type WorkflowDraftAuditAction = (typeof WORKFLOW_DRAFT_AUDIT_ACTIONS)[number];
@@ -337,6 +338,7 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   'workflow_draft.created': 'success',
   'workflow_draft.updated': 'success',
   'workflow_draft.deleted': 'success',
+  'workflow_draft.published': 'success',
   // An operator's reconcile: the verdict it applied, or the ask that found nothing to apply.
   'onboarding.pending_connector_reconciled': 'success',
   'onboarding.pending_connector_reconcile_noop': 'observed',
