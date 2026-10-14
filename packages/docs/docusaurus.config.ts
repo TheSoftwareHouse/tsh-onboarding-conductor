@@ -142,9 +142,11 @@ const config: Config = {
           ...Object.fromEntries(
             readRegisteredApiVersions().map((version) => [
               version,
-              // A frozen contract is still the contract of that engine version, not an
-              // unmaintained page, and the info page already prints the exact version.
-              { label: version, banner: 'none', badge: false },
+              // Docusaurus' banner marks every page of the version, generated endpoint pages
+              // included; its stock "no longer maintained" wording is replaced in i18n/en/code.json,
+              // because a frozen contract is still the contract of that engine version. The info
+              // page already prints the exact version, so no badge.
+              { label: version, banner: 'unmaintained', badge: false },
             ]),
           ),
         },
@@ -186,7 +188,10 @@ const config: Config = {
       items: [
         { type: 'html', position: 'left', value: '<span class="tsh-navbar-eyebrow">Docs</span>' },
         { type: 'docSidebar', sidebarId: 'guides', position: 'left', label: 'Guides' },
-        { to: '/api', position: 'left', label: 'API', activeBaseRegex: '^/api' },
+        // A doc item rather than a link to /api: it opens the API version the reader last chose
+        // in the dropdown, where a plain link always lands on the current one and the dropdown's
+        // label flips between sections.
+        { type: 'doc', docId: 'index', docsPluginId: 'api', position: 'left', label: 'API' },
         { to: '/fixtures', position: 'left', label: 'Fixtures', activeBaseRegex: '^/fixtures' },
         // The API reference's versions; a plain link while only the current document exists. Not
         // highlighted as active, so it reads as a selector rather than a fourth section.

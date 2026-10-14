@@ -10,8 +10,9 @@
 //   (`api//…` today, `api/version-X/…` for an archive), so it is rewritten to the real route.
 //
 // For an archived version only:
-// - The three hand-written overview pages are copied in from docs/api, the download link pointed at
-//   that version's copy of the document and a note added saying which version the pages describe.
+// - The three hand-written overview pages are copied in from docs/api with the download link pointed
+//   at that version's copy of the document. Docusaurus' version banner, worded in i18n/en/code.json,
+//   says which version a page describes, so the copies carry no note of their own.
 // - The plugin's `sidebar.ts` is turned into the versioned sidebar Docusaurus expects as JSON, through
 //   the same builder the current version's sidebars/api.ts uses. Node strips the types itself.
 //
@@ -64,28 +65,14 @@ function finishGeneratedPages(dir, routeBase) {
   return infoDocId;
 }
 
-function copyOverviewPages({ version, docsDir, downloadUrl }) {
-  const note = [
-    ':::info Older version',
-    `These pages describe version ${version} of the engine's API. [The current version](/api/) is where new routes and fields appear.`,
-    ':::',
-    '',
-  ].join('\n');
-
+function copyOverviewPages({ docsDir, downloadUrl }) {
   for (const name of OVERVIEW_PAGES) {
     const source = readFileSync(join(API_DOCS_DIR, name), 'utf8');
-    const frontMatterEnd = source.indexOf('\n---\n', source.indexOf('---\n') + 1);
 
-    if (frontMatterEnd === -1) {
-      throw new Error(`${name} has no front matter block`);
-    }
-
-    const head = source.slice(0, frontMatterEnd + '\n---\n'.length);
-    const body = source
-      .slice(head.length)
-      .replaceAll(CURRENT_DOWNLOAD_LINK, `pathname://${downloadUrl}`);
-
-    writeFileSync(join(docsDir, name), `${head}\n${note}${body}`);
+    writeFileSync(
+      join(docsDir, name),
+      source.replaceAll(CURRENT_DOWNLOAD_LINK, `pathname://${downloadUrl}`),
+    );
   }
 }
 

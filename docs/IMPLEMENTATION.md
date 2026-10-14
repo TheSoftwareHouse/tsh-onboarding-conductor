@@ -3805,8 +3805,12 @@ overview pages; versioned with Docusaurus' docs versioning — the current docum
 version at `/api` and each minor archived under `packages/shared/openapi/versions` (§11) is a
 version at `/api/<major.minor>`, generated at build from its frozen document by an OpenAPI plugin
 entry of its own, its sidebar written as JSON by `scripts/finish-api-pages.mjs` through the same
-builder as the current one, the overview pages copied in with that version's download link, and a
-`docsVersionDropdown` in the navbar switching between them; `scripts/prepare-api-versions.mjs`
+builder as the current one, the overview pages copied in with that version's download link, every
+page of an archived version carrying Docusaurus' version banner in the project's wording
+(`i18n/en/code.json`: the version described, Guides describe the current engine, link to the same
+page in the current version), a `docsVersionDropdown` in the navbar switching between them, and the
+navbar's API entry a `doc` item of the `api` instance so it opens the version last chosen rather
+than always the current one; `scripts/prepare-api-versions.mjs`
 registers the versions before any `docusaurus` command, because Docusaurus refuses to load with a
 listed version whose folder is missing, and the site is plainly unversioned while no minor has been
 archived) and **Fixtures** (`docs/fixtures`, written by `scripts/generate-fixtures.mjs`, which

@@ -1,0 +1,14 @@
+{
+  "theme.docs.versions.unmaintainedVersionLabel": {
+    "message": "These pages describe the engine's API at version {versionLabel}. The Guides describe the current engine.",
+    "description": "The banner on every page of an archived API version; Docusaurus' own wording calls the version unmaintained, which a frozen contract is not"
+  },
+  "theme.docs.versions.latestVersionSuggestionLabel": {
+    "message": "New routes and fields appear in the {latestVersionLink}.",
+    "description": "The banner's second sentence, linking to the current API version"
+  },
+  "theme.docs.versions.latestVersionLinkLabel": {
+    "message": "current version",
+    "description": "The text of the banner's link to the current API version"
+  }
+}

@@ -12,7 +12,9 @@ instances, each with its own sidebar under `sidebars/`:
   `/api/<major.minor>`, generated from its frozen document by an OpenAPI plugin entry of its own
   (`docs/decisions/0040-versioned-openapi-documents.md`). `openapi-versions.ts` is the one place
   that knows where the documents and the generated versioning files are; the config and the
-  scripts import it.
+  scripts import it. Every page of an archived version shows Docusaurus' version banner, worded
+  in `i18n/en/code.json` (the only translation file; the site has one locale), and the navbar's
+  API entry is a `doc` item so it follows the version chosen in the dropdown.
 - **Fixtures** (`docs/fixtures`, served at `/fixtures`) — generated from `workflows/fixtures` and
   `workflows/built-in` by `scripts/generate-fixtures.mjs`, plus the hand-written gallery
   `index.mdx`. An example's two files (`<name>-typed`, specialized steps; `<name>`, `custom` steps)
@@ -36,7 +38,7 @@ versions (the versions file and one folder per version), `clean-api-docs all` cl
 pages, `scripts/copy-openapi.mjs` publishes every document under `static/openapi/`,
 `gen-api-docs all` writes the pages of every version, and `scripts/finish-api-pages.mjs` labels
 the info pages, fixes `info_path`, copies the overview pages into each archived version with its
-download link and a version note, and writes each archived version's sidebar JSON through
+download link, and writes each archived version's sidebar JSON through
 `sidebars/api-items.ts`, the builder `sidebars/api.ts` uses for the current version.
 
 `sidebars/api.ts` imports the generated `docs/api/sidebar.ts`; `typecheck` therefore depends on

@@ -25,8 +25,12 @@ entry of its own, with its sidebar written as the JSON Docusaurus expects and th
 overview pages copied in with that version's download link. The versions file, the versioned pages
 and sidebars and the published copies of the documents are generated on every build and never
 committed, as decision 0016 already says of the current version's pages. A `docsVersionDropdown`
-in the navbar switches between versions; the local search plugin indexes each version under its own
-route.
+in the navbar switches between versions, and the navbar's API entry is a `doc` item of the `api`
+instance rather than a link to `/api`, so it opens the version the reader last chose instead of
+always the current one. Every page of an archived version carries Docusaurus' version banner with
+the project's own wording (`packages/docs/i18n/en/code.json`): which version the pages describe, that
+the Guides describe the current engine, and a link to the same page in the current version. The local
+search plugin indexes each version under its own route.
 
 Out of scope: a release command around `changeset version`. Bumping `packages/engine/package.json`
 and running `pnpm openapi:generate` is the whole procedure, and the drift test already forces the
@@ -58,14 +62,15 @@ Three constraints decided the shape:
 
 ## Alternatives
 
-| Option                                             | Why not                                                                                                                                                                                     |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The OpenAPI plugin's own `versions` option         | Its only selector is a small dropdown rendered on the info page; no navbar item, no per-version search index, no link from a guide to a version                                             |
-| Committing Docusaurus' versioned MDX snapshots     | Hundreds of generated files per version in the repository, the second copy decision 0016 exists to avoid                                                                                    |
-| A separate `pnpm openapi:archive` command          | A step that can be forgotten; the generator already runs at the bump because the drift test fails on `info.version` alone                                                                   |
-| Archiving every patch version                      | One folder per release for documents that mostly differ in `info.version`; the user asked for minors and majors only                                                                        |
-| Reading the archive from git history at build time | Ties the build to the repository's history and tags, of which there are none, and makes the archive invisible in the tree                                                                   |
-| An "unmaintained" banner on archived versions      | Docusaurus' default banner wording describes abandoned documentation; a frozen contract is still the contract of that engine version. A note on the overview page names the version instead |
+| Option                                             | Why not                                                                                                                                                                                                                                                                                            |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The OpenAPI plugin's own `versions` option         | Its only selector is a small dropdown rendered on the info page; no navbar item, no per-version search index, no link from a guide to a version                                                                                                                                                    |
+| Committing Docusaurus' versioned MDX snapshots     | Hundreds of generated files per version in the repository, the second copy decision 0016 exists to avoid                                                                                                                                                                                           |
+| A separate `pnpm openapi:archive` command          | A step that can be forgotten; the generator already runs at the bump because the drift test fails on `info.version` alone                                                                                                                                                                          |
+| Archiving every patch version                      | One folder per release for documents that mostly differ in `info.version`; the user asked for minors and majors only                                                                                                                                                                               |
+| Reading the archive from git history at build time | Ties the build to the repository's history and tags, of which there are none, and makes the archive invisible in the tree                                                                                                                                                                          |
+| A version note on the overview pages only          | Rejected on review: the generated endpoint pages, which is where a reader lands from search, said nothing about their version. Docusaurus' banner reaches every page; its stock "no longer maintained" wording is replaced, because a frozen contract is still the contract of that engine version |
+| Versioning the Guides alongside the API            | Deferred, see Consequences: hand-written pages would be snapshotted into committed `versioned_docs/` at every minor bump, and one dropdown would have to drive two docs instances                                                                                                                  |
 
 ## Consequences
 
@@ -82,6 +87,17 @@ Three constraints decided the shape:
   generated pages.
 - With no archive the site is exactly as before, apart from the navbar entry, which Docusaurus
   renders as a plain link carrying the current version's label until a second version exists.
+- The Guides stay unversioned and describe the current engine, which the banner on an archived API
+  version says. Versioning them is a follow-up, not a reversal of this record: snapshot `docs/guides`
+  with `docusaurus docs:version <major.minor>` in the same step that archives the document, commit the
+  snapshots (they are hand-written sources, not generated output), and replace the stock dropdown with
+  a navbar item that saves the preferred version of both docs instances, so that switching sections
+  keeps the version. Fixtures would stay unversioned, being rendered from the workflow files.
+- An archived version's route ends in a dotted segment (`/api/0.1/`). `docusaurus serve` reads that
+  as a file name with an extension and answers 404 for the version's overview page on a direct
+  request or reload, although the page is built and every other route of the version works; the
+  deployed site is served by Vercel, which has not shown the problem. A prefix such as `v0.1` would
+  not help, since the segment would still be dotted.
 
 Reversing this is cheap: delete the `versions/` folder and the version-aware steps, and the site is
 back to one version. The archived documents remain readable JSON wherever they are kept.
