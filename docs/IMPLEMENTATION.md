@@ -5,7 +5,8 @@ review fixes on top of it — the callback-only submit guard (§2 "The callback-
 images-only uploads at Veriff (§4) — plus the phase-2 documentation of runtime connector selection
 and the persisted parked connector (§2, §4, §5, §8, §9, §11, §12;
 [0038](decisions/0038-runtime-connector-selection.md)) on top of the KYC connector kernel and the
-`veriff_kyc` provider (§4). Bump this when that work lands. Typed steps as the only authored form (§2.1,
+`veriff_kyc` provider (§4), and the Lean connectors `lean_iban_verification` and `lean_bank_data` with the
+`lean-ksa` fixtures (§4, [0040](decisions/0040-open-banking-widget-handoff-in-host-service.md)). Bump this when that work lands. Typed steps as the only authored form (§2.1,
 [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
@@ -1023,7 +1024,7 @@ Each example exists to exercise one mechanism end-to-end, and ships **twice**: `
 document converts to; `<name>-typed.workflow.json` (id `<name>-typed`) is the same example through
 the specialized step types and uses no `custom` step. The e2e suites address the plain ids, whose
 compiled steps are unchanged. `packages/engine/src/workflows/checked-in-workflows.spec.ts` guards the
-pairing, runs the adapters' load-time config checks over every checked-in file, and pins the seven
+pairing, runs the adapters' load-time config checks over every checked-in file, and pins the eight
 pairs that compile to identical steps; the "Typed twin" column says how the other five differ.
 
 | File | Connector types | Demonstrates | Typed twin |
@@ -1037,6 +1038,7 @@ pairs that compile to identical steps; the "Typed twin" column says how the othe
 | `http-request` | `custom` | The generic HTTP connector with placeholders, query, and error statuses | Identical: `http-call` including a `form`, `fieldMapping` naming the two payload keys that differ from their fields |
 | `sumsub-kyc` | `kyc` | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter | A two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `POL`, and the field validations are the steps' and the step declares the optional `kycAttemptCount` callback field the hand-written twin predates |
 | `veriff-kyc` | `kyc` | The same shape against `veriff_kyc`: a provider that does not count attempts, so the custom form declares `kycAttemptCount` and the kernel keeps the running total; uploads are images only, since Veriff takes a PDF only once enabled on the account; the document country is `PL` (alpha-2), and no `levelName` or `questionnaireDefinitionId` | The `sumsub-kyc-typed` step graph with the `veriff_kyc` binding: a two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `PL`, and the field validations are the steps' |
+| `lean-ksa` | `bank_verification`, `credit` | A synchronous `lean_iban_verification` with `canReject` ahead of an `async: true` `lean_bank_data` whose `config.minMonthlySalary` is the workflow's salary threshold; every IBAN refusal leaves on the plain `rejected` arm, and the decision routes on `salaryThresholdMet`, `salaryConsistent` and `bankConnectOutcome` | Identical: a `form`, two `connector-call` steps (the first with a `rejected` edge, the second declaring the callback fields), a `decision` with `approve` and `review` branches, a `manual-review` and two `terminal` steps |
 | `manual-review` | none | All three manual triggers and a recursive `success` transition | Identical: `manual-review` including a `form` |
 | `connector-fallback` | `email_delivery` | An unconfigured `sendgrid_email` primary retries three times 200 ms apart, falls through a `mock_email_delivery` link told to fail, and is delivered by `smtp` on `send_notification`; `optional_notice` swallows the same failure via `errorHandler: continue_on_error` with no fallback declared | Identical: the whole chain, retry and handler on the `notify` binding, the SMTP entry with its own `fieldMapping` and `config` |
 | `scoring` | `phone_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_verify` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting | Twelve compiled steps through specialized step types: step-level `scoring` on `identity-profile`, on `otp-verify` (landing on `verify_code`) and on `kyc-identity-verification`; the risk band routes through conditional edges on `success` and `verified`; `manual-review`'s `invalid` edge is score-gated with a fallback arm; `submit_kyc` also declares `kycAttemptCount` |
@@ -1415,13 +1417,15 @@ since the adapter registry's factory already injects every adapter.
 
 Declared schemas:
 
-| Id               | Keys                                                                                                                  |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `sendgrid_email` | `apiKey` (secret, required), `from` (required, must match an email-address `pattern`)                                 |
-| `twilio_verify`  | `accountSid` (required), `authToken` (secret, required), `verifyServiceSid` (required, must match `^VA[A-Za-z0-9]+$`) |
-| `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       |
-| `sumsub_kyc`     | `appToken` (required), `secretKey` (secret, required), `callbackSigningSecret` (secret, required)                     |
-| `veriff_kyc`     | `apiKey` (required), `sharedSecretKey` (secret, required)                                                             |
+| Id                       | Keys                                                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `sendgrid_email`         | `apiKey` (secret, required), `from` (required, must match an email-address `pattern`)                                 |
+| `twilio_verify`          | `accountSid` (required), `authToken` (secret, required), `verifyServiceSid` (required, must match `^VA[A-Za-z0-9]+$`) |
+| `smtp`                   | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       |
+| `sumsub_kyc`             | `appToken` (required), `secretKey` (secret, required), `callbackSigningSecret` (secret, required)                     |
+| `veriff_kyc`             | `apiKey` (required), `sharedSecretKey` (secret, required)                                                             |
+| `lean_iban_verification` | `clientId` (required), `clientSecret` (secret, required)                                                              |
+| `lean_bank_data`         | `clientId` (required), `clientSecret` (secret, required), `callbackSigningSecret` (secret, required)                  |
 
 Stored values are one flat `Record<string, string>` per connector, held as plaintext JSON in the
 `connectors` table (`id` primary key, `type`, `settings jsonb`, `updated_at`, `updated_by`) — see
@@ -1514,6 +1518,8 @@ adapters directory.
 | `smtp`                                               | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`.                                                                         |
 | `sumsub_kyc`                                         | Real        | KYC via Sumsub; `async: true`-only (park on `execute`, resume on the provider's callback). See "The KYC connector" below.                                                                                       |
 | `veriff_kyc`                                         | Real        | KYC via Veriff, API-only; the same kernel and the same `async: true`-only contract as `sumsub_kyc`. See "The KYC connector" below.                                                                              |
+| `lean_iban_verification`                             | Real        | Saudi IBAN ownership against a national ID through Lean; synchronous, every refusal `CONNECTOR_REJECTED` with a `leanReason`. See "The Lean connectors" below.                                                  |
+| `lean_bank_data`                                     | Real        | Open-banking income and employment through Lean's widget; async, parks on the Lean customer id and resumes on Lean's signed webhooks. See "The Lean connectors" below.                                          |
 | `mock_kyc_1`, `mock_kyc_2`                           | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                                                                                          |
 | `mock_phone_verification`, `mock_email_verification` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.                                                                           |
 | `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                                                                                                    |
@@ -1885,6 +1891,196 @@ and store the integration's `apiKey` and shared secret as above; sample images o
 since `VeriffMediaFitter` brings them within Veriff's 1920 px longer-side limit before upload.
 `scripts/run-eu-b2c-kyc-manual-test-veriff.sh` drives the Veriff walkthrough end to end against
 `eu-b2c-individual-kyc-eea-veriff-v2-local` and stops at the one step only the Portal can perform.
+
+### The Lean connectors
+
+`lean_iban_verification` and `lean_bank_data` are two adapters over one `LeanClient`, in
+`connectors/adapters/built-in/lean/`, for Lean Technologies' Saudi Arabian API. The first checks that an
+IBAN belongs to the applicant's national ID, synchronously; the second has the applicant link a bank in
+Lean's widget and reads their income back from Lean. Lean is not a KYC provider and does not use the
+kernel above ([0037](./decisions/0037-kyc-connector-kernel-and-providers.md)).
+[0040](./decisions/0040-open-banking-widget-handoff-in-host-service.md) records the design choice that
+shapes it: the widget handoff belongs to the host service, never to the engine.
+
+**The client.** `LeanClient` is plain `fetch` under `AbortSignal.timeout(LEAN_TIMEOUT_MS)`, no SDK. It
+authenticates with an OAuth `client_credentials` token of scope `api`, cached per credential pair and
+refreshed 60 seconds before `expires_in`; one `401` forces a refresh and a single retry. Credentials are
+resolved on every call ([0001](./decisions/0001-runtime-connector-credentials.md)), so a changed pair
+misses the cache. A timeout, a refused connection, a `5xx`, a token request Lean refuses or a body it
+cannot read is `500 LEAN_UNAVAILABLE` (§11). A `4xx` is handed back to the adapter as a typed result,
+because each adapter maps some of them to outcomes of its own. On the insights calls, `202` comes back as
+a typed "still computing" and `501` as a typed "not supported synchronously". The client logs paths,
+statuses and ids, never a token, a secret, an IBAN or a national ID.
+
+**Settings.** `clientId` is the Lean portal's "app token". The two adapters share one Lean application, so
+the same pair is stored under both ids.
+
+| Id                       | Keys                                                                                                 |
+| ------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `lean_iban_verification` | `clientId` (required), `clientSecret` (secret, required)                                             |
+| `lean_bank_data`         | `clientId` (required), `clientSecret` (secret, required), `callbackSigningSecret` (secret, required) |
+
+`LEAN_AUTH_BASE_URL`, `LEAN_API_BASE_URL` and `LEAN_TIMEOUT_MS` are deployment settings (§10). Lean's
+sandbox and production use different hosts, and the defaults are the sandbox's.
+
+#### `lean_iban_verification`
+
+Type `bank_verification`, synchronous. `validateDeclaration` requires `iban` and `nationalId` in the
+`fieldMapping`. It calls `POST /verifications/v1/accounts` (country `SA`, holder type `PERSONAL`, the IBAN,
+and the national ID as the identification) and maps the answer:
+
+| Lean answers                                                                       | Result                                                                                                      |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `account_ownership_verified: true`, `status: OK`, `account_status: ACTIVE`         | `accepted`                                                                                                  |
+| `account_ownership_verified: false`, whatever `account_status` says                | `rejected('CONNECTOR_REJECTED')`, `leanReason: iban_ownership_not_verified`                                 |
+| Any other `2xx` answer: `status` not `OK`, no verdict, or the account not `ACTIVE` | `rejected('CONNECTOR_REJECTED')`, `leanReason: iban_not_verifiable`                                         |
+| `400 INVALID_PARAMETERS`                                                           | retryable `invalidData` on `nationalId` when Lean's message names it, else on `iban` (the workflow's field) |
+| Any other `4xx`, a `5xx`, a timeout, a network failure                             | throws `LeanUnavailableException`; the declaration's error handler and `retry` apply                        |
+
+Every refusal is `CONNECTOR_REJECTED`, because `CONNECTOR_REJECTION_REASONS` is a closed set shared by
+every connector (§2). Which Lean outcome it was travels as `leanReason` in the result's metadata and in
+the engine's `LEAN_IBAN_VERIFICATION_REJECTED … leanReason=…` log line; the `connector.result_rejected`
+audit row carries only `reason: CONNECTOR_REJECTED` (§8), so `leanReason` is logged, not audited, and a
+workflow cannot route on it. So the step's plain `rejected` arm, which
+must end on a `rejected` terminal (§2), is the only route for both reasons, and an applicant whose IBAN
+cannot be verified is refused rather than sent to review. A synchronous result cannot write onboarding
+state, so nothing Lean returns here is stored.
+
+#### `lean_bank_data`
+
+Type `credit`, `supportsAsyncCallback`: the step parks, and Lean's signed webhooks resume it.
+
+**The handoff.** The applicant links a bank in Lean's LinkSDK widget, which needs a token minted with the
+Lean client secret, so the engine does not run it. The host service creates a Lean customer whose
+`app_user_id` is the onboarding id, mints a customer-scoped token, runs the widget and submits the Lean
+customer id as `leanCustomerId`. Today that service is a dev-only harness, `scripts/lean-link-harness/`,
+driven by `scripts/run-ksa-lean-manual-test.sh` against the Lean sandbox; a BFF takes the role later. The
+engine exposes no widget, token or URL on `/state` or on the park. The harness refuses a request whose
+`Host` is not a loopback name it listens on and any POST that is not JSON, and the script stops at
+`manual_review` unless `AUTO_APPROVE_REVIEW=1`.
+
+What the sandbox run on 2026-10-13 established about the widget: the KSA mock banks (`LEA1_SAMAOB_SAU`,
+`LEA2_SAMAOB_SAU`) authenticate by redirect, so `connect` must carry `account_type: "PERSONAL"`,
+`success_redirect_url` and `fail_redirect_url`. Without the redirect URLs the widget lists no banks ("No
+available banks"; a forced `bank_identifier` is "not recognised"). With a plain-http loopback return address
+it fails at the bank ("We can't connect your … account"). An HTTPS return address works, so the page is
+served through the tunnel: `scripts/lean-link-harness/start-tunnel.sh` runs one ngrok agent with a
+public endpoint that sends `/v1/webhooks/*` and `/v1/health/*` to the engine and forwards every other
+path to the harness's internal endpoint (`https://lean-harness.internal`). The bank thus returns the
+customer to the harness page they started from, and the admin panel and `/v1/admin/*` are not reachable
+through the tunnel. The harness accepts that one public host (`LEAN_HARNESS_PUBLIC_HOST`); the script
+keeps the harness up after the verdict (`HARNESS_LINGER`, or until Enter). One connect produced `entity.created`, about thirty
+`entity.data.refresh.updated` `PENDING` events (each re-parks, and each is a recorded state transition) and
+a `FINISHED` event within twenty seconds.
+
+**`execute`** reads `leanCustomerId`, fetches the customer from Lean and accepts only one whose
+`app_user_id` is this onboarding's id, answering `accepted({ providerReference: <customer id> })`; the
+executor turns that into a park because the declaration is `async` (above). A missing id, an unknown
+customer or another onboarding's customer is retryable `invalidData` on `leanCustomerId`
+(`400 INVALID_STEP_DATA`), so a client cannot bind someone else's bank data and the onboarding stays on
+`bank_connect`. `leanCustomerId` is optional at the step level (`required: false`) because a callback
+replays through the step without it and the step's own `required` check reads only the submitted data;
+the adapter enforces its presence. For the same reason the declaration maps it through
+`optionalFieldMapping`: a field named in `fieldMapping` but absent from the payload fails the submit
+with `ConnectorPayloadFieldNotFoundError` (a 500) before the adapter can refuse it.
+
+After the callback the onboarding waits on `affordability_decision` for a client `submit {}`, because a
+`decision` step routes only on a submit.
+
+Only Lean's `404 UNKNOWN_CUSTOMER` means a customer does not exist. The lookup, in `execute` and in
+callback correlation alike, treats every other refusal as an integration fault, not a verdict on the
+customer:
+
+| Case                                                                                                                                                                  | Behaviour                                                                                                                                  |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `execute`: `leanCustomerId` missing or not a UUID (refused without calling Lean), Lean `404 UNKNOWN_CUSTOMER`, or the customer's `app_user_id` is not this onboarding | retryable invalid data: `400 INVALID_STEP_DATA` on `leanCustomerId` (code `invalid_lean_customer`); the onboarding stays on `bank_connect` |
+| Customer lookup: any other non-2xx (`403`, `429`, a second `401`, a `404` with another code)                                                                          | `LEAN_UNAVAILABLE` (`500`); the onboarding is unchanged; on the webhook path Lean redelivers                                               |
+| Callback: a refresh event whose customer lookup is `404 UNKNOWN_CUSTOMER`                                                                                             | acknowledged as already applied (`204`)                                                                                                    |
+| Webhook path: insights `202` pending or `501` unsupported                                                                                                             | re-park                                                                                                                                    |
+| Reconcile path: insights `501` unsupported                                                                                                                            | resolves `bankConnectOutcome: data_unavailable`; `202` stays `still_pending`                                                               |
+
+An unrelated signed event (`bank.availability.updated`, say) records a
+`webhook.inbound_callback_mapping_failed` audit event before the `callback_already_applied` rejection, as
+observed live; the answer is still `204`.
+
+**The threshold is the declaration's.** `config.minMonthlySalary`, a finite number above zero, is
+required: `validateDeclaration` refuses a declaration without it at load, and every callback and
+reconcile reads it again from the declaration the park resolves to, throwing if it has since become
+unusable rather than deciding on a guess. The DDL has no numeric comparators (only `equals`, `in`,
+`isSet`), so the adapter computes `salaryThresholdMet` and the workflow routes on that boolean. `lean-ksa`
+sets it to 4000 (SAR).
+
+**Callback authentication.** `callbackAuth` is HMAC-SHA512, hex, header `lean-signature`, whose value is
+`sha512=<hex>`. `parseSignatureHeader` strips the prefix, case-insensitively, so the verifier needs no
+change (§5). The secret is `callbackSigningSecret`, Lean's "webhook secret".
+
+**`mapCallbackResult`** runs in this order:
+
+1. The body is parsed as Lean's `{type, payload}` envelope. An unparseable body, an event type the
+   adapter has no use for (`bank.availability.updated`, say) or a missing id is
+   `ConnectorCallbackAlreadyAppliedError`, answered `204` (§5).
+2. The onboarding id is `payload.app_user_id` for `entity.created` and `entity.updated`. An
+   `entity.data.refresh.updated` carries only `customer_id`, so the adapter reads the customer back from
+   Lean and takes its `app_user_id`. Anything that is not a UUID is already-applied, since Lean echoes
+   whatever `app_user_id` it was given.
+3. With no park on `lean_bank_data`, already-applied again.
+4. A `customer_id` other than the park's `providerReference` belongs to an earlier attempt: the callback
+   **re-parks** the step with the stored park untouched and applies nothing.
+5. `entity.created`, `entity.updated` and a refresh with status `PENDING` decide nothing and re-park the
+   same way (`submittedData: {}`).
+6. A `FINISHED` refresh is checked against its `data_status`: `accounts` and every account's
+   `transactions` must be `SUCCESS`, `OK` or `PARTIAL` (Lean's own pages disagree on the success word),
+   or the result is `{ bankConnectOutcome: 'data_unavailable' }`.
+7. Otherwise the adapter reads the insights back from Lean, never trusting the webhook body for them:
+   `POST /insights/v2/income?async=false` with `{entity_id, start_date, income_type: 'ALL'}` (Get Income
+   is a `POST`; a `GET` answers `404`), then `GET /insights/v2/income/employment?async=false`, with a
+   start date six months back. `202` or `501` from either re-parks, and reconcile picks it up later. A
+   `4xx` from either is `data_unavailable`, logged as `LEAN_INSIGHTS_REFUSED`. A `5xx` or a timeout throws
+   `LeanUnavailableException`, a `500` for Lean to redeliver.
+
+**The callback fields** are declared by the `bank_connect` step in its `data`, so a client cannot submit
+them (`CALLBACK_ONLY`, §2). Only the fields an outcome produces are set.
+
+| Field                     | Type    | Set on                  | Is                                                                                      |
+| ------------------------- | ------- | ----------------------- | --------------------------------------------------------------------------------------- |
+| `bankConnectOutcome`      | text    | always                  | `connected`, `data_unavailable` or `not_connected`                                      |
+| `salaryMonthlyAverage`    | number  | `connected`             | SAR, `income.salary.total.average_monthly_amount`; 0 when there is no salary            |
+| `salaryMonthsDetected`    | number  | `connected`             | Entries of `salary.monthly_totals` with a `count` above 0                               |
+| `nonSalaryMonthlyAverage` | number  | `connected`             | SAR, `income.non_salary.total.average_monthly_amount`                                   |
+| `salaryConsistent`        | boolean | `connected`             | Any employer Lean marks `salary_consistent`                                             |
+| `employerName`            | text    | `connected`, when known | That employer's (else the first's) matched English name, else the name on the bank side |
+| `salaryThresholdMet`      | boolean | `connected`             | `salaryMonthlyAverage >= config.minMonthlySalary`                                       |
+
+Only derived aggregates reach onboarding state: no transaction, balance or account number.
+
+**`reconcilePending`** is the operator's read-back (§5) for a webhook that never came. The park's
+`providerReference` is the customer id; a park without one refuses with
+`PENDING_CONNECTOR_RECONCILE_UNSUPPORTED` (`reference_missing`). The adapter lists the customer's entities
+(one per connected bank) and takes the newest:
+
+- A listing Lean refuses is `still_pending`: it says nothing about the connect.
+- No entity yet is `still_pending`, until the park is older than `LEAN_CONNECT_ABANDONED_AFTER_MS` (30
+  minutes, counted from `parkedAt`; a park recorded without one is never old). Then it resolves with
+  `bankConnectOutcome: 'not_connected'`.
+- An entity goes through the same insights read as step 7, with one difference: pending is
+  `still_pending`, but a `501` resolves with `bankConnectOutcome: 'data_unavailable'`, since repeating a
+  read Lean cannot serve never changes the answer. A `4xx` is `data_unavailable`, otherwise the
+  `connected` fields. It does not check `data_status`, which only a webhook carries.
+
+**Limits.** Lean waits 10 seconds for a `200` on a webhook. A re-park answers well inside that; a
+`FINISHED` refresh does a customer lookup and up to two insights calls, each bounded only by
+`LEAN_TIMEOUT_MS` (15 seconds by default), so it can overrun. Lean then redelivers on its own schedule,
+and the redelivered `FINISHED` repeats the pull while the park still holds; once the verdict is applied, a
+redelivery is already-applied and answers `204`. Nothing answers the webhook first and pulls off the
+request path. Nor does anything resolve an abandoned widget: no scheduler runs `reconcilePending`, so the
+onboarding stays parked until an operator reconciles it
+([0039](./decisions/0039-parked-onboarding-lifecycle.md)).
+
+**The `lean-ksa` workflows** (§2, "Checked-in workflows") bind both connectors: `collect_bank_account` →
+`verify_iban` (`canReject`; `rejected` → the `rejected` terminal) → `bank_connect` →
+`affordability_decision`, which approves on `bankConnectOutcome == 'connected'`,
+`salaryThresholdMet == true` and `salaryConsistent == true`, and sends everything else to
+`manual_review`.
 
 ---
 
@@ -2620,13 +2816,21 @@ cannot express:
   sweep.
 
 Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_CONNECTOR_TIMEOUT_MS`,
-`TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`, `VERIFF_TIMEOUT_MS`: 100–30000).
+`TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`, `VERIFF_TIMEOUT_MS`: 100–30000; `LEAN_TIMEOUT_MS`: 100–60000).
 `SUMSUB_BASE_URL` (default `https://api.sumsub.com`) and `SUMSUB_TIMEOUT_MS` are deployment
 settings on `AppConfig`, not credentials — `sumsub_kyc`'s `appToken`/`secretKey` are DB-backed
 like every other adapter's `settingsSchema` (§4). So are `VERIFF_BASE_URL` (default
 `https://stationapi.veriff.com`, the same host for test and live — the API key decides the mode)
 and `VERIFF_TIMEOUT_MS` (default 10000, as Sumsub's); `veriff_kyc`'s `apiKey`/`sharedSecretKey` are
 DB-backed.
+
+`LEAN_AUTH_BASE_URL` (default `https://auth.sandbox.sa.leantech.me`) and `LEAN_API_BASE_URL` (default
+`https://sandbox.sa.leantech.me`) are absolute URLs, and `LEAN_TIMEOUT_MS` is a bounded integer (default
+15000, 100–60000: wider than the others because Lean's insights calls can be slow).
+Lean's production hosts differ from the sandbox's, so a production deployment sets both URLs
+(`https://auth.sa.leantech.me` and `https://api2.sa.leantech.me`, as `.env.dist` notes); the defaults are the
+sandbox's, so a forgotten override reaches the sandbox, not production. `lean_iban_verification`'s and
+`lean_bank_data`'s `clientId`, `clientSecret` and `callbackSigningSecret` are DB-backed (§4).
 
 **No connector credential is declared in `AppConfig` any more.** `TWILIO_ACCOUNT_SID`,
 `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY`, `SENDGRID_FROM`,
@@ -2741,7 +2945,7 @@ enum:
 | `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                                                                                                                                                                                             | 401 / 503 |
 | `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 410       |
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                                                                                                                                                                                      | 503       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                      | 500       |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `LEAN_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                  | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the

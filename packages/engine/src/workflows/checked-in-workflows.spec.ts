@@ -71,6 +71,7 @@ const IDENTICAL_PAIRS = [
   'connector-fallback',
   'file-upload',
   'http-request',
+  'lean-ksa',
   'manual-review',
   'manual-smtp',
   'sendgrid-email',

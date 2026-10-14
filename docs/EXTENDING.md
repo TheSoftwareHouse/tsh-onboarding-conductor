@@ -89,7 +89,7 @@ quickest start is to copy the closest example from [workflows/fixtures/](../work
 each of which ships twice: `<name>.workflow.json` written as `custom` steps, one hand-written
 compiled step each, and `<name>-typed.workflow.json` written through the specialized types. The examples are
 `base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`, `http-request`,
-`twilio-verify`, `sendgrid-email`, `manual-smtp`, `connector-fallback`, `sumsub-kyc`, `veriff-kyc` and
+`twilio-verify`, `sendgrid-email`, `manual-smtp`, `connector-fallback`, `sumsub-kyc`, `veriff-kyc`, `lean-ksa` and
 `scoring` — `sumsub-kyc` and `veriff-kyc` are the ones to copy for a provider that answers on a
 callback rather than in the same request (`veriff-kyc` for one that needs no provider-side level or
 questionnaire), `scoring` for named scores and score-conditioned transitions. The production reference

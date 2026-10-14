@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   Max,
   Min,
   validateSync,
@@ -81,6 +82,12 @@ const SUMSUB_TIMEOUT_MS_MAX = 30000;
 const VERIFF_TIMEOUT_MS_DEFAULT = 10000;
 const VERIFF_TIMEOUT_MS_MIN = 100;
 const VERIFF_TIMEOUT_MS_MAX = 30000;
+
+const LEAN_AUTH_BASE_URL_DEFAULT = 'https://auth.sandbox.sa.leantech.me';
+const LEAN_API_BASE_URL_DEFAULT = 'https://sandbox.sa.leantech.me';
+const LEAN_TIMEOUT_MS_DEFAULT = 15000;
+const LEAN_TIMEOUT_MS_MIN = 100;
+const LEAN_TIMEOUT_MS_MAX = 60000;
 
 const CONNECTOR_CALLBACK_UNSIGNED_TYPES_DEFAULT = '';
 
@@ -402,6 +409,30 @@ export class AppConfig {
   @IsOptional()
   @Type(() => Number)
   VERIFF_TIMEOUT_MS: number = VERIFF_TIMEOUT_MS_DEFAULT;
+
+  /**
+   * `clientId`, `clientSecret` and `callbackSigningSecret` are operator-provided connector settings
+   * configured through the admin API, not environment variables — the `connectors` table is the
+   * only source. The hosts and the timeout stay here because they are deployment settings, not
+   * credentials. Lean's sandbox and production use different hosts, so these defaults point at
+   * the sandbox.
+   */
+  @IsUrl({ require_tld: false, require_protocol: true, protocols: ['http', 'https'] })
+  @IsOptional()
+  @Type(() => String)
+  LEAN_AUTH_BASE_URL: string = LEAN_AUTH_BASE_URL_DEFAULT;
+
+  @IsUrl({ require_tld: false, require_protocol: true, protocols: ['http', 'https'] })
+  @IsOptional()
+  @Type(() => String)
+  LEAN_API_BASE_URL: string = LEAN_API_BASE_URL_DEFAULT;
+
+  @IsInt()
+  @Min(LEAN_TIMEOUT_MS_MIN)
+  @Max(LEAN_TIMEOUT_MS_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  LEAN_TIMEOUT_MS: number = LEAN_TIMEOUT_MS_DEFAULT;
 
   @IsString()
   @IsOptional()

@@ -1,0 +1,115 @@
+{
+  "id": "lean-ksa-typed",
+  "version": 1,
+  "name": "Lean KSA open banking (specialized steps)",
+  "initial": "collect_bank_account",
+  "steps": [
+    {
+      "name": "collect_bank_account",
+      "type": "form",
+      "config": {
+        "fields": {
+          "iban": {
+            "type": "text",
+            "required": true,
+            "validation": { "format": "account-number" }
+          },
+          "nationalId": {
+            "type": "text",
+            "required": true,
+            "validation": { "pattern": "^[0-9]{10}$" }
+          }
+        }
+      },
+      "edges": { "success": "verify_iban" }
+    },
+    {
+      "name": "verify_iban",
+      "type": "connector-call",
+      "config": {
+        "connectors": [
+          {
+            "name": "lean_iban_verification",
+            "id": "lean_iban_verification",
+            "type": "bank_verification",
+            "order": 1,
+            "canReject": true,
+            "fieldMapping": { "iban": "iban", "nationalId": "nationalId" }
+          }
+        ]
+      },
+      "edges": { "success": "bank_connect", "rejected": "rejected" }
+    },
+    {
+      "name": "bank_connect",
+      "type": "connector-call",
+      "config": {
+        "fields": {
+          "leanCustomerId": { "type": "text", "required": false },
+          "bankConnectOutcome": {
+            "type": "text",
+            "required": false,
+            "validation": { "oneOf": ["connected", "data_unavailable", "not_connected"] }
+          },
+          "salaryMonthlyAverage": { "type": "number", "required": false },
+          "salaryMonthsDetected": { "type": "number", "required": false },
+          "nonSalaryMonthlyAverage": { "type": "number", "required": false },
+          "salaryConsistent": { "type": "boolean", "required": false },
+          "salaryThresholdMet": { "type": "boolean", "required": false },
+          "employerName": { "type": "text", "required": false }
+        },
+        "connectors": [
+          {
+            "name": "lean_bank_data",
+            "id": "lean_bank_data",
+            "type": "credit",
+            "async": true,
+            "order": 1,
+            "fieldMapping": {},
+            "optionalFieldMapping": { "leanCustomerId": "leanCustomerId" },
+            "config": { "minMonthlySalary": 4000 }
+          }
+        ]
+      },
+      "edges": { "success": "affordability_decision" }
+    },
+    {
+      "name": "affordability_decision",
+      "type": "decision",
+      "config": {
+        "branches": [
+          {
+            "port": "approve",
+            "when": {
+              "all": [
+                { "field": "bankConnectOutcome", "equals": "connected" },
+                { "field": "salaryThresholdMet", "equals": true },
+                { "field": "salaryConsistent", "equals": true }
+              ]
+            }
+          },
+          {
+            "port": "review",
+            "when": {
+              "not": {
+                "all": [
+                  { "field": "bankConnectOutcome", "equals": "connected" },
+                  { "field": "salaryThresholdMet", "equals": true },
+                  { "field": "salaryConsistent", "equals": true }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "edges": { "approve": "approved", "review": "manual_review" }
+    },
+    {
+      "name": "manual_review",
+      "type": "manual-review",
+      "edges": { "approve": "approved", "reject": "rejected" }
+    },
+    { "name": "approved", "type": "terminal", "config": { "outcome": "approved" } },
+    { "name": "rejected", "type": "terminal", "config": { "outcome": "rejected" } }
+  ]
+}

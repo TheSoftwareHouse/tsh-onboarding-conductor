@@ -14,7 +14,7 @@ What you get:
 - **An engine** — a NestJS service that runs the workflows and exposes a small HTTP API.
 - **An admin panel** — a React app where operators follow onboardings in progress, read the
   audit trail and configure connectors.
-- **Connectors** — ready-made integrations (Twilio Verify, SendGrid, SMTP, Sumsub, Veriff) plus a generic
+- **Connectors** — ready-made integrations (Twilio Verify, SendGrid, SMTP, Sumsub, Veriff, Lean) plus a generic
   one that can call any JSON API from configuration alone, so most providers need no new code.
 
 ## Documentation
