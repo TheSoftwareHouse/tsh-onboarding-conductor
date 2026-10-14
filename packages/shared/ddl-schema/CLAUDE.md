@@ -64,8 +64,7 @@ the package.
 - `eu-b2c-revision-equivalence.spec.ts` (in the engine) is the regression test for this whole
   layer: it pins revision 2 of the built-in route to revision 1 step by step — identical except that
   the OTP send is a step of its own — so changing how any step type compiles fails there with the
-  difference named. `checked-in-workflows.spec.ts` does the same for the fixture pairs. Expect to
-  see them break, and read them rather than working around them.
+  difference named. Expect to see it break, and read it rather than working around it.
 - A step that calls a connector declares a `connectorSlot` — the connector types it accepts — and
   reads its binding through `readConnectorBinding`, never from raw config. The slot's `extras` says
   whether the author may add `fieldMapping` and `config` keys next to what the type derives; merge

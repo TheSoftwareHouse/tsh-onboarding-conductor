@@ -137,7 +137,7 @@ At most one arm may lack a `when`, and it must come last — but a list may equa
 conditional, and then no fallback is missing. With no arm matching, a submit ends the onboarding
 `invalid` and a `manual-review` trigger is refused with `MANUAL_TRANSITION_NOT_AVAILABLE`; a
 document that wants either outcome writes the conditional arms alone, as
-`conditional-fields-and-transitions-typed` does. `webhook: { notify: false }` on an arm is the only
+`conditional-fields-and-transitions` does on its review steps. `webhook: { notify: false }` on an arm is the only
 place an outbound-notification opt-out can be written.
 
 **`substeps`** renames a generated sub-step. `otp-verify` named `send_phone_code` compiles to
@@ -293,11 +293,3 @@ declares `connectors` in full.
 validated against the compiled schema's own definitions, so a mistake is reported at
 `steps[i].config.…`. Everything `docs/EXTENDING.md` → "Add a workflow" says about the compiled form
 applies verbatim inside it.
-
-A fixture's `custom` twin is therefore a transcription, not a second authoring pass. Compile the
-typed form, then wrap each compiled step: keep `name` where it is, add `"type": "custom"`, and move
-everything else that step carries (`status`, `data`, `transitions`, and `connectors` / `scoring`
-when it has them) under `config`. Nothing else changes but the root `id` and `name`, and the result
-is what `checked-in-workflows.spec.ts` compares in `IDENTICAL_PAIRS`. Hand-writing the twin instead
-is how one drifts from its pair — and an invented connector id in the `custom` form compiles clean
-and fails at boot.

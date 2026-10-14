@@ -73,9 +73,9 @@ different capability therefore compiles clean and fails at boot with
 - More than one arm without a `when`, or an unconditional arm that is not last.
 
 **A group whose arms are all conditional is none of those, and is not a defect.** Nothing requires
-an unconditional fallback — `workflows/fixtures/conditional-fields-and-transitions-typed.workflow.json`
-ships two `manual-review` steps whose `approve` group is a single `when`-qualified arm, and
-`checked-in-workflows.spec.ts` asserts that shape. It is the document saying "only this case
+an unconditional fallback — `workflows/fixtures/conditional-fields-and-transitions.workflow.json`
+ships two review steps whose approve transitions are each a single `when`-qualified arm. It is the
+document saying "only this case
 advances". Appending a fallback to such a group is a behaviour change, not a fix: with no arm
 matching, a **submit** ends the onboarding `invalid` and a **manual** trigger (`manual.approve`,
 `manual.reject`, `manual.invalid`) is refused with `MANUAL_TRANSITION_NOT_AVAILABLE`, leaving the

@@ -5,7 +5,7 @@ sidebar_label: Your first onboarding
 description: Start an onboarding, read the step to render, submit its data. Three requests against a workflow that ships with the repository.
 ---
 
-→ The `base` example workflow ships with the repository, so there is something to run the moment the stack is up. After one operator call to publish the agreement it declares, three requests take a customer through its first step; the responses below come from a real local run. The example ships twice, as `base` written in `custom` steps and as `base-typed` written in specialized steps, and both compile to the same steps: every request and response below is the same under either id.
+→ The `base` example workflow ships with the repository, so there is something to run the moment the stack is up. After one operator call to publish the agreement it declares, three requests take a customer through its first step; the responses below come from a real local run.
 
 ## Publish the agreement it declares
 
@@ -73,29 +73,7 @@ $ curl -X POST localhost:3000/v1/onboardings/01a023ea-.../submit \
 
 A step that waits on a slow provider or on an operator's decision looks the same from the outside: the state stays on it until the callback or the review arrives, and the next read shows the move.
 
-## The same flow, written the other way
-
-`base` spells each step out as a `custom` step. `base-typed` is the same three steps written with the specialized types `connector-call` and `terminal`; the [introduction](./introduction.md#how-it-works) shows its first step both ways and the [`base` page in the gallery](/fixtures/base) shows both files in full. Start from it and the engine answers the same, because the two files compile to identical steps:
-
-```bash
-$ curl -X POST localhost:3000/v1/onboardings \
-    -H 'Content-Type: application/json' -d '{"workflowId":"base-typed"}'
-{"onboardingId":"01a0902c-ba85-73bf-9891-afc10b66b7de","status":"awaiting_user",
- "currentStep":"collect_email","expiresAt":null}
-```
-
-```bash
-$ curl localhost:3000/v1/onboardings/01a0902c-.../state
-{"onboardingId":"01a0902c-ba85-73bf-9891-afc10b66b7de","workflowId":"base-typed","workflowVersion":1,
- "status":"awaiting_user","currentStep":"collect_email","terminal":false,"rejectionReason":null,
- "step": { "name": "collect_email", "canSubmit": true, "fields": [
-     { "name": "email", "type": "text", "required": true, "value": null,
-       "schema": { "type": "string", "format": "email" } } ] … } }
-```
-
-Only `workflowId` tells the two apart. The submit, its answer and the `400` for a wrong field are the ones shown above, byte for byte. Which form to write in is an authoring choice: the specialized types are shorter and are what a builder works in, and `custom` is there for a step none of them describes.
-
 ## Where to go next
 
 - The [API reference](/api) covers the rest of the flow: document uploads, manual review, provider callbacks and the operator endpoints, each with the exact error codes it can return.
-- The [fixtures gallery](/fixtures) has a workflow for each mechanism, ready to copy into `workflows/users/`.
+- The [fixtures gallery](/fixtures) has the checked-in workflows, ready to copy into `workflows/users/`.

@@ -1327,6 +1327,6 @@ describe('WorkflowRegistryService', () => {
       repository: new InMemoryWorkflowsRepository(),
     });
 
-    expect(await registry.getById('http-request', 1)).toBeInstanceOf(Workflow);
+    expect(await registry.getById('eu-b2c-individual-kyc-eea', 2)).toBeInstanceOf(Workflow);
   });
 });

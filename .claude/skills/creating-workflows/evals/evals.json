@@ -4,21 +4,14 @@
   "evals": [
     {
       "id": "fixture-consent-review",
-      "prompt": "Add a fixture workflow under workflows/fixtures called mock-consent-review. It asks the applicant for an email address and acceptance of the terms, then a human reviewer approves or rejects the application. Include everything the repository expects of a new fixture.",
+      "prompt": "Add a fixture workflow under workflows/fixtures called mock-consent-review, for a new e2e suite to start onboardings on. It asks the applicant for an email address and acceptance of the terms, then a human reviewer approves or rejects the application. Include everything the repository expects of a new fixture.",
       "model": "sonnet",
-      "expected_output": "Two new files under workflows/fixtures: mock-consent-review.workflow.json written entirely in custom steps and mock-consent-review-typed.workflow.json written in specialized steps, both compiling and validating and describing the same flow — a contact-details step collecting email with the phone number omitted, including a consents fragment for the terms, followed by a manual-review step whose approve and reject ports lead to approved and rejected terminals. The step types and edges match the golden definition. No existing workflow file is edited, and docs/IMPLEMENTATION.md's checked-in workflows section and docs/EXTENDING.md's example list mention the new fixture.",
-      "golden": "golden/mock-consent-review-typed.workflow.json",
+      "expected_output": "One new file under workflows/fixtures: mock-consent-review.workflow.json written in specialized steps, compiling and validating — a contact-details step collecting email with the phone number omitted, including a consents fragment for the terms, followed by a manual-review step whose approve and reject ports lead to approved and rejected terminals. The step types and edges match the golden definition. No existing workflow file is edited, and docs/IMPLEMENTATION.md's checked-in workflows section and docs/EXTENDING.md's example list mention the new fixture.",
+      "golden": "golden/mock-consent-review.workflow.json",
       "checks": [
         {
           "type": "files-changed",
-          "glob": "workflows/fixtures/mock-consent-review.workflow.json",
-          "status": "added",
-          "min": 1,
-          "max": 1
-        },
-        {
-          "type": "files-changed",
-          "glob": "workflows/fixtures/mock-consent-review-typed.workflow.json",
+          "glob": "workflows/fixtures/mock-consent-review*.workflow.json",
           "status": "added",
           "min": 1,
           "max": 1
@@ -35,12 +28,12 @@
         },
         {
           "type": "compiled-graph-matches",
-          "glob": "workflows/fixtures/mock-consent-review-typed.workflow.json",
-          "golden": "golden/mock-consent-review-typed.workflow.json"
+          "glob": "workflows/fixtures/mock-consent-review.workflow.json",
+          "golden": "golden/mock-consent-review.workflow.json"
         }
       ],
       "assertions": [
-        "The typed definition collects the email with a contact-details step (phone number omitted) and the terms with a consents fragment, not with a custom step",
+        "The definition collects the email with a contact-details step (phone number omitted) and the terms with a consents fragment, not with a custom step",
         "The manual-review step's approve and reject ports lead to terminal steps with outcomes approved and rejected",
         "Every connector id, error handler and step type used exists in the repository; none is invented",
         {
