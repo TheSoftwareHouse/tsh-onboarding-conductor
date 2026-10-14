@@ -159,13 +159,7 @@ export function NewDraftForm({
         isRequired
         font="mono"
         disabled={isLoadingFork}
-        trailing={
-          idHint === null ? undefined : (
-            <Typography variant="meta" className="text-fg-4">
-              {idHint}
-            </Typography>
-          )
-        }
+        description={idHint ?? undefined}
       />
       <TextFormField
         control={control}

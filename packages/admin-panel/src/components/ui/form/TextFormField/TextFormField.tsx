@@ -14,6 +14,7 @@ export interface TextFormFieldProps<TValues extends FieldValues, TTransformedVal
   isRequired?: boolean;
   badges?: ReactNode;
   trailing?: ReactNode;
+  description?: ReactNode;
   disabled?: boolean;
   font?: InputFont;
   placeholder?: string;
@@ -36,6 +37,7 @@ export function TextFormField<TValues extends FieldValues, TTransformedValues = 
   isRequired,
   badges,
   trailing,
+  description,
   disabled,
   font,
   placeholder,
@@ -57,6 +59,7 @@ export function TextFormField<TValues extends FieldValues, TTransformedValues = 
       isRequired={isRequired}
       badges={badges}
       trailing={trailing}
+      description={description}
       error={fieldState.error?.message}
     >
       <Input

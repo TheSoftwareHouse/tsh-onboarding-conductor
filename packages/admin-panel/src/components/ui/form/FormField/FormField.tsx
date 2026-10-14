@@ -9,8 +9,10 @@ export interface FormFieldProps {
   isRequired?: boolean;
   /** Inline after the label, appended after the required chip — e.g. the `secret` chip. */
   badges?: ReactNode;
-  /** Right-aligned, and the field's always-present description. */
+  /** Right-aligned in the label row; a short tag. Describes the field unless `description` is set. */
   trailing?: ReactNode;
+  /** A sentence under the control; takes the hint id over `trailing`. */
+  description?: ReactNode;
   error?: string;
   children: ReactNode;
 }
@@ -27,8 +29,9 @@ export function fieldDescribedBy(controlId: string, hasError: boolean): string {
 }
 
 /**
- * Labelled field layout: label row, control, error line. Owns the id scheme — `trailing` renders
- * inside the element carrying `hintId`, so a caller never attaches it by hand.
+ * Labelled field layout: label row, control, description, error line. Owns the id scheme — the
+ * description, or else `trailing`, renders inside the element carrying `hintId`, so a caller never
+ * attaches it by hand.
  */
 export function FormField({
   controlId,
@@ -36,6 +39,7 @@ export function FormField({
   isRequired,
   badges,
   trailing,
+  description,
   error,
   children,
 }: FormFieldProps): ReactElement {
@@ -50,11 +54,19 @@ export function FormField({
         </Typography>
         {isRequired && <Chip tone="outline">required</Chip>}
         {badges}
-        <span id={hintId} className="ml-auto flex items-center">
+        <span
+          id={description === undefined ? hintId : undefined}
+          className="ml-auto flex items-center"
+        >
           {trailing}
         </span>
       </div>
       {children}
+      {description !== undefined && (
+        <Typography variant="meta" id={hintId} className="text-fg-4">
+          {description}
+        </Typography>
+      )}
       {hasError && (
         <Typography variant="body-sm" id={errorId} className="text-tsh-red" role="alert">
           {error}
