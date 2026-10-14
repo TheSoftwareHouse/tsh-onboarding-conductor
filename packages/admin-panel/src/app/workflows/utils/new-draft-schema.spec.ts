@@ -8,6 +8,7 @@ const EMPTY: NewDraftValues = {
   version: '1',
   name: '',
   upload: null,
+  fork: null,
 };
 
 function messagesOf(values: NewDraftValues): string[] {
@@ -24,7 +25,15 @@ describe('parseDraftUpload', () => {
       document,
       id: 'flow',
       version: 3,
+      name: '',
     });
+  });
+
+  it('returns the file name, or an empty string when it has none or a non-string one', () => {
+    expect(parseDraftUpload('{"id":"f","version":1,"name":"Flow"}')).toMatchObject({
+      name: 'Flow',
+    });
+    expect(parseDraftUpload('{"id":"f","version":1,"name":7}')).toMatchObject({ name: '' });
   });
 
   it.each([
@@ -107,7 +116,7 @@ describe('newDraftSchema', () => {
     expect(messagesOf({ ...EMPTY, ...change })).toEqual([message]);
   });
 
-  it('posts a ready upload under the typed id and version, ignoring the Name field', () => {
+  it('posts a ready upload under the typed id, version and name', () => {
     const document = { id: 'flow', version: 3, name: 'Flow', steps: [] };
 
     expect(
@@ -116,10 +125,22 @@ describe('newDraftSchema', () => {
         source: 'upload',
         workflowId: ' renamed ',
         version: '4',
-        name: 'Ignored',
-        upload: { status: 'ready', document, id: 'flow', version: 3 },
+        name: ' Renamed ',
+        upload: { status: 'ready', document, id: 'flow', version: 3, name: 'Flow' },
       }),
-    ).toEqual({ id: 'renamed', version: 4, name: 'Flow', steps: [] });
+    ).toEqual({ id: 'renamed', version: 4, name: 'Renamed', steps: [] });
+  });
+
+  it('removes the name of an upload when the Name field is empty', () => {
+    const document = { id: 'flow', version: 3, name: 'Flow', steps: [] };
+
+    expect(
+      newDraftSchema.parse({
+        ...EMPTY,
+        source: 'upload',
+        upload: { status: 'ready', document, id: 'flow', version: 3, name: 'Flow' },
+      }),
+    ).toEqual({ id: 'my-flow', version: 1, steps: [] });
   });
 
   it('checks the typed id and version of an upload', () => {
@@ -129,7 +150,13 @@ describe('newDraftSchema', () => {
         source: 'upload',
         workflowId: '',
         version: '0',
-        upload: { status: 'ready', document: { id: 'flow', version: 3 }, id: 'flow', version: 3 },
+        upload: {
+          status: 'ready',
+          document: { id: 'flow', version: 3 },
+          id: 'flow',
+          version: 3,
+          name: '',
+        },
       }),
     ).toEqual([
       'A workflow id is required.',
@@ -149,5 +176,48 @@ describe('newDraftSchema', () => {
         upload: { status: 'invalid', message: 'The file is not valid JSON.' },
       }),
     ).toEqual(['The file is not valid JSON.']);
+  });
+});
+
+describe('newDraftSchema fork arm', () => {
+  const FORK: NewDraftValues = {
+    ...EMPTY,
+    source: 'fork',
+    workflowId: 'copy',
+    version: '2',
+    name: ' Copy ',
+    fork: {
+      workflowId: 'kyc',
+      scope: 'users',
+      document: { id: 'kyc', version: 1, name: 'KYC', steps: [{ id: 'a' }] },
+    },
+  };
+
+  it('overrides the source id, version and name and keeps the rest', () => {
+    expect(newDraftSchema.parse(FORK)).toEqual({
+      id: 'copy',
+      version: 2,
+      name: 'Copy',
+      steps: [{ id: 'a' }],
+    });
+  });
+
+  it('removes the source name when the Name field is empty', () => {
+    expect(newDraftSchema.parse({ ...FORK, name: '' })).toEqual({
+      id: 'copy',
+      version: 2,
+      steps: [{ id: 'a' }],
+    });
+  });
+
+  it('fails without a source', () => {
+    expect(messagesOf({ ...FORK, fork: null })).toEqual(['Choose a workflow and a version.']);
+  });
+
+  it('checks the typed id and version', () => {
+    expect(messagesOf({ ...FORK, workflowId: '', version: '0' })).toEqual([
+      'A workflow id is required.',
+      'The version is a whole number from 1 to 2147483647.',
+    ]);
   });
 });

@@ -15,6 +15,7 @@ import {
   type WorkflowVersionStatus,
 } from '@/api/workflows/workflow-versions';
 import { ADMIN_ROUTES } from '@/constants/routes';
+import { NewDraftDialog } from '../components/NewDraftDialog/NewDraftDialog';
 import { DraftEditor, type DraftHeaderSlots } from './components/DraftEditor/DraftEditor';
 import { VersionDocument } from './components/VersionDocument/VersionDocument';
 import { VersionGraph } from './components/VersionGraph';
@@ -203,6 +204,14 @@ export function WorkflowDetailsPage(): ReactElement {
   const isDraft = requestedVersion !== null && requestedStatus === WORKFLOW_VERSION_STATUS.draft;
   const backSearch = stripDetailsParams(search);
 
+  const isReadOnlyVersion =
+    versionStatus === WORKFLOW_VERSION_STATUS.published ||
+    versionStatus === WORKFLOW_VERSION_STATUS.retired;
+  const newVersionAction =
+    isReadOnlyVersion && version !== null ? (
+      <NewDraftDialog initialFork={{ workflowId, version }} />
+    ) : undefined;
+
   const renderHeader = (slots: DraftHeaderSlots = {}): ReactElement => (
     <WorkflowDetailsHeader
       workflowId={workflowId}
@@ -211,7 +220,7 @@ export function WorkflowDetailsPage(): ReactElement {
       version={version}
       backSearch={backSearch}
       onVersionChange={params.setVersion}
-      actions={slots.actions}
+      actions={slots.actions ?? newVersionAction}
       note={slots.note}
     />
   );
