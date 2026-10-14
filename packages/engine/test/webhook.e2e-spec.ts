@@ -41,7 +41,12 @@ type OutboxRow = {
   updated_at: string;
 };
 
-const DEFAULT_TIMEOUT_MS = '150';
+/**
+ * The `/hold` specs keep a delivery's request open while they claim, read and assert on its row,
+ * and release it themselves; nothing here waits for a request to time out. A timeout shorter than
+ * that work aborts the held request on a slow runner and returns the row to PENDING mid-assertion.
+ */
+const DEFAULT_TIMEOUT_MS = '5000';
 
 /**
  * Re-checks on a timer rather than on `setImmediate`. What these conditions wait for — a delivery
