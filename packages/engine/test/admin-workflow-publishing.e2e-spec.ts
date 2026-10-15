@@ -28,7 +28,8 @@ const RACE_A_ID = `${FAMILY_PREFIX}race-a`;
 const RACE_B_ID = `${FAMILY_PREFIX}race-b`;
 const RACE_SOURCE_KEY = 'publishing_e2e_race_source_key';
 /** The fixture family whose connector `sourceKey` the conflicting draft repeats. */
-const SOURCE_KEY_OWNER_ID = 'sumsub-kyc-typed';
+const SOURCE_KEY_OWNER_ID = 'scoring';
+const OWNED_SOURCE_KEY = 'sumsub_kyc_scoring_individual_standard_v2';
 
 const NOT_FOUND = { code: 'WORKFLOW_NOT_FOUND', message: 'WORKFLOW_NOT_FOUND' };
 
@@ -59,9 +60,7 @@ const invalidDocument = (id: string, version: number) => ({
 
 /** The fixture's own document under a new id, so it declares a `sourceKey` another family owns. */
 const sourceKeyConflictDocument = (id: string, version: number) => ({
-  ...JSON.parse(
-    readFileSync(path.join(FIXTURE_WORKFLOWS_DIR, 'sumsub-kyc-typed.workflow.json'), 'utf8'),
-  ),
+  ...JSON.parse(readFileSync(path.join(FIXTURE_WORKFLOWS_DIR, 'scoring.workflow.json'), 'utf8')),
   id,
   version,
   name: 'Publishing E2E conflict',
@@ -70,9 +69,7 @@ const sourceKeyConflictDocument = (id: string, version: number) => ({
 /** The fixture's document under a new id and a sourceKey no published family owns. */
 const raceDocument = (id: string) => {
   const document = sourceKeyConflictDocument(id, 1);
-  return JSON.parse(
-    JSON.stringify(document).replace('sumsub_kyc_typed_individual_standard_v2', RACE_SOURCE_KEY),
-  );
+  return JSON.parse(JSON.stringify(document).replace(OWNED_SOURCE_KEY, RACE_SOURCE_KEY));
 };
 
 describe('Admin workflow publishing (e2e)', () => {
@@ -376,7 +373,7 @@ describe('Admin workflow publishing (e2e)', () => {
 
       expect(response.body).toMatchObject({
         code: 'WORKFLOW_SOURCE_KEY_CONFLICT',
-        sourceKey: 'sumsub_kyc_typed_individual_standard_v2',
+        sourceKey: OWNED_SOURCE_KEY,
         conflictingWorkflowId: SOURCE_KEY_OWNER_ID,
       });
       expect(await findRows(CONFLICT_ID)).toMatchObject([{ version: 1, status: 'draft' }]);
