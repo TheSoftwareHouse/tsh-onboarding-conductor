@@ -7,6 +7,7 @@ import { createQueryClient } from '@/services/query-client/create-query-client';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fetchAdminWorkflows, type AdminWorkflowSummary } from '@/api/workflows/admin-workflows';
 import {
   fetchWorkflowDefinition,
   type WorkflowDefinition,
@@ -36,6 +37,11 @@ vi.mock('@/api/workflows/workflow-drafts', async (importOriginal) => {
   return { ...actual, fetchWorkflowDocument: vi.fn() };
 });
 
+vi.mock('@/api/workflows/admin-workflows', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/workflows/admin-workflows')>();
+  return { ...actual, fetchAdminWorkflows: vi.fn() };
+});
+
 vi.mock('./components/JsonEditor', () => ({
   JsonEditor: ({ value, label }: { value: string; label: string }) => (
     <textarea aria-label={label} value={value} readOnly />
@@ -45,6 +51,7 @@ vi.mock('./components/JsonEditor', () => ({
 const mockedFetchDocument = vi.mocked(fetchWorkflowDocument);
 const mockedFetchDefinition = vi.mocked(fetchWorkflowDefinition);
 const mockedFetchVersions = vi.mocked(fetchWorkflowVersions);
+const mockedFetchList = vi.mocked(fetchAdminWorkflows);
 
 const WORKFLOW_ID = 'kyc';
 const UNPINNED_VERSION = 2;
@@ -638,6 +645,101 @@ describe('WorkflowDetailsPage', () => {
 
       expect(await findInspectorHeading('collect')).toBeInTheDocument();
       expect(mockedFetchDocument).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('New draft', () => {
+    const summaryFor = (overrides: Partial<AdminWorkflowSummary>): AdminWorkflowSummary => ({
+      workflowId: WORKFLOW_ID,
+      name: 'KYC flow',
+      scope: 'users',
+      servingVersion: 2,
+      versionCount: 2,
+      draftCount: 0,
+      inProgressCount: 0,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      mockedFetchList.mockResolvedValue({
+        records: [summaryFor({})],
+        pagination: { page: 1, limit: 100, total: 1, totalPages: 1 },
+      });
+      mockedFetchDocument.mockResolvedValue({
+        workflowId: WORKFLOW_ID,
+        version: 2,
+        status: 'published',
+        name: 'KYC flow',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        document: { id: WORKFLOW_ID, version: 2, name: 'KYC flow', steps: [] },
+      });
+    });
+
+    it('is shown on a published version', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
+      renderPage('?version=2');
+
+      expect(await screen.findByRole('button', { name: 'New draft' })).toBeInTheDocument();
+    });
+
+    it('is shown on a retired version', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
+      renderPage('?version=1');
+
+      expect(await screen.findByRole('button', { name: 'New draft' })).toBeInTheDocument();
+    });
+
+    it('is shown on a built-in family', async () => {
+      mockedFetchList.mockResolvedValue({
+        records: [summaryFor({ scope: 'built-in', name: null })],
+        pagination: { page: 1, limit: 100, total: 1, totalPages: 1 },
+      });
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+      renderPage('?version=2');
+
+      expect(await screen.findByRole('button', { name: 'New draft' })).toBeInTheDocument();
+    });
+
+    it('is shown on a published version of a family that has a draft', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([3, 'draft'], [2, 'published']));
+      renderPage('?version=2');
+
+      expect(await screen.findByRole('button', { name: 'New draft' })).toBeInTheDocument();
+    });
+
+    it('is not shown on a draft', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [3, 'draft']));
+      mockedFetchDocument.mockResolvedValue({
+        workflowId: WORKFLOW_ID,
+        version: 3,
+        status: 'draft',
+        name: 'KYC draft',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        document: { id: WORKFLOW_ID, version: 3, steps: [] },
+      });
+      renderPage('?version=3');
+
+      await screen.findByRole('textbox', { name: 'Workflow document (JSON)' });
+      expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
+    });
+
+    it('opens the New draft dialog on Fork with the shown workflow and version chosen', async () => {
+      const user = userEvent.setup();
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
+      renderPage('?version=1');
+
+      await user.click(await screen.findByRole('button', { name: 'New draft' }));
+
+      expect(await screen.findByRole('dialog', { name: 'New draft' })).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /Fork an existing version/ })).toBeChecked();
+      expect(await screen.findByRole('combobox', { name: 'Source version' })).toHaveTextContent(
+        'v1',
+      );
+      expect(screen.getByRole('combobox', { name: 'Source workflow' })).toHaveValue('KYC flow');
     });
   });
 });

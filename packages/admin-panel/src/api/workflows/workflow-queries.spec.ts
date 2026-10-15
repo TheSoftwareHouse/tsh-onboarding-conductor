@@ -61,6 +61,13 @@ const FILTERS: AdminWorkflowQueryFilters = {
   hasDraft: null,
 };
 
+const PAGES_FILTERS: Omit<AdminWorkflowQueryFilters, 'page'> = {
+  limit: 20,
+  search: null,
+  scope: null,
+  hasDraft: null,
+};
+
 beforeEach(() => {
   mockedFetchAdminWorkflows.mockReset();
   mockedFetchAdminWorkflows.mockResolvedValue(WORKFLOWS_PAGE);
@@ -83,6 +90,11 @@ describe('workflowQueries', () => {
     expect(workflowQueries.all()).toEqual(['workflows']);
     expect(workflowQueries.lists()).toEqual(['workflows', 'list']);
     expect(workflowQueries.list(FILTERS).queryKey).toEqual(['workflows', 'list', FILTERS]);
+    expect(workflowQueries.listPages(PAGES_FILTERS).queryKey).toEqual([
+      'workflows',
+      'list',
+      PAGES_FILTERS,
+    ]);
     expect(workflowQueries.details()).toEqual(['workflows', 'details']);
     expect(workflowQueries.detailsFor('kyc')).toEqual(['workflows', 'details', 'kyc']);
     expect(workflowQueries.detail('kyc', 3).queryKey).toEqual(['workflows', 'details', 'kyc', 3]);
@@ -162,6 +174,27 @@ describe('workflowQueries', () => {
     });
 
     expect(mockedFetchAdminWorkflows).toHaveBeenCalledWith(FILTERS);
+  });
+
+  it('fetches each page with the filters the key was built from, and stops after the last', async () => {
+    const options = workflowQueries.listPages(PAGES_FILTERS);
+
+    await options.queryFn?.({
+      queryKey: options.queryKey,
+      pageParam: 2,
+      direction: 'forward',
+      signal: new AbortController().signal,
+      meta: undefined,
+      client: undefined as never,
+    });
+
+    expect(mockedFetchAdminWorkflows).toHaveBeenCalledWith({ ...PAGES_FILTERS, page: 2 });
+    const page = (current: number): AdminWorkflowsPage => ({
+      records: [],
+      pagination: { page: current, limit: 20, total: 50, totalPages: 3 },
+    });
+    expect(options.getNextPageParam(page(2), [], 2, [])).toBe(3);
+    expect(options.getNextPageParam(page(3), [], 3, [])).toBeUndefined();
   });
 
   it('fetches the definition with the same id and version the key was built from, across the module boundary', async () => {

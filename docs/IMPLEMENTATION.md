@@ -3317,7 +3317,7 @@ connector. Onboardings already waiting on the previous connector finish with it.
 rest is the engine's `detail` when it sent one — it names the missing field or the offending config
 key — else the panel's sentence for the `reason`, one per reason the engine declares, else the
 engine's own message for a reason this build does not know. The "→ Global settings" link keeps the
-effective id. Import JSON, Fork, every publish, retire or scheduling action and
+effective id. Import JSON, every publish, retire or scheduling action and
 the visual canvas the design draws are dropped; the design's "24 workflows" count beside the filter
 actions is dropped too, since the footer's "Showing x–y of n" already states it.
 
@@ -3337,21 +3337,65 @@ reads `GET .../versions/{v}` when pinned and `GET /v1/admin/workflows/{id}` when
 `?version=N` no longer exists; its signature and callers are unchanged.
 
 **New draft** is a primary button in the list's `PageHeader` that opens `NewDraftDialog`
-(`src/app/workflows/components/NewDraftDialog/`, Base UI `Dialog`). "Start from" offers two options.
+(`src/app/workflows/components/NewDraftDialog/`, Base UI `Dialog`). "Start from" offers three options,
+**Fork an existing version** (the default), **Empty workflow** and **Upload a definition file**.
 **Empty workflow** takes Workflow ID, Version (integer from 1, default 1) and an optional Name
 through react-hook-form, and posts `{ id, version, name?, steps: [] }`. **Upload a definition
 file** reads a `.json` file with `File.text()` and `JSON.parse` (`parseDraftUpload`);
 the document is validated in the editor, not on upload, so only a parse failure, a non-object or a
 missing `id` or `version` is rejected, as field validation. A read file prefills editable Workflow ID
-and Version fields, and the document is posted with those values in place of its own. Both sources validate through one
+and Version fields, plus an editable Name prefilled from the file's `name`, and the document is posted with
+those values in place of its own; an empty Name removes `name` from it, also in a fork.
+**Fork** copies a published or retired version into a new draft
+([0043](decisions/0043-forking-a-version-is-a-client-side-copy.md)); the engine does not change.
+`ForkSourceFields` holds a **Source workflow** `Combobox` and a **Source version** `Select`. The
+combobox searches `workflowQueries.listPages` (`limit 20` a page, `search` debounced 300 ms by
+`useDebouncedValue`) and keeps only families with a published or retired version
+(`versionCount - draftCount > 0`), built-in and fixture families included. The endpoint cannot
+leave draft-only families out, so the next page loads on its own while fewer than 20 forkable
+families show, and again when the list is scrolled to its end; the empty row shows only once
+every page is read. Choosing a family reads
+`workflowQueries.versions(id)`; the select offers its non-draft versions as `vN — status` and
+defaults to the latest published one, else the latest retired (`defaultForkVersion`). Choosing a
+version reads `workflowQueries.document(id, v)` and prefills the form; choosing the
+selected one again, or leaving Fork for Empty and coming back, keeps the operator's edits; coming back from a read upload clears the upload and prefills the source again. A `users` family keeps its ID and takes Version `max + 1` over every listed
+version of any status (`nextWorkflowVersion`); a `built-in` or `fixtures` family gets an empty
+ID, the hint "Built-in workflows are copied under a new ID." and Version 1, since a
+new ID is a new family. Name comes from the document, and editing the ID never changes the
+Version. A hint, "Changing the ID creates a new workflow.", sits in the ID field's hint slot for a `users` source.
+While a chosen source's reads load, including the lookup of a preselected family, the identity fields and Create are disabled and the combobox shows its loading row; a late document never prefills while another source is chosen. A failed read shows a
+`StatusRegion` with Retry. The **draft-exists guard** fires when the trimmed ID equals the
+source's and its versions list holds a draft: a notice band (`role="status"`) above the ID row reads "This
+workflow already has draft v{N}. Open it, or change the ID to create a new workflow." with "Open
+it" linking to `/workflows/<id>?version=N`; the footer's primary action becomes **Open draft v{N}**
+(a link to the same path), Create is disabled and outlined; the engine's
+`409 WORKFLOW_DRAFT_EXISTS` toast stays as the fallback. The schema's `fork` arm posts
+`{ ...fork.document, id, version, name? }` and rejects a form with no source ("Choose a workflow
+and a version."). All three sources validate through one
 `zod` schema, `utils/new-draft-schema.ts`, wired with `zodResolver`
 ([0035](decisions/0035-zod-schemas-for-client-validated-forms.md)): the engine's save
 precondition (`id` of 1–100 characters, `version` from 1 to 2147483647) is stated once there and
-shared by the typed fields and the uploaded document, and the schema's output is the document
+shared by the typed fields and the uploaded or forked document, and the schema's output is the document
 posted, so submit does no assembling of its own. On success the dialog toasts,
 invalidates `workflowQueries.lists()`, `versions(id)` and `detail(id, v)`, closes and navigates to
 `/workflows/<id>?version=<v>`; on failure it shows an error toast and stays open with its input.
 `steps: []` does not compile (`INVALID_VALUE`, `steps`); a draft may be invalid by design.
+
+The same **New draft** button sits in the details header of every published or retired version, in
+every scope; a draft's actions still come from `DraftEditor`. `WorkflowDetailsPage` renders
+`<NewDraftDialog initialFork={{ workflowId, version }} />`, which opens the
+same modal on Fork with that family and version chosen and prefilled by the rules above. The engine
+has no per-family summary read, so the scope and the combobox label come from
+`workflowQueries.list({ limit: 100, search: workflowId })`, matched on `workflowId` exactly. The
+`search` is an `ILIKE` on `key` or `name`, so a family whose ID is matched by more than 100 others
+falls outside that page; the combobox then starts empty and the operator picks the family by hand.
+The button still shows when the family has a draft, and the guard covers it.
+
+The dialog's pickers are Base UI wrappers in `src/components/ui/`
+([0031](decisions/0031-base-ui-toasts-for-admin-panel-mutation-outcomes.md)), generic and unaware of workflows.
+`Select` is controlled, takes typed `{ value, label }` items and is styled like the native select
+(`h-10`, mono text). `Combobox` is server-driven: the parent owns the input text, the selected
+item and the filtering (`filter={null}`), and it shows loading, error and empty rows.
 
 When the selected version is a `draft` (a pinned `?version=`, or the draft a family with no published
 version opens on), `WorkflowDetailsPage` renders `DraftEditor`
@@ -3426,6 +3470,8 @@ invalidations that `(data, variables)` and the factory's `(id, v)` decide, carri
 `MutationCache` handler of `createQueryClient()` on success:
 
 - **Create** invalidates `lists()`, `versions(id)` and `detail(id, v)` of the new draft.
+  A fork creates through the same factory; its reads (`list`, `versions`, `document`) are plain
+  queries and add no invalidation.
 - **Save** invalidates `lists()`. A draft that stayed put awaits its own `detail(id, v)` and
   `versions(id)`, so the editor's `onSuccess` runs against the refetched document. A moved draft
   invalidates the new location's `versions(id)` and `detail(id, v)` instead.

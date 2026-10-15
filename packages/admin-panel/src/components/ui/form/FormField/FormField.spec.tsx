@@ -44,6 +44,22 @@ describe('FormField', () => {
     expect(trailing.parentElement).toHaveClass('ml-auto', 'flex', 'items-center');
   });
 
+  it('renders the description under the control and moves the hint id onto it', () => {
+    render(
+      <FormField
+        controlId="api-key"
+        label="apiKey"
+        trailing={<span>Not set</span>}
+        description="Rotated monthly."
+      >
+        <input id="api-key" />
+      </FormField>,
+    );
+
+    expect(screen.getByText('Rotated monthly.')).toHaveAttribute('id', 'api-key-hint');
+    expect(screen.getByText('Not set').parentElement).not.toHaveAttribute('id');
+  });
+
   it('renders the required chip before badges, so it is always first', () => {
     render(
       <FormField controlId="api-key" label="apiKey" isRequired badges={<span>secret</span>}>
