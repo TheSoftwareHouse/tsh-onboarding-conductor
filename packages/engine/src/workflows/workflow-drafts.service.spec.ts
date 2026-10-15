@@ -6,7 +6,12 @@ import { WorkflowInvalidException } from './errors/workflow-invalid.exception';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowScopeConflictException } from './errors/workflow-scope-conflict.exception';
 import { WorkflowVersionExistsException } from './errors/workflow-version-exists.exception';
+import { WorkflowConnectorDeclarationInvalidException } from './errors/workflow-connector-declaration-invalid.exception';
+import { WorkflowSourceKeyConflictException } from './errors/workflow-source-key-conflict.exception';
 import { WorkflowVersionNotDraftException } from './errors/workflow-version-not-draft.exception';
+import { WorkflowVersionNotLatestException } from './errors/workflow-version-not-latest.exception';
+import type { WorkflowCompilationService } from './workflow-compilation.service';
+import type { WorkflowFileLoaderService } from './workflow-file-loader.service';
 import type { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { WorkflowDraftsService } from './workflow-drafts.service';
 import type { WorkflowRegistryService } from './workflow-registry.service';
@@ -65,10 +70,20 @@ const createService = () => {
     lockRevision: jest.fn().mockResolvedValue(undefined),
     deleteDraft: jest.fn().mockResolvedValue(undefined),
     deleteEmptyFamily: jest.fn().mockResolvedValue(undefined),
+    lockPublishing: jest.fn().mockResolvedValue(undefined),
+    findLatestPublished: jest.fn().mockResolvedValue(null),
+    publishDraft: jest.fn(),
+    relabelFamily: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<WorkflowsRepository>;
   const registry = {
     getActiveScopes: jest.fn().mockReturnValue(ACTIVE_SCOPES),
   } as unknown as jest.Mocked<WorkflowRegistryService>;
+  const compilation = {
+    compile: jest.fn().mockResolvedValue({}),
+  } as unknown as jest.Mocked<WorkflowCompilationService>;
+  const fileLoader = {
+    load: jest.fn().mockReturnValue([]),
+  } as unknown as jest.Mocked<WorkflowFileLoaderService>;
   const audit = {
     logWorkflowDraft: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<AuditService>;
@@ -76,8 +91,17 @@ const createService = () => {
   return {
     dataSource,
     repository,
+    compilation,
+    fileLoader,
     audit,
-    service: new WorkflowDraftsService(dataSource, repository, registry, audit),
+    service: new WorkflowDraftsService(
+      dataSource,
+      repository,
+      registry,
+      compilation,
+      fileLoader,
+      audit,
+    ),
   };
 };
 
@@ -520,6 +544,219 @@ describe('WorkflowDraftsService', () => {
 
       expect(repository.deleteDraft).not.toHaveBeenCalled();
       expect(audit.logWorkflowDraft).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('publish', () => {
+    const setup = (draft = createRow({ version: 3 })) => {
+      const context = createService();
+
+      context.repository.findRevision.mockResolvedValue(draft);
+      context.repository.publishDraft.mockResolvedValue(
+        createRow({ version: 3, status: 'published', name: 'Stored label' }),
+      );
+
+      return context;
+    };
+
+    const expectNothingWritten = ({
+      repository,
+      audit,
+    }: Pick<ReturnType<typeof createService>, 'repository' | 'audit'>) => {
+      expect(repository.publishDraft).not.toHaveBeenCalled();
+      expect(repository.relabelFamily).not.toHaveBeenCalled();
+      expect(audit.logWorkflowDraft).not.toHaveBeenCalled();
+    };
+
+    it('compiles the stored definition, flips the row and audits identifiers only', async () => {
+      const definition = { id: 'flow', version: 3, steps: [] };
+      const context = setup(createRow({ version: 3, definition }));
+
+      await expect(context.service.publish('flow', 3, OPERATOR)).resolves.toEqual({
+        workflowId: 'flow',
+        version: 3,
+        status: 'published',
+        name: 'Stored label',
+        createdAt: new Date('2026-10-06T10:00:00Z'),
+        updatedAt: new Date('2026-10-06T11:00:00Z'),
+      });
+      expect(context.compilation.compile).toHaveBeenCalledWith(definition, manager);
+      expect(context.repository.publishDraft).toHaveBeenCalledWith(manager, 'version-uuid');
+      expect(context.audit.logWorkflowDraft).toHaveBeenCalledTimes(1);
+      expect(context.audit.logWorkflowDraft).toHaveBeenCalledWith(manager, {
+        action: 'workflow_draft.published',
+        actorId: OPERATOR,
+        resourceId: 'version-uuid',
+        metadata: { workflowId: 'flow', version: 3 },
+      });
+    });
+
+    it('takes the advisory lock before the row lock', async () => {
+      const { service, repository } = setup();
+
+      await service.publish('flow', 3, OPERATOR);
+
+      expect(repository.lockPublishing).toHaveBeenCalledWith(manager);
+      expect(repository.lockPublishing.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.lockRevision.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('answers 404 and 409 NOT_DRAFT before anything else is checked', async () => {
+      const context = createService();
+
+      await expect(context.service.publish('flow', 3, OPERATOR)).rejects.toThrow(
+        WorkflowNotFoundException,
+      );
+
+      context.repository.findRevision.mockResolvedValue(createRow({ status: 'published' }));
+      await expect(context.service.publish('flow', 3, OPERATOR)).rejects.toThrow(
+        WorkflowVersionNotDraftException,
+      );
+
+      expect(context.repository.findLatestPublished).not.toHaveBeenCalled();
+      expect(context.compilation.compile).not.toHaveBeenCalled();
+      expectNothingWritten(context);
+    });
+
+    it.each([
+      ['equal to', 3],
+      ['above', 5],
+    ])('refuses a draft when a published version is %s it', async (_label, latestVersion) => {
+      const context = setup();
+
+      context.repository.findLatestPublished.mockResolvedValue(
+        createRow({ version: latestVersion, status: 'published' }),
+      );
+
+      const failure = await context.service
+        .publish('flow', 3, OPERATOR)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(WorkflowVersionNotLatestException);
+      expect((failure as WorkflowVersionNotLatestException).getResponse()).toEqual({
+        code: 'WORKFLOW_VERSION_NOT_LATEST',
+        message: 'WORKFLOW_VERSION_NOT_LATEST',
+        workflowId: 'flow',
+        version: 3,
+        latestPublishedVersion: latestVersion,
+      });
+      expect(context.compilation.compile).not.toHaveBeenCalled();
+      expectNothingWritten(context);
+    });
+
+    it('answers 409 VERSION_EXISTS when a workflow file declares the same id and version', async () => {
+      const context = setup();
+
+      context.fileLoader.load.mockReturnValue([
+        {
+          scope: 'users',
+          filePath: '/workflows/users/flow.json',
+          workflowId: 'flow',
+          version: 3,
+          definition: { id: 'flow', version: 3, steps: [] },
+        },
+      ]);
+
+      const failure = await context.service
+        .publish('flow', 3, OPERATOR)
+        .catch((error: unknown) => error);
+
+      expect(context.fileLoader.load).toHaveBeenCalledWith(ACTIVE_SCOPES);
+      expect(failure).toBeInstanceOf(WorkflowVersionExistsException);
+      expect((failure as WorkflowVersionExistsException).getResponse()).toEqual({
+        code: 'WORKFLOW_VERSION_EXISTS',
+        message: 'WORKFLOW_VERSION_EXISTS',
+        workflowId: 'flow',
+        version: 3,
+      });
+      expect(context.compilation.compile).not.toHaveBeenCalled();
+      expectNothingWritten(context);
+    });
+
+    it('publishes when workflow files declare only other versions of the family', async () => {
+      const { service, fileLoader } = setup();
+
+      fileLoader.load.mockReturnValue([
+        {
+          scope: 'users',
+          filePath: '/workflows/users/flow.json',
+          workflowId: 'flow',
+          version: 2,
+          definition: { id: 'flow', version: 2, steps: [] },
+        },
+      ]);
+
+      await expect(service.publish('flow', 3, OPERATOR)).resolves.toMatchObject({ version: 3 });
+    });
+
+    it('publishes over a lower published version', async () => {
+      const { service, repository } = setup();
+
+      repository.findLatestPublished.mockResolvedValue(
+        createRow({ version: 2, status: 'published' }),
+      );
+
+      await expect(service.publish('flow', 3, OPERATOR)).resolves.toMatchObject({ version: 3 });
+    });
+
+    it.each([
+      ['an invalid document', new WorkflowInvalidException('INVALID_SHAPE')],
+      ['a connector declaration', new WorkflowConnectorDeclarationInvalidException('step', 'bad')],
+      ['a source key another family owns', new WorkflowSourceKeyConflictException('key', 'other')],
+    ])('writes nothing when the compile reports %s', async (_label, error) => {
+      const context = setup();
+
+      context.compilation.compile.mockRejectedValue(error);
+
+      await expect(context.service.publish('flow', 3, OPERATOR)).rejects.toBe(error);
+      expectNothingWritten(context);
+    });
+
+    it('labels the family when the document names it and no non-draft version outranks it', async () => {
+      const context = setup(
+        createRow({ version: 3, definition: { id: 'flow', version: 3, name: 'New label' } }),
+      );
+
+      context.repository.listVersions.mockResolvedValue([
+        createRow({ version: 3 }),
+        createRow({ version: 2, status: 'published' }),
+      ]);
+
+      await expect(context.service.publish('flow', 3, OPERATOR)).resolves.toMatchObject({
+        name: 'New label',
+      });
+      expect(context.repository.relabelFamily).toHaveBeenCalledWith(
+        manager,
+        'family-uuid',
+        'New label',
+      );
+    });
+
+    it('does not label when the document has no usable name', async () => {
+      const { service, repository } = setup(
+        createRow({ version: 3, definition: { id: 'flow', version: 3, name: '' } }),
+      );
+
+      await service.publish('flow', 3, OPERATOR);
+
+      expect(repository.relabelFamily).not.toHaveBeenCalled();
+    });
+
+    it('does not label when a retired version of the family is higher', async () => {
+      const { service, repository } = setup(
+        createRow({ version: 3, definition: { id: 'flow', version: 3, name: 'New label' } }),
+      );
+
+      repository.listVersions.mockResolvedValue([
+        createRow({ version: 4, status: 'retired' }),
+        createRow({ version: 3, status: 'published' }),
+      ]);
+
+      await expect(service.publish('flow', 3, OPERATOR)).resolves.toMatchObject({
+        name: 'Stored label',
+      });
+      expect(repository.relabelFamily).not.toHaveBeenCalled();
     });
   });
 });

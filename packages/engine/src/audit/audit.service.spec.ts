@@ -1875,6 +1875,7 @@ describe('AuditService', () => {
       'workflow_draft.created',
       'workflow_draft.updated',
       'workflow_draft.deleted',
+      'workflow_draft.published',
     ] as const)(
       'files %s against the version row, naming the operator, on the caller manager',
       async (action) => {
@@ -1960,6 +1961,26 @@ describe('AuditService', () => {
 
       const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
       expect(insertedRow.metadata).toEqual({ workflowId: 'kyc', version: 2 });
+    });
+
+    it('files a publication with only the allowed metadata keys', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logWorkflowDraft(manager, {
+        action: 'workflow_draft.published',
+        actorId: 'operator-oid',
+        resourceId: VERSION_ID,
+        metadata: { workflowId: 'kyc', version: 2, document: { id: 'kyc' } } as never,
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          action: 'workflow_draft.published',
+          entryType: 'success',
+          metadata: { workflowId: 'kyc', version: 2 },
+        }),
+      );
     });
 
     it('rejects an action outside the draft allowlist', async () => {

@@ -246,6 +246,14 @@ than editing a stored one. Starting an onboarding without naming a version picks
 higher — and pins the onboarding to it for its whole lifetime, so nothing in flight changes shape
 under a customer.
 
+**Publish a draft from the panel.** An operator can also publish a stored `draft` from its editor
+in the admin panel, or with `POST /v1/admin/workflows/{workflowId}/versions/{version}/publish`. The
+engine compiles the stored document first, and refuses a draft that does not compile or whose
+version is not above every published one of the family (`409 WORKFLOW_VERSION_NOT_LATEST`), and
+one whose `id` and `version` a workflow file also declares (`409 WORKFLOW_VERSION_EXISTS`). A
+published version is immutable, is served to unpinned starts at once, and leaves other versions'
+status unchanged.
+
 Field types, the `persist` flag, `connectorData` vs `acceptedData` and the available validation
 formats are covered in
 [step-data-validation.md](../packages/engine/docs/step-data-validation.md).

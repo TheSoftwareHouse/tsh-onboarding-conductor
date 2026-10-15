@@ -13,8 +13,7 @@ export interface AddEncryptionKeyActionProps {
  * Adding a key supersedes the active one and cannot be undone from the panel, so it sits behind
  * the same inline two-click confirm as `ConnectorCard`'s Clear action rather than firing on the
  * first click. It does not rewrite stored data: rotation is lazy, and a stored onboarding moves
- * onto the new key the next time it is written. There is no modal `Dialog` in this codebase and
- * this does not introduce one.
+ * onto the new key the next time it is written.
  */
 export function AddEncryptionKeyAction({
   disabled,

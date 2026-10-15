@@ -226,6 +226,7 @@ describe('WorkflowsController', () => {
         getDocument: jest.fn().mockResolvedValue({ workflowId: 'flow', document: {} }),
         update: jest.fn().mockResolvedValue({ workflowId: 'flow' }),
         remove: jest.fn().mockResolvedValue(undefined),
+        publish: jest.fn().mockResolvedValue({ workflowId: 'flow', status: 'published' }),
       } as unknown as jest.Mocked<WorkflowDraftsService>;
       const request = {
         adminTokenClaims: { oid: OPERATOR },
@@ -267,6 +268,15 @@ describe('WorkflowsController', () => {
       await controller.update({ workflowId: 'flow', version: 1 }, document, request);
 
       expect(service.update).toHaveBeenCalledWith('flow', 1, document, OPERATOR);
+    });
+
+    it('hands the address and the operator to publish', async () => {
+      const { controller, service, request } = createDraftController();
+
+      await expect(
+        controller.publish({ workflowId: 'flow', version: 2 }, request),
+      ).resolves.toEqual({ workflowId: 'flow', status: 'published' });
+      expect(service.publish).toHaveBeenCalledWith('flow', 2, OPERATOR);
     });
 
     it('hands the address and the operator to remove', async () => {

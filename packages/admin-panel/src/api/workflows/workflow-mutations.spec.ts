@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { QueryKey } from '@tanstack/react-query';
+import { QueryClient, type QueryKey } from '@tanstack/react-query';
 import { workflowMutations } from './workflow-mutations';
 import { workflowQueries } from './workflow-queries';
 import {
@@ -10,6 +10,7 @@ import {
   compileWorkflowDocument,
   createWorkflowDraft,
   deleteWorkflowDraft,
+  publishWorkflowDraft,
   updateWorkflowDraft,
   type WorkflowDraft,
 } from './workflow-drafts';
@@ -25,6 +26,7 @@ vi.mock('./workflow-drafts', async (importOriginal) => ({
   createWorkflowDraft: vi.fn(),
   updateWorkflowDraft: vi.fn(),
   deleteWorkflowDraft: vi.fn(),
+  publishWorkflowDraft: vi.fn(),
   compileWorkflowDocument: vi.fn(),
 }));
 
@@ -118,6 +120,45 @@ describe('workflowMutations', () => {
       expect(workflowMutations.delete('kyc', 1).meta?.invalidates).toEqual([
         workflowQueries.lists(),
       ]);
+    });
+  });
+
+  describe('publish', () => {
+    it('calls publishWorkflowDraft with its bound id and version', async () => {
+      await workflowMutations.publish('kyc', 3).mutationFn?.(undefined, {} as never);
+
+      expect(publishWorkflowDraft).toHaveBeenCalledWith('kyc', 3);
+    });
+
+    it('awaits the versions and invalidates the lists and the unpinned detail', () => {
+      const { meta } = workflowMutations.publish('kyc', 3);
+
+      expect(meta?.awaits).toEqual([workflowQueries.versions('kyc').queryKey]);
+      expect(meta?.invalidates).toEqual([
+        workflowQueries.lists(),
+        workflowQueries.detail('kyc').queryKey,
+      ]);
+    });
+
+    it('does not invalidate the version document nor any pinned detail', () => {
+      const { meta } = workflowMutations.publish('kyc', 3);
+      const client = new QueryClient();
+      for (const { queryKey } of [
+        workflowQueries.document('kyc', 3),
+        workflowQueries.detail('kyc', 3),
+        workflowQueries.detail('kyc'),
+      ]) {
+        client.setQueryData<unknown>(queryKey as QueryKey, 'cached');
+      }
+
+      for (const queryKey of meta?.invalidates as QueryKey[]) {
+        void client.invalidateQueries({ queryKey });
+      }
+
+      const stale = (queryKey: QueryKey) => client.getQueryState(queryKey)?.isInvalidated;
+      expect(stale(workflowQueries.detail('kyc').queryKey)).toBe(true);
+      expect(stale(workflowQueries.detail('kyc', 3).queryKey)).toBe(false);
+      expect(stale(workflowQueries.document('kyc', 3).queryKey)).toBe(false);
     });
   });
 

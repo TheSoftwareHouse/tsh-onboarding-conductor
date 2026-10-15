@@ -25,6 +25,7 @@ import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-respon
 import { API_TAGS, WORKFLOW_DOCUMENT_SCHEMA, schemaRef } from '../openapi/openapi.constants';
 import { AdminWorkflowDraftDocumentResponseDto } from './dto/admin-workflow-draft-document.response.dto';
 import { AdminWorkflowDraftResponseDto } from './dto/admin-workflow-draft.response.dto';
+import { AdminWorkflowPublicationResponseDto } from './dto/admin-workflow-publication.response.dto';
 import { ListAdminWorkflowVersionsResponseDto } from './dto/list-admin-workflow-versions.response.dto';
 import { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import { ListAdminWorkflowsResponseDto } from './dto/list-admin-workflows.response.dto';
@@ -47,6 +48,7 @@ import { WorkflowSourceKeyConflictException } from './errors/workflow-source-key
 import { WorkflowStepNotFoundException } from './errors/workflow-step-not-found.exception';
 import { WorkflowVersionExistsException } from './errors/workflow-version-exists.exception';
 import { WorkflowVersionNotDraftException } from './errors/workflow-version-not-draft.exception';
+import { WorkflowVersionNotLatestException } from './errors/workflow-version-not-latest.exception';
 import { RawWorkflowDocumentPipe } from './transport/raw-workflow-document.pipe';
 import { WorkflowCompilationService } from './workflow-compilation.service';
 import { WorkflowConnectorSelectionService } from './workflow-connector-selection.service';
@@ -324,6 +326,48 @@ export class WorkflowsController {
       workflowId,
       version,
       document,
+      resolveOperatorId(request.adminTokenClaims),
+    );
+  }
+
+  @Post(':workflowId/versions/:version/publish')
+  @HttpCode(200)
+  @AdminRoute()
+  @ApiOperation({
+    operationId: 'publishWorkflowDraft',
+    summary: 'Publish a draft',
+    description:
+      'Compiles the stored draft exactly as the compile route does and, when it passes, makes it ' +
+      'published. Publishing is permanent: a published version can no longer be edited or ' +
+      'deleted. Unpinned starts are served the new version at once. A root `name` of 1 to 200 ' +
+      'characters in the document relabels the family unless a higher non-draft version exists. ' +
+      'It never retires another version. A draft below or at a published version of the family ' +
+      'answers `409 WORKFLOW_VERSION_NOT_LATEST`, and one whose id and version a workflow file ' +
+      'also declares answers `409 WORKFLOW_VERSION_EXISTS`.',
+  })
+  @ApiParam(WORKFLOW_ID_PARAM)
+  @ApiParam(VERSION_PARAM)
+  @ApiOkResponse({
+    type: AdminWorkflowPublicationResponseDto,
+    description: 'The published version, without its document.',
+  })
+  @ApiErrorResponses(
+    VALIDATION_ERROR,
+    WorkflowNotFoundException,
+    WorkflowVersionNotDraftException,
+    WorkflowVersionNotLatestException,
+    WorkflowVersionExistsException,
+    WorkflowInvalidException,
+    WorkflowConnectorDeclarationInvalidException,
+    WorkflowSourceKeyConflictException,
+  )
+  publish(
+    @Param() { workflowId, version }: WorkflowVersionParamsDto,
+    @Req() request: AdminAuthenticatedRequest,
+  ): Promise<AdminWorkflowPublicationResponseDto> {
+    return this.workflowDraftsService.publish(
+      workflowId,
+      version,
       resolveOperatorId(request.adminTokenClaims),
     );
   }

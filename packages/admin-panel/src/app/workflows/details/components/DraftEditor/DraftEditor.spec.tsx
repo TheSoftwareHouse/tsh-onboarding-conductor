@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/services/api/api-error';
@@ -10,6 +10,7 @@ import {
   compileWorkflowDocument,
   deleteWorkflowDraft,
   fetchWorkflowDocument,
+  publishWorkflowDraft,
   updateWorkflowDraft,
   type WorkflowDraft,
   type WorkflowDraftDocument,
@@ -28,6 +29,7 @@ vi.mock('@/api/workflows/workflow-drafts', async (importOriginal) => {
     updateWorkflowDraft: vi.fn(),
     deleteWorkflowDraft: vi.fn(),
     compileWorkflowDocument: vi.fn(),
+    publishWorkflowDraft: vi.fn(),
   };
 });
 
@@ -52,6 +54,7 @@ const mockedFetch = vi.mocked(fetchWorkflowDocument);
 const mockedUpdate = vi.mocked(updateWorkflowDraft);
 const mockedDelete = vi.mocked(deleteWorkflowDraft);
 const mockedCompile = vi.mocked(compileWorkflowDocument);
+const mockedPublish = vi.mocked(publishWorkflowDraft);
 
 const WORKFLOW_ID = 'kyc';
 const VERSION = 2;
@@ -166,12 +169,12 @@ describe('DraftEditor', () => {
     renderEditor();
     type(await editorText(), `${SAVED_TEXT} `);
 
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    expect(screen.getByText('Unsaved changes · save to publish')).toBeInTheDocument();
     expect(screen.queryByText(/Editing · draft saved/)).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Discard' }));
 
-    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unsaved changes/)).not.toBeInTheDocument();
     expect(screen.getByText(/Editing · draft saved/)).toBeInTheDocument();
   });
 
@@ -253,7 +256,7 @@ describe('DraftEditor', () => {
       type(await editorText(), JSON.stringify({ ...DOCUMENT, name: 'KYC' }));
       await userEvent.click(screen.getByRole('button', { name: 'Save draft' }));
 
-      await waitFor(() => expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByText(/Unsaved changes/)).not.toBeInTheDocument());
     });
 
     it('keeps text typed while the save was in flight', async () => {
@@ -269,7 +272,7 @@ describe('DraftEditor', () => {
 
       await waitFor(() => expect(showSuccessToast).toHaveBeenCalledWith('Draft saved.'));
       expect(textarea.value).toBe(newer);
-      expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+      expect(screen.getByText(/Unsaved changes/)).toBeInTheDocument();
     });
 
     it('navigates to the new id and version when the draft moved', async () => {
@@ -400,6 +403,124 @@ describe('DraftEditor', () => {
 
     expect(textarea.value).toBe(SAVED_TEXT);
     expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
+  });
+
+  describe('Publish', () => {
+    const PUBLICATION = { ...summary(), status: 'published' as const };
+
+    async function clickPublish(): Promise<void> {
+      await userEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    }
+
+    it('is disabled while dirty and enabled again after Save or Discard', async () => {
+      mockedUpdate.mockResolvedValue(summary());
+      renderEditor();
+      const textarea = await editorText();
+      expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled();
+
+      type(textarea, `${SAVED_TEXT} `);
+      expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled();
+      expect(screen.getByText('Unsaved changes · save to publish')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Discard' }));
+      expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled();
+
+      type(textarea, JSON.stringify({ ...DOCUMENT, name: 'KYC' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled());
+    });
+
+    it('opens no dialog on a failed compile and stays enabled so the next click compiles again', async () => {
+      mockedCompile
+        .mockRejectedValueOnce(
+          new ApiError('WORKFLOW_INVALID', {
+            status: 400,
+            code: 'WORKFLOW_INVALID',
+            body: {
+              code: 'WORKFLOW_INVALID',
+              message: 'WORKFLOW_INVALID',
+              reason: 'DUPLICATE_STEP',
+            },
+          }),
+        )
+        .mockResolvedValueOnce({ stepCount: 3 });
+      renderEditor();
+      await editorText();
+      await clickPublish();
+
+      expect(await screen.findByText('WORKFLOW_INVALID')).toBeInTheDocument();
+      expect(mockedCompile).toHaveBeenCalledWith(DOCUMENT);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled();
+
+      await clickPublish();
+
+      expect(await screen.findByRole('dialog', { name: 'Publish kyc v2' })).toBeInTheDocument();
+      expect(mockedCompile).toHaveBeenCalledTimes(2);
+    });
+
+    it('opens the dialog on a valid compile', async () => {
+      mockedCompile.mockResolvedValue({ stepCount: 3 });
+      renderEditor();
+      await editorText();
+      await clickPublish();
+
+      expect(await screen.findByRole('dialog', { name: 'Publish kyc v2' })).toBeInTheDocument();
+      expect(screen.getByText('Valid · 3 steps')).toBeInTheDocument();
+    });
+
+    it('publishes the bound draft on confirm, never saves, then toasts and lands on its version', async () => {
+      mockedCompile.mockResolvedValue({ stepCount: 3 });
+      mockedPublish.mockResolvedValue(PUBLICATION);
+      renderEditor();
+      await editorText();
+      await clickPublish();
+      await userEvent.click(
+        within(await screen.findByRole('dialog')).getByRole('button', { name: 'Publish' }),
+      );
+
+      await waitFor(() => expect(mockedPublish).toHaveBeenCalledWith(WORKFLOW_ID, VERSION));
+      expect(mockedUpdate).not.toHaveBeenCalled();
+      await waitFor(() =>
+        expect(showSuccessToast).toHaveBeenCalledWith(`Version ${VERSION} published.`),
+      );
+      expect(mockedFetch).toHaveBeenCalledTimes(1);
+      expect(screen.getByLabelText('location')).toHaveTextContent(
+        `/workflows/kyc?version=${VERSION}`,
+      );
+    });
+
+    it('raises the error toast and closes the dialog when publishing fails', async () => {
+      mockedCompile.mockResolvedValue({ stepCount: 3 });
+      mockedPublish.mockRejectedValue(
+        new ApiError('WORKFLOW_VERSION_NOT_LATEST', {
+          status: 409,
+          code: 'WORKFLOW_VERSION_NOT_LATEST',
+          body: {
+            code: 'WORKFLOW_VERSION_NOT_LATEST',
+            message: 'WORKFLOW_VERSION_NOT_LATEST',
+            workflowId: WORKFLOW_ID,
+            version: VERSION,
+            latestPublishedVersion: 3,
+          },
+        }),
+      );
+      renderEditor();
+      await editorText();
+      await clickPublish();
+      await userEvent.click(
+        within(await screen.findByRole('dialog')).getByRole('button', { name: 'Publish' }),
+      );
+
+      await waitFor(() =>
+        expect(showErrorToast).toHaveBeenCalledWith(
+          'Unable to publish the draft:',
+          DRAFT_ERROR_MESSAGES.WORKFLOW_VERSION_NOT_LATEST,
+        ),
+      );
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(showSuccessToast).not.toHaveBeenCalled();
+    });
   });
 
   describe('Delete draft', () => {

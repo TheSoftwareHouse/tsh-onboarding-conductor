@@ -7,6 +7,7 @@ import {
   compileWorkflowDocument,
   createWorkflowDraft,
   deleteWorkflowDraft,
+  publishWorkflowDraft,
   updateWorkflowDraft,
   type WorkflowDocumentInput,
   type WorkflowDraft,
@@ -58,6 +59,16 @@ export const workflowMutations = {
     mutationOptions({
       mutationFn: () => deleteWorkflowDraft(workflowId, version),
       meta: { invalidates: [workflowQueries.lists()] },
+    }),
+  publish: (workflowId: string, version: number) =>
+    mutationOptions({
+      mutationFn: () => publishWorkflowDraft(workflowId, version),
+      meta: {
+        // Awaited so the page swaps the editor for the graph before the caller navigates.
+        awaits: [workflowQueries.versions(workflowId).queryKey],
+        // Never `detailsFor`: it would refetch the mounted editor's document into a 409.
+        invalidates: [workflowQueries.lists(), workflowQueries.detail(workflowId).queryKey],
+      },
     }),
   compile: () =>
     mutationOptions({

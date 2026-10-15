@@ -1962,6 +1962,173 @@
         ]
       }
     },
+    "/v1/admin/workflows/{workflowId}/versions/{version}/publish": {
+      "post": {
+        "description": "Compiles the stored draft exactly as the compile route does and, when it passes, makes it published. Publishing is permanent: a published version can no longer be edited or deleted. Unpinned starts are served the new version at once. A root `name` of 1 to 200 characters in the document relabels the family unless a higher non-draft version exists. It never retires another version. A draft below or at a published version of the family answers `409 WORKFLOW_VERSION_NOT_LATEST`, and one whose id and version a workflow file also declares answers `409 WORKFLOW_VERSION_EXISTS`.",
+        "operationId": "publishWorkflowDraft",
+        "parameters": [
+          {
+            "name": "workflowId",
+            "required": true,
+            "in": "path",
+            "description": "The workflow id.",
+            "schema": {
+              "example": "my-onboarding",
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": true,
+            "in": "path",
+            "description": "The revision number, a positive integer.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 2147483647,
+              "example": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The published version, without its document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminWorkflowPublicationResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`WORKFLOW_INVALID`: The document fails the DDL; `reason` names the rule and `path`, when the failure can be located, the offending place.\n\n`WORKFLOW_CONNECTOR_DECLARATION_INVALID`: A step's connector declaration is refused by the adapter it names; carries `stepName` and the adapter's `detail`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NestHttpError"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/ApiError"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "WORKFLOW_INVALID",
+                                "WORKFLOW_CONNECTOR_DECLARATION_INVALID"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`WORKFLOW_VERSION_NOT_DRAFT`: The revision is not a draft; carries `workflowId`, `version` and `status`.\n\n`WORKFLOW_VERSION_NOT_LATEST`: The family already has a published version at or above the draft's; carries `workflowId`, `version` and `latestPublishedVersion`.\n\n`WORKFLOW_VERSION_EXISTS`: A revision with this workflow id and version already exists; carries `workflowId` and `version`.\n\n`WORKFLOW_SOURCE_KEY_CONFLICT`: Another stored workflow already owns this source key; carries `sourceKey` and `conflictingWorkflowId`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_VERSION_NOT_DRAFT",
+                            "WORKFLOW_VERSION_NOT_LATEST",
+                            "WORKFLOW_VERSION_EXISTS",
+                            "WORKFLOW_SOURCE_KEY_CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Publish a draft",
+        "tags": [
+          "Admin: workflows"
+        ]
+      }
+    },
     "/v1/admin/workflows/{workflowId}/steps/{stepName}/connector": {
       "put": {
         "description": "Replaces the authored primary connector's id on every stored version of the family that declares the step; config, field mapping, retry and fallbacks are untouched. The adapter is validated against each non-retired version, and the first to refuse it names itself in `workflowVersion`. Onboardings already parked on the step finish with the provider they started on. The response projects the slot from the highest published version. The write is audited under the operator the token identifies.",
@@ -6164,6 +6331,53 @@
           "createdAt",
           "updatedAt",
           "document"
+        ]
+      },
+      "AdminWorkflowPublicationResponseDto": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "description": "The workflow id the version belongs to.",
+            "example": "my-onboarding"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The revision number that was published."
+          },
+          "status": {
+            "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run.",
+            "example": "published",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowVersionStatus"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The family's display label, or null when it has none."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "workflowId",
+          "version",
+          "status",
+          "name",
+          "createdAt",
+          "updatedAt"
         ]
       },
       "SelectWorkflowConnectorRequestDto": {

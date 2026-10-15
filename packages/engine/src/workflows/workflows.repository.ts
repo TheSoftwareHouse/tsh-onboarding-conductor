@@ -39,6 +39,9 @@ const canonicalJson = (definition: Record<string, unknown> | string): string =>
 /** The scope a family created by a runtime draft write lives in. */
 export const DRAFT_FAMILY_SCOPE: WorkflowScope = 'users';
 
+/** The one advisory-lock key every publish takes, hashed by Postgres, so publishes run one at a time. */
+const PUBLISH_ADVISORY_LOCK_KEY = 'workflow:publish';
+
 const revisionKey = (workflowId: string, version: number): string => `${workflowId}@${version}`;
 
 /** A workflow family as the draft writes see it: its uuid, its key and the scope it lives in. */
@@ -280,6 +283,40 @@ export class WorkflowsRepository {
         WHERE w.key = $1 AND w.scope = ANY($2) AND v.version = $3
           FOR UPDATE OF v`,
       [key, [...scopes], version],
+    );
+  }
+
+  /** Serializes publishes until the transaction ends, so two families cannot both pass the sourceKey check. */
+  async lockPublishing(manager: EntityManager): Promise<void> {
+    await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [PUBLISH_ADVISORY_LOCK_KEY]);
+  }
+
+  /** Flips a draft to published; `null` when no draft row matched. */
+  async publishDraft(
+    manager: EntityManager,
+    workflowVersionId: string,
+  ): Promise<WorkflowVersionEntity | null> {
+    // A CTE, because a bare `UPDATE … RETURNING` comes back from the driver as `[rows, count]`.
+    const published = await manager.query<{ workflow_version_id: string }[]>(
+      `WITH published AS (
+         UPDATE workflow_versions
+            SET status = $2, updated_at = now()
+          WHERE workflow_version_id = $1 AND status = $3
+        RETURNING workflow_version_id
+       )
+       SELECT workflow_version_id FROM published`,
+      [workflowVersionId, PUBLISHED_WORKFLOW_STATUS, DRAFT_WORKFLOW_STATUS],
+    );
+
+    return published.length === 0 ? null : this.findVersion(manager, workflowVersionId);
+  }
+
+  /** Writes the family label when it differs from the stored one. */
+  async relabelFamily(manager: EntityManager, workflowId: string, name: string): Promise<void> {
+    await manager.query(
+      `UPDATE workflows SET name = $2, updated_at = now()
+        WHERE workflow_id = $1 AND name IS DISTINCT FROM $2`,
+      [workflowId, name],
     );
   }
 

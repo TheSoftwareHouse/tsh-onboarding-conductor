@@ -614,6 +614,55 @@ describe('WorkflowsRepository', () => {
       expect(parameters).toEqual(['base', ['users'], 2]);
     });
 
+    it('takes the publish advisory lock with a bound key', async () => {
+      const harness = createHarness();
+
+      await harness.sut.lockPublishing(harness.manager);
+
+      const [sql, parameters] = harness.findSql('pg_advisory_xact_lock')!;
+      expect(sql).toContain('pg_advisory_xact_lock(hashtext($1))');
+      expect(parameters).toEqual(['workflow:publish']);
+    });
+
+    it('publishes only a draft row and re-reads it with its family', async () => {
+      const harness = createHarness();
+      (harness.manager.query as jest.Mock).mockResolvedValueOnce([{ workflow_version_id: 'v-1' }]);
+      (harness.entityRepositoryMock.findOne as jest.Mock).mockResolvedValueOnce({
+        workflowVersionId: 'v-1',
+      });
+
+      const stored = await harness.sut.publishDraft(harness.manager, 'v-1');
+
+      const [sql, parameters] = harness.findSql('UPDATE workflow_versions')!;
+      expect(sql).toContain('status = $3');
+      expect(sql).toContain('updated_at = now()');
+      expect(parameters).toEqual(['v-1', PUBLISHED_WORKFLOW_STATUS, DRAFT_WORKFLOW_STATUS]);
+      expect(harness.entityRepositoryMock.findOne).toHaveBeenCalledWith({
+        where: { workflowVersionId: 'v-1' },
+        relations: { workflow: true },
+      });
+      expect(stored).toEqual({ workflowVersionId: 'v-1' });
+    });
+
+    it('returns null from publishDraft when no draft row matched', async () => {
+      const harness = createHarness();
+      (harness.manager.query as jest.Mock).mockResolvedValueOnce([]);
+
+      await expect(harness.sut.publishDraft(harness.manager, 'v-1')).resolves.toBeNull();
+      expect(harness.entityRepositoryMock.findOne).not.toHaveBeenCalled();
+    });
+
+    it('relabels a family only when the name differs', async () => {
+      const harness = createHarness();
+
+      await harness.sut.relabelFamily(harness.manager, 'wf-flow', 'Flow');
+
+      const [sql, parameters] = harness.findSql('UPDATE workflows')!;
+      expect(sql).toContain('updated_at = now()');
+      expect(sql).toContain('name IS DISTINCT FROM $2');
+      expect(parameters).toEqual(['wf-flow', 'Flow']);
+    });
+
     it('counts the onboardings pinned to a revision as a number', async () => {
       const harness = createHarness();
 
