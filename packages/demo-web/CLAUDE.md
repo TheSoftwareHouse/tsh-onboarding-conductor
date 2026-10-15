@@ -25,6 +25,20 @@ One value, the BFF origin: `VITE_BNPL_BFF_BASE_URL` (default `http://localhost:3
   add `defer`, `async` or `type="module"` to it.
 - Read the origin only through `getBffBaseUrl()`; never `import.meta.env` directly.
 
+## Journey
+
+Pages live under `src/app/` (`details`, `consent`, `bank`, `result`, ...). One table in
+`src/app/session/session-routes.ts` maps each engine step to the pages that may show while it is
+current (`stepPath(step)` is the default); `useSessionView(page)` loads the session and redirects
+to `pageFor(view)` when the page does not match. The bank journey (`bank`, `bank/auth`,
+`bank/login`, `bank/transfer`, `accounts`, `bank/consent`) is simulated theatre: the bank list is
+a constant (`src/app/bank/banks.ts`), the QR code (`qrcode.react`, pinned) encodes this app's own
+login URL, the password is never sent, and the transfer progress bar is decorative. What the
+engine records goes through `submitSession` (`bank_selection`, `account_selection`,
+`bank_access_consent`) and `bankLogin`; the authorise button on `bank/consent` submits the consent
+and then runs the credit check. "Refuse" ends the session on that page: the engine cannot step
+back to the account selection.
+
 ## Styling
 
 Tailwind 4 loaded through PostCSS (`postcss.config.js`), with the TSH tokens (palette, fonts,
@@ -44,7 +58,7 @@ outcome and rejects with `AbortError` when its signal aborts.
 ## E2E
 
 `e2e/smoke.spec.ts` loads `/` and asserts the app shell renders. `e2e/bnpl-journey.spec.ts` walks the
-personas through the real UI, BFF and engine (`credit-check` fixture on `mock_credit`) and posts
+bank journey (generic start and persona shortcuts) through the real UI, BFF and engine (`credit-check` fixture on `mock_credit`) and posts
 the mock callback to the engine itself.
 
 `playwright.config.ts` starts the BFF (`pnpm --filter @tsh/demo-bff start:e2e`, port 3101, so a reuse can

@@ -17,6 +17,9 @@ const PERSONAS_DIR = fileURLToPath(new URL('../demo-bff/personas', import.meta.u
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // A journey walks ten pages and the engine runs every parallel worker's session at once.
+  timeout: 90_000,
+  expect: { timeout: 15_000 },
   retries: 0,
   reporter: 'list',
   use: {

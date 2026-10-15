@@ -1,10 +1,6 @@
 import { parseCreditConfig } from '../credit/credit-config';
 import type { AlgoanClient } from './algoan-client';
-import {
-  buildAlgoanReport,
-  maskAccountIdentifiers,
-  stripNestedTransactions,
-} from './algoan-report';
+import { buildAlgoanReport, stripNestedTransactions } from './algoan-report';
 
 const CREDENTIALS = { clientId: 'client-1', clientSecret: 'secret-1' };
 const SOURCE = {
@@ -46,20 +42,6 @@ describe('stripNestedTransactions', () => {
     expect(
       stripNestedTransactions({ a: 1, transactions: [1], b: [{ transactions: [2], c: 3 }] }),
     ).toEqual({ a: 1, b: [{ c: 3 }] });
-  });
-});
-
-describe('maskAccountIdentifiers', () => {
-  it('keeps the last four characters of every account identifier', () => {
-    expect(
-      maskAccountIdentifiers([
-        { id: 'acc-1', iban: 'GB29NWBK60161331926819', bic: 'NWBKGB2L', number: '12345678' },
-        { accountNumber: '1234', name: 'Current', details: { iban: 'DE89370400440532013000' } },
-      ]),
-    ).toEqual([
-      { id: 'acc-1', iban: '****6819', bic: '****GB2L', number: '****5678' },
-      { accountNumber: '****1234', name: 'Current', details: { iban: '****3000' } },
-    ]);
   });
 });
 

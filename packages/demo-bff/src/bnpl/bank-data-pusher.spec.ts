@@ -9,11 +9,19 @@ import { BankDataPusher, BankDataUploadError } from './bank-data-pusher';
 const BANK_DATA = {
   accounts: [
     {
+      type: 'CHECKING',
       balanceDate: '2026-10-14T12:00:00.000Z',
       transactions: [{ dates: { debitedAt: '2026-10-13T12:00:00.000Z' } }],
     },
+    {
+      type: 'SAVINGS',
+      balanceDate: '2026-10-14T12:00:00.000Z',
+      transactions: [],
+    },
   ],
 };
+
+const BOTH = ['account-01', 'account-02'];
 
 describe('BankDataPusher', () => {
   const calls: string[] = [];
@@ -58,7 +66,7 @@ describe('BankDataPusher', () => {
 
   it('reserves, uploads, completes and submits in that order', async () => {
     await expect(
-      pusher.push('o1', 'sherlock_holmes', new Date('2026-11-20T08:00:00Z')),
+      pusher.push('o1', 'sherlock_holmes', BOTH, new Date('2026-11-20T08:00:00Z')),
     ).resolves.toEqual({
       parked: false,
     });
@@ -68,7 +76,7 @@ describe('BankDataPusher', () => {
   });
 
   it('reserves the compact rebased JSON with its byte length', async () => {
-    await pusher.push('o1', 'sherlock_holmes', new Date('2026-11-20T08:00:00Z'));
+    await pusher.push('o1', 'sherlock_holmes', BOTH, new Date('2026-11-20T08:00:00Z'));
 
     const [, reservation] = engine.reserveDocument.mock.calls[0];
     const form = fetchMock.mock.calls[0][1].body as FormData;
@@ -84,8 +92,17 @@ describe('BankDataPusher', () => {
     expect(text).toBe(JSON.stringify(JSON.parse(text)));
   });
 
+  it('uploads only the selected accounts, matched by position', async () => {
+    await pusher.push('o1', 'sherlock_holmes', ['account-02']);
+
+    const form = fetchMock.mock.calls[0][1].body as FormData;
+    const uploaded = JSON.parse(await (form.get('file') as File).text());
+
+    expect(uploaded.accounts.map((account: { type: string }) => account.type)).toEqual(['SAVINGS']);
+  });
+
   it('rewrites only the host of the presigned URL and sends the file part last', async () => {
-    await pusher.push('o1', 'sherlock_holmes');
+    await pusher.push('o1', 'sherlock_holmes', BOTH);
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const names = [...(init.body as FormData).keys()];
@@ -100,7 +117,7 @@ describe('BankDataPusher', () => {
       EngineError.fromResponse(409, { code: 'ONBOARDING_AWAITING_CONNECTOR', message: 'parked' }),
     );
 
-    await expect(pusher.push('o1', 'sherlock_holmes')).resolves.toEqual({ parked: true });
+    await expect(pusher.push('o1', 'sherlock_holmes', BOTH)).resolves.toEqual({ parked: true });
   });
 
   it('rethrows any other submit failure', async () => {
@@ -108,13 +125,17 @@ describe('BankDataPusher', () => {
       EngineError.fromResponse(422, { code: 'OTHER', message: 'no' }),
     );
 
-    await expect(pusher.push('o1', 'sherlock_holmes')).rejects.toMatchObject({ code: 'OTHER' });
+    await expect(pusher.push('o1', 'sherlock_holmes', BOTH)).rejects.toMatchObject({
+      code: 'OTHER',
+    });
   });
 
   it('stops before completing when the upload is refused', async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
 
-    await expect(pusher.push('o1', 'sherlock_holmes')).rejects.toBeInstanceOf(BankDataUploadError);
+    await expect(pusher.push('o1', 'sherlock_holmes', BOTH)).rejects.toBeInstanceOf(
+      BankDataUploadError,
+    );
     expect(engine.completeDocument).not.toHaveBeenCalled();
   });
 });

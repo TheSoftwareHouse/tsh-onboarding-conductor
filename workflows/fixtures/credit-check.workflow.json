@@ -1,6 +1,6 @@
 {
   "id": "credit-check",
-  "version": 1,
+  "version": 2,
   "name": "Credit Check",
   "initial": "applicant",
   "webhook": {
@@ -24,12 +24,18 @@
               "firstName": {
                 "type": "text",
                 "required": true,
-                "validation": { "minLength": 1, "maxLength": 100 }
+                "validation": {
+                  "minLength": 1,
+                  "maxLength": 100
+                }
               },
               "lastName": {
                 "type": "text",
                 "required": true,
-                "validation": { "minLength": 1, "maxLength": 100 }
+                "validation": {
+                  "minLength": 1,
+                  "maxLength": 100
+                }
               }
             },
             "canonical": {
@@ -56,6 +62,109 @@
         ]
       },
       "edges": {
+        "success": "bank_selection"
+      }
+    },
+    {
+      "name": "bank_selection",
+      "type": "form",
+      "config": {
+        "fields": {
+          "bankId": {
+            "type": "text",
+            "required": true,
+            "clientVisible": true,
+            "validation": {
+              "pattern": "^[a-z0-9_]+$",
+              "maxLength": 40
+            }
+          },
+          "bankName": {
+            "type": "text",
+            "required": true,
+            "clientVisible": true,
+            "validation": {
+              "maxLength": 100
+            }
+          }
+        }
+      },
+      "edges": {
+        "success": "bank_connection"
+      }
+    },
+    {
+      "name": "bank_connection",
+      "type": "form",
+      "config": {
+        "fields": {
+          "bankConnectionReference": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "pattern": "^[A-Za-z0-9-]{8,64}$"
+            }
+          },
+          "bankConnectionMethod": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": ["qr", "device"]
+            }
+          },
+          "bankProfile": {
+            "type": "text",
+            "required": true,
+            "clientVisible": true,
+            "validation": {
+              "oneOf": ["high", "medium", "low", "test"]
+            }
+          }
+        }
+      },
+      "edges": {
+        "success": "account_selection"
+      }
+    },
+    {
+      "name": "account_selection",
+      "type": "form",
+      "config": {
+        "fields": {
+          "selectedAccounts": {
+            "type": "array",
+            "required": true,
+            "clientVisible": true,
+            "items": {
+              "type": "text",
+              "validation": {
+                "pattern": "^account-[0-9]{2}$"
+              }
+            },
+            "validation": {
+              "minItems": 1,
+              "maxItems": 10
+            }
+          }
+        }
+      },
+      "edges": {
+        "success": "bank_access_consent"
+      }
+    },
+    {
+      "name": "bank_access_consent",
+      "type": "consents",
+      "config": {
+        "consents": [
+          {
+            "key": "bankDataAccess",
+            "version": "2026-10",
+            "acknowledgement": "consent"
+          }
+        ]
+      },
+      "edges": {
         "success": "credit_check"
       }
     },
@@ -63,8 +172,13 @@
       "name": "credit_check",
       "type": "credit-assessment",
       "config": {
-        "connector": { "id": "mock_credit" },
-        "bands": { "approveFrom": 700, "reviewFrom": 400 },
+        "connector": {
+          "id": "mock_credit"
+        },
+        "bands": {
+          "approveFrom": 700,
+          "reviewFrom": 400
+        },
         "maxAttempts": 3,
         "report": "full"
       },
@@ -72,7 +186,7 @@
         "approved": "approved",
         "review": "manual_review",
         "declined": "declined",
-        "retry": "credit_consent"
+        "retry": "account_selection"
       }
     },
     {
@@ -83,7 +197,19 @@
         "reject": "declined"
       }
     },
-    { "name": "approved", "type": "terminal", "config": { "outcome": "approved" } },
-    { "name": "declined", "type": "terminal", "config": { "outcome": "rejected" } }
+    {
+      "name": "approved",
+      "type": "terminal",
+      "config": {
+        "outcome": "approved"
+      }
+    },
+    {
+      "name": "declined",
+      "type": "terminal",
+      "config": {
+        "outcome": "rejected"
+      }
+    }
   ]
 }

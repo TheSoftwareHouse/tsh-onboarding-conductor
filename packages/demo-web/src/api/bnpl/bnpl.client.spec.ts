@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BffError,
+  bankLogin,
   createSession,
   getSession,
   submitSession,
@@ -52,6 +53,26 @@ describe('bnpl client', () => {
       expect(url).toBe('http://localhost:3100/v1/bnpl/sessions');
       expect(init?.method).toBe('POST');
       expect(init?.body).toBe(JSON.stringify({ persona: 'sherlock' }));
+    });
+
+    it('should post an empty body when creating a session without a persona', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ token: TOKEN, persona: null }, 201));
+
+      const created = await createSession();
+
+      expect(created.persona).toBeNull();
+      expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({}));
+    });
+
+    it('should post the persona and method when logging in to the bank', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(view({ phase: 'collect' })));
+
+      await bankLogin(TOKEN, { persona: 'sherlock', method: 'qr' });
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe(`http://localhost:3100/v1/bnpl/sessions/${TOKEN}/bank-login`);
+      expect(init?.method).toBe('POST');
+      expect(init?.body).toBe(JSON.stringify({ persona: 'sherlock', method: 'qr' }));
     });
 
     it('should pass wait as a query parameter when reading a session', async () => {

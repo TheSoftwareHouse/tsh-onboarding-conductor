@@ -15,6 +15,19 @@ describe('BnplSessionStore', () => {
     expect(store.get(token)?.createdAt).toBeInstanceOf(Date);
   });
 
+  it('accepts a session without a persona and lets the bank login set one later', () => {
+    const token = store.create('o1', null);
+
+    expect(store.get(token)?.persona).toBeNull();
+
+    const session = store.get(token);
+    if (session !== undefined) {
+      session.persona = 'james_watson';
+    }
+
+    expect(store.get(token)?.persona).toBe('james_watson');
+  });
+
   it('issues a distinct token per session', () => {
     expect(store.create('o1', 'p')).not.toBe(store.create('o2', 'p'));
   });

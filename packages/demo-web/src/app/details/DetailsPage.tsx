@@ -84,7 +84,11 @@ export function DetailsPage() {
     <Card className="mx-auto max-w-lg">
       <CardHeader>
         <CardTitle>Your details</CardTitle>
-        <CardDescription>We prefilled these for the chosen scenario.</CardDescription>
+        <CardDescription>
+          {persona === null
+            ? 'Tell us who is applying.'
+            : 'We prefilled these for the chosen scenario.'}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <form

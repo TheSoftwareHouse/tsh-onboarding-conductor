@@ -380,6 +380,67 @@
       "iban": "GB85RRNM02284446816452",
       "usage": "PERSONAL",
       "bic": "HBUKGB4BXXX"
+    },
+    {
+      "balance": 2150.4,
+      "balanceDate": "2026-10-14T12:00:00.000Z",
+      "owners": [
+        {
+          "name": "SHERLOCK HOLMES"
+        }
+      ],
+      "bank": {
+        "name": "Algoan Demo",
+        "id": "AD",
+        "logoUrl": "https://storage.googleapis.com/bank-data-images-preprod/algoan-bank/logo.svg"
+      },
+      "currency": "GBP",
+      "transactions": [
+        {
+          "currency": "GBP",
+          "dates": {
+            "debitedAt": "2026-07-20T12:00:00.000Z"
+          },
+          "description": "TRANSFER FROM CURRENT ACCOUNT",
+          "amount": 300
+        },
+        {
+          "currency": "GBP",
+          "dates": {
+            "debitedAt": "2026-08-20T12:00:00.000Z"
+          },
+          "description": "TRANSFER FROM CURRENT ACCOUNT",
+          "amount": 300
+        },
+        {
+          "currency": "GBP",
+          "dates": {
+            "debitedAt": "2026-09-20T12:00:00.000Z"
+          },
+          "description": "TRANSFER FROM CURRENT ACCOUNT",
+          "amount": 300
+        },
+        {
+          "currency": "GBP",
+          "dates": {
+            "debitedAt": "2026-10-02T12:00:00.000Z"
+          },
+          "description": "INTEREST PAID",
+          "amount": 3.87
+        },
+        {
+          "currency": "GBP",
+          "dates": {
+            "debitedAt": "2026-10-12T12:00:00.000Z"
+          },
+          "description": "TRANSFER FROM CURRENT ACCOUNT",
+          "amount": 300
+        }
+      ],
+      "type": "SAVINGS",
+      "iban": "GB85RRNM02284446816453",
+      "usage": "PERSONAL",
+      "bic": "HBUKGB4BXXX"
     }
   ]
 }

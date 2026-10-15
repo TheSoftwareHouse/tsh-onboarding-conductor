@@ -10,7 +10,7 @@ export const EVENT_RETENTION_MS = HOURS_PER_DAY * SECONDS_PER_HOUR * MILLISECOND
 
 export interface BnplSession {
   onboardingId: string;
-  persona: string;
+  persona: string | null;
   createdAt: Date;
   lastEventId?: string;
 }
@@ -26,7 +26,7 @@ export class BnplSessionStore {
   private readonly tokenByOnboarding = new Map<string, string>();
   private readonly claimedEvents = new Map<string, number>();
 
-  create(onboardingId: string, persona: string): string {
+  create(onboardingId: string, persona: string | null): string {
     const token = randomBytes(TOKEN_BYTES).toString('base64url');
 
     this.sessions.set(token, { onboardingId, persona, createdAt: new Date() });

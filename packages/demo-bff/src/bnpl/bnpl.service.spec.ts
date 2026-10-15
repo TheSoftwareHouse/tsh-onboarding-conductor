@@ -39,9 +39,14 @@ function state(overrides: Partial<OnboardingState> = {}): OnboardingState {
   };
 }
 
+const ACCOUNTS = [
+  { id: 'account-01', type: 'CHECKING' },
+  { id: 'account-02', type: 'SAVINGS' },
+];
+
 describe('BnplService', () => {
   let engine: { startOnboarding: jest.Mock; getState: jest.Mock; submit: jest.Mock };
-  let personas: { accounts: jest.Mock };
+  let personas: { accounts: jest.Mock; summary: jest.Mock };
   let pusher: { push: jest.Mock };
   let store: BnplSessionStore;
   let service: BnplService;
@@ -49,7 +54,10 @@ describe('BnplService', () => {
 
   beforeEach(async () => {
     engine = { startOnboarding: jest.fn(), getState: jest.fn(), submit: jest.fn() };
-    personas = { accounts: jest.fn().mockReturnValue([{ id: 'a1' }]) };
+    personas = {
+      accounts: jest.fn().mockReturnValue(ACCOUNTS),
+      summary: jest.fn().mockReturnValue({ id: 'sherlock_holmes', profile: 'high' }),
+    };
     pusher = { push: jest.fn().mockResolvedValue(undefined) };
     store = new BnplSessionStore();
     service = new BnplService(
@@ -70,9 +78,21 @@ describe('BnplService', () => {
       expect(store.get(token)).toMatchObject({ onboardingId: 'o1', persona: 'sherlock_holmes' });
     });
 
+    it('starts a session without a persona, with no accounts to show', async () => {
+      engine.getState.mockResolvedValue(state());
+
+      personas.summary.mockClear();
+      const created = await service.createSession();
+
+      expect(created.persona).toBeNull();
+      expect(personas.summary).toHaveBeenCalledTimes(0);
+      await expect(service.getSession(created.token)).resolves.toMatchObject({ persona: null });
+      expect(await service.getSession(created.token)).not.toHaveProperty('accounts');
+    });
+
     it('rejects an unknown persona with UNKNOWN_PERSONA before starting anything', async () => {
       engine.startOnboarding.mockClear();
-      personas.accounts.mockImplementation(() => {
+      personas.summary.mockImplementation(() => {
         throw new PersonaNotFoundError('nobody');
       });
 
@@ -93,7 +113,7 @@ describe('BnplService', () => {
         fields: [{ name: 'firstName', type: 'text', required: true, value: null }],
         data: {},
         persona: 'sherlock_holmes',
-        accounts: [{ id: 'a1' }],
+        accounts: ACCOUNTS,
       });
     });
 
@@ -188,6 +208,29 @@ describe('BnplService', () => {
     });
   });
 
+  describe('accounts in the view', () => {
+    it('lists every account while collecting', async () => {
+      engine.getState.mockResolvedValue(state({ data: { selectedAccounts: ['account-02'] } }));
+
+      await expect(service.getSession(token)).resolves.toMatchObject({ accounts: ACCOUNTS });
+    });
+
+    it('lists only the selected accounts on a result', async () => {
+      engine.getState.mockResolvedValue(
+        state({
+          terminal: true,
+          status: 'approved',
+          step: null,
+          data: { creditOutcome: 'approved', selectedAccounts: ['account-01'] },
+        }),
+      );
+
+      const view = await service.getSession(token);
+
+      expect(view.accounts).toEqual([ACCOUNTS[0]]);
+    });
+  });
+
   describe('getSession long-poll', () => {
     it('keeps re-reading while processing and returns once the phase changes', async () => {
       const parked = state({ pending: { connectorId: 'c', parkedAt: null } });
@@ -279,18 +322,164 @@ describe('BnplService', () => {
     });
   });
 
+  describe('submit of account_selection', () => {
+    it('rejects a selection without the checking account before the engine sees it', async () => {
+      await expect(
+        service.submit(token, { selectedAccounts: ['account-02'] }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: {
+          code: 'INVALID_STEP_DATA',
+          errors: { selectedAccounts: ['CHECKING_ACCOUNT_REQUIRED'] },
+        },
+      });
+      expect(engine.submit).not.toHaveBeenCalled();
+    });
+
+    it('rejects ids that match no account', async () => {
+      await expect(
+        service.submit(token, { selectedAccounts: ['account-09'] }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('forwards a selection that includes the checking account', async () => {
+      engine.submit.mockResolvedValue({});
+      engine.getState.mockResolvedValue(state());
+
+      await service.submit(token, { selectedAccounts: ['account-01', 'account-02'] });
+
+      expect(engine.submit).toHaveBeenCalledWith('o1', {
+        selectedAccounts: ['account-01', 'account-02'],
+      });
+    });
+
+    it('leaves a session without a persona to the engine', async () => {
+      engine.submit.mockResolvedValue({});
+      engine.getState.mockResolvedValue(state());
+      const { token: bare } = await service.createSession();
+
+      await service.submit(bare, { selectedAccounts: ['account-02'] });
+
+      expect(engine.submit).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('bankLogin', () => {
+    const atBank = () =>
+      state({
+        currentStep: 'bank_connection',
+        step: { ...state().step!, name: 'bank_connection' },
+      });
+
+    it('sets the persona and submits an opaque reference, the method and the profile', async () => {
+      const bare = await service.createSession();
+      personas.summary.mockReturnValue({ id: 'james_watson', profile: 'medium' });
+      engine.getState.mockResolvedValue(atBank());
+      engine.submit.mockResolvedValue({});
+
+      const view = await service.bankLogin(bare.token, 'james_watson', 'qr');
+
+      expect(engine.submit).toHaveBeenCalledWith('o1', {
+        bankConnectionReference: expect.stringMatching(/^[a-f0-9]{32}$/),
+        bankConnectionMethod: 'qr',
+        bankProfile: 'medium',
+      });
+      expect(store.get(bare.token)?.persona).toBe('james_watson');
+      expect(view).toMatchObject({ persona: 'james_watson', accounts: ACCOUNTS });
+    });
+
+    it('answers 409 SESSION_HAS_NO_BANK away from the bank connection step', async () => {
+      engine.getState.mockResolvedValue(state());
+
+      await expect(service.bankLogin(token, 'sherlock_holmes', 'device')).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'SESSION_HAS_NO_BANK' },
+      });
+      expect(engine.submit).not.toHaveBeenCalled();
+    });
+
+    it('answers UNKNOWN_PERSONA before reading the engine', async () => {
+      personas.summary.mockImplementation(() => {
+        throw new PersonaNotFoundError('nobody');
+      });
+
+      await expect(service.bankLogin(token, 'nobody', 'qr')).rejects.toMatchObject({
+        response: { code: 'UNKNOWN_PERSONA' },
+      });
+      expect(engine.getState).not.toHaveBeenCalled();
+    });
+
+    it('maps an engine failure on the submit to the BFF contract', async () => {
+      engine.getState.mockResolvedValue(atBank());
+      engine.submit.mockRejectedValue(EngineError.transport('down'));
+
+      await expect(service.bankLogin(token, 'sherlock_holmes', 'qr')).rejects.toMatchObject({
+        status: 502,
+      });
+    });
+
+    it('leaves the persona unchanged when the engine refuses the submit', async () => {
+      const bare = await service.createSession();
+      personas.summary.mockReturnValue({ id: 'james_watson', profile: 'medium' });
+      engine.getState.mockResolvedValue(atBank());
+      engine.submit.mockRejectedValue(EngineError.transport('down'));
+
+      await expect(service.bankLogin(bare.token, 'james_watson', 'qr')).rejects.toMatchObject({
+        status: 502,
+      });
+      expect(store.get(bare.token)?.persona).toBeNull();
+    });
+  });
+
   describe('run', () => {
-    it('pushes the persona and answers processing', async () => {
+    const selected = () => state({ data: { selectedAccounts: ['account-01', 'account-02'] } });
+
+    it('pushes the persona with the engine-recorded selection and answers processing', async () => {
+      engine.getState.mockResolvedValue(selected());
+
       await expect(service.run(token)).resolves.toEqual({ phase: 'processing' });
-      expect(pusher.push).toHaveBeenCalledWith('o1', 'sherlock_holmes');
+      expect(pusher.push).toHaveBeenCalledWith('o1', 'sherlock_holmes', [
+        'account-01',
+        'account-02',
+      ]);
+    });
+
+    it('answers 409 ACCOUNTS_NOT_SELECTED when the engine holds no selection', async () => {
+      engine.getState.mockResolvedValue(state());
+
+      await expect(service.run(token)).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'ACCOUNTS_NOT_SELECTED' },
+      });
+      expect(pusher.push).not.toHaveBeenCalled();
+    });
+
+    it('answers 409 ACCOUNTS_NOT_SELECTED for a session without a persona', async () => {
+      engine.getState.mockResolvedValue(selected());
+      const { token: bare } = await service.createSession();
+
+      await expect(service.run(bare)).rejects.toMatchObject({
+        response: { code: 'ACCOUNTS_NOT_SELECTED' },
+      });
     });
 
     it('also answers processing when the push meets a parked connector', async () => {
+      engine.getState.mockResolvedValue(selected());
       pusher.push.mockRejectedValue(
         new EngineError(409, 'ONBOARDING_AWAITING_CONNECTOR', 'parked'),
       );
 
       await expect(service.run(token)).resolves.toEqual({ phase: 'processing' });
+    });
+
+    it('answers 409 STEP_NOT_READY when the engine refuses the reservation on this step', async () => {
+      engine.getState.mockResolvedValue(selected());
+      pusher.push.mockRejectedValue(new EngineError(400, 'INVALID_DOCUMENT_UPLOAD', 'wrong step'));
+
+      await expect(service.run(token)).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'STEP_NOT_READY' },
+      });
     });
   });
 

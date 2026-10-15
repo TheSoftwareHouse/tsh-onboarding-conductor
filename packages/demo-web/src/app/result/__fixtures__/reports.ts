@@ -86,7 +86,18 @@ function build(spec: PersonaSpec): Json {
       },
       cashFlows: [],
     },
-    accounts: [{ id: 'acc-1', bankName: 'Fixture Bank', balance: 1250.5, currency: 'GBP' }],
+    accounts: [
+      {
+        id: 'account-01',
+        type: 'CHECKING',
+        name: 'Current account',
+        accountNumber: '4321',
+        bankName: 'Fixture Bank',
+        owner: 'Fixture Owner',
+        balance: 1250.5,
+        currency: 'GBP',
+      },
+    ],
     essentials: {
       monthlyRegularIncome: spec.monthlyIncome,
       monthlyEssentialExpenses: spec.monthlyExpenses,

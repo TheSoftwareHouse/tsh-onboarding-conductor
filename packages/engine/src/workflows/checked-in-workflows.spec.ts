@@ -122,6 +122,18 @@ describe('checked-in workflows', () => {
     expect(everyConnector(shipped!.normalized).map(({ connector }) => connector.id)).toContain(
       'algoan_credit',
     );
+    expect(shipped!.normalized.steps.map((step) => step.name)).toEqual([
+      'applicant',
+      'credit_consent',
+      'bank_selection',
+      'bank_connection',
+      'account_selection',
+      'bank_access_consent',
+      'credit_check',
+      'manual_review',
+      'approved',
+      'declined',
+    ]);
     expect({ ...fork!.authored, id: undefined, name: undefined }).toEqual({
       ...shipped!.authored,
       id: undefined,

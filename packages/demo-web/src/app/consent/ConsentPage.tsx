@@ -1,3 +1,4 @@
+import { Lock, ShieldCheck, UserCheck } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -12,6 +13,12 @@ import { SessionGate, useSessionView } from '../session/useSessionView';
 
 const CONSENT_VERSION = '2026-10';
 
+const BADGES = [
+  { icon: Lock, label: 'Secure connection' },
+  { icon: ShieldCheck, label: 'GDPR compliant' },
+  { icon: UserCheck, label: 'Your data stays private' },
+] as const;
+
 export function ConsentPage() {
   const state = useSessionView('consent');
   const navigate = useNavigate();
@@ -23,7 +30,7 @@ export function ConsentPage() {
     return <SessionGate state={state} />;
   }
 
-  const { token, view } = state;
+  const { token } = state;
 
   async function onContinue() {
     setSubmitting(true);
@@ -33,7 +40,7 @@ export function ConsentPage() {
         openBankingCreditCheckVersion: CONSENT_VERSION,
         openBankingCreditCheckConsent: true,
       });
-      void navigate(sessionPath(token, 'run'));
+      void navigate(sessionPath(token, 'bank'));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not record your consent.');
       setSubmitting(false);
@@ -43,19 +50,23 @@ export function ConsentPage() {
   return (
     <Card className="mx-auto max-w-lg">
       <CardHeader>
-        <CardTitle>Open banking consent</CardTitle>
+        <CardTitle>Share your bank data</CardTitle>
         <CardDescription>
           We read your account data through open banking to assess your credit.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {view.retry === true ? (
-          <p role="status" className="rounded-md border border-warning bg-warning/15 p-3 text-sm">
-            The credit check could not finish
-            {view.attempt === undefined ? '' : ` (attempt ${view.attempt})`}. Confirm your consent
-            to try again.
-          </p>
-        ) : null}
+        <ul className="grid gap-3 sm:grid-cols-3">
+          {BADGES.map(({ icon: Icon, label }) => (
+            <li
+              key={label}
+              className="flex flex-col items-center gap-1 rounded-md border border-border p-3 text-center text-xs"
+            >
+              <Icon aria-hidden="true" className="size-5 text-primary" />
+              {label}
+            </li>
+          ))}
+        </ul>
         <div className="flex items-start gap-3">
           <Checkbox
             id="consent"
@@ -72,7 +83,7 @@ export function ConsentPage() {
           </p>
         )}
         <Button disabled={!agreed || submitting} onClick={() => void onContinue()}>
-          {submitting ? 'Saving…' : 'Continue'}
+          {submitting ? 'Saving…' : 'Go to bank selection'}
         </Button>
       </CardContent>
     </Card>

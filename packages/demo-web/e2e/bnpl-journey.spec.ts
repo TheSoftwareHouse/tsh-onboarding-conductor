@@ -9,7 +9,7 @@ const BFF_ORIGIN = 'http://localhost:3101';
 
 interface CreatedSession {
   token: string;
-  persona: string;
+  persona: string | null;
 }
 
 /** The BFF's test-only route (`NODE_ENV=test`); the public response carries no engine id. */
@@ -34,22 +34,79 @@ async function startFromCard(page: Page, personaId: string): Promise<CreatedSess
   return (await (await created).json()) as CreatedSession;
 }
 
-/** Details (prefilled) -> consent -> run, ending on the processing page. */
-async function runUntilProcessing(page: Page): Promise<void> {
+const TEST_BANK = 'Algoan Demo Bank';
+
+/** Posts the session-creating request of the generic "Start a credit check" button. */
+async function startGeneric(page: Page): Promise<CreatedSession> {
+  await page.goto('/');
+
+  const created = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/v1/bnpl/sessions') && response.request().method() === 'POST',
+  );
+
+  await page.getByRole('button', { name: 'Start a credit check' }).click();
+
+  return (await (await created).json()) as CreatedSession;
+}
+
+async function fillDetails(page: Page, first: string, last: string): Promise<void> {
+  await expect(page.getByText('Your details', { exact: true })).toBeVisible();
+  await page.getByLabel('First name').fill(first);
+  await page.getByLabel('Last name').fill(last);
+  await page.getByLabel('Email').fill(`${first}.${last}@example.com`.toLowerCase());
+  await page.getByRole('button', { name: 'Continue' }).click();
+}
+
+async function giveConsent(page: Page): Promise<void> {
+  await expect(page.getByText('Share your bank data', { exact: true })).toBeVisible();
+  await page.getByLabel(CONSENT_LABEL).click();
+  await page.getByRole('button', { name: 'Go to bank selection' }).click();
+}
+
+/** Bank selection -> device authentication -> login. `profile` is clicked unless preselected. */
+async function connectBank(page: Page, profile: string | null): Promise<void> {
+  await expect(page.getByText('Select your bank', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: TEST_BANK }).click();
+
+  await expect(page.getByText(`Authenticate with the ${TEST_BANK} app`)).toBeVisible();
+  await page.getByRole('link', { name: 'Continue on this device' }).click();
+
+  await expect(page.getByText('Sign in to connect your accounts')).toBeVisible();
+  if (profile === null) {
+    await expect(page.getByRole('radio', { checked: true })).toBeVisible();
+  } else {
+    await page.getByRole('radio', { name: new RegExp(profile) }).check();
+  }
+  await page.getByRole('button', { name: 'Connect bank' }).click();
+
+  await expect(page.getByText('Transmission in progress…', { exact: true })).toBeVisible();
+}
+
+/** Accounts (all of them) -> the bank's authorisation page -> processing. */
+async function authoriseAccounts(page: Page, savings = true): Promise<void> {
+  await expect(page.getByText('Select accounts for analysis', { exact: true })).toBeVisible();
+  await page.getByLabel('Select all accounts').click();
+  await expect(page.getByLabel('Current account')).toBeChecked();
+  if (savings) {
+    await expect(page.getByLabel('Savings account')).toBeChecked();
+  }
+  await page.getByRole('button', { name: 'Confirm' }).click();
+
+  await expect(page.getByText('Algoan wants to access:')).toBeVisible();
+  await page.getByRole('button', { name: 'Authorise access' }).click();
+  await expect(page.getByText('Analysing your accounts', { exact: true })).toBeVisible();
+}
+
+/** From the prefilled details page to processing; `profile` as in `connectBank`. */
+async function runUntilProcessing(page: Page, profile: string | null = null): Promise<void> {
   await expect(page.getByText('Your details', { exact: true })).toBeVisible();
   await expect(page.getByLabel('First name')).not.toHaveValue('');
   await page.getByRole('button', { name: 'Continue' }).click();
 
   await giveConsent(page);
-
-  await page.getByRole('button', { name: 'Run my credit check' }).click();
-  await expect(page.getByText('Analysing your accounts', { exact: true })).toBeVisible();
-}
-
-async function giveConsent(page: Page): Promise<void> {
-  await expect(page.getByText('Open banking consent', { exact: true })).toBeVisible();
-  await page.getByLabel(CONSENT_LABEL).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
+  await connectBank(page, profile);
+  await authoriseAccounts(page);
 }
 
 async function postMockCallback(request: APIRequestContext, onboardingId: string): Promise<void> {
@@ -61,13 +118,12 @@ async function postMockCallback(request: APIRequestContext, onboardingId: string
 }
 
 const SCENARIOS = [
-  { persona: 'sherlock_holmes', decision: 'Approved', score: '965' },
   { persona: 'james_watson', decision: 'Under review', score: '598' },
   { persona: 'james_moriarty', decision: 'Declined', score: '362' },
 ] as const;
 
 for (const { persona, decision, score } of SCENARIOS) {
-  test(`should show ${decision} with score ${score} when ${persona} finishes the credit check`, async ({
+  test(`should show ${decision} with score ${score} when the ${persona} shortcut finishes the credit check`, async ({
     page,
     request,
   }) => {
@@ -82,6 +138,36 @@ for (const { persona, decision, score } of SCENARIOS) {
     await expect(banner.getByText(score, { exact: true })).toBeVisible();
   });
 }
+
+test('should show Approved with score 965 when the generic journey picks the high profile', async ({
+  page,
+  request,
+}) => {
+  const session = await startGeneric(page);
+
+  expect(session.persona).toBeNull();
+  await expect(page.getByLabel('First name')).toHaveValue('');
+  await fillDetails(page, 'Sherlock', 'Holmes');
+  await giveConsent(page);
+  await connectBank(page, 'High score');
+  await authoriseAccounts(page);
+  await postMockCallback(request, await onboardingIdOf(request, session.token));
+
+  const banner = page.getByRole('region', { name: 'Credit decision' });
+
+  await expect(banner.getByRole('heading', { name: 'Approved' })).toBeVisible();
+  await expect(banner.getByText('965', { exact: true })).toBeVisible();
+});
+
+test('should render a QR code on the bank authentication page', async ({ page }) => {
+  await startGeneric(page);
+  await fillDetails(page, 'Sherlock', 'Holmes');
+  await giveConsent(page);
+  await page.getByRole('button', { name: TEST_BANK }).click();
+
+  await expect(page.getByText(`Authenticate with the ${TEST_BANK} app`)).toBeVisible();
+  await expect(page.locator('svg:has(> title) path').first()).toBeAttached();
+});
 
 test('should render every result tab without an error when Sherlock is approved', async ({
   page,
@@ -115,7 +201,8 @@ test('should render every result tab without an error when Sherlock is approved'
     await openTab(sub);
   }
   await openTab('Accounts');
-  await expect(page.getByRole('cell', { name: 'Algoan Demo' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Algoan Demo', exact: true })).toHaveCount(2);
+  await expect(page.getByRole('cell', { name: 'Savings account' })).toBeVisible();
   await openTab('Raw JSON');
   await expect(panel.filter({ visible: true })).toContainText('creditScore');
 });
@@ -129,29 +216,25 @@ async function failCaseUntilRetry(page: Page, request: APIRequestContext): Promi
   await page.goto('/start/fail_case');
   const session = (await (await created).json()) as CreatedSession;
 
-  await expect(page.getByText('Your details', { exact: true })).toBeVisible();
-  // No prefill for a persona the demo does not list.
-  await page.getByLabel('First name').fill('Fail');
-  await page.getByLabel('Last name').fill('Case');
-  await page.getByLabel('Email').fill('fail.case@example.com');
-  await page.getByRole('button', { name: 'Continue' }).click();
+  await fillDetails(page, 'Fail', 'Case');
   await giveConsent(page);
-  await page.getByRole('button', { name: 'Run my credit check' }).click();
-  await expect(page.getByText('Analysing your accounts', { exact: true })).toBeVisible();
+  await connectBank(page, null);
+  // The test-only persona owns a current account only.
+  await authoriseAccounts(page, false);
 
   await postMockCallback(request, await onboardingIdOf(request, session.token));
 
-  await expect(page.getByText('Open banking consent', { exact: true })).toBeVisible();
+  await expect(page.getByText('Select accounts for analysis', { exact: true })).toBeVisible();
 }
 
-test('should ask for consent again when the provider fails the analysis', async ({
+test('should return to the account selection when the provider fails the analysis', async ({
   page,
   request,
 }) => {
   await failCaseUntilRetry(page, request);
 
   await expect(page.getByRole('status')).toContainText('The credit check could not finish');
-  await expect(page.getByLabel(CONSENT_LABEL)).not.toBeChecked();
+  await expect(page).toHaveURL(/\/s\/[^/]+\/accounts$/);
 });
 
 // BUG: the engine's `credit-assessment` step type declares `creditAttemptCount` without

@@ -14,6 +14,8 @@ describe('BnplController', () => {
         story: 'story',
         expectedBand: 'approved',
         expectedScore: 965,
+        profile: 'high',
+        profileLabel: 'High score',
       },
     ];
     const personas = { list: jest.fn().mockReturnValue(summaries) };
@@ -26,6 +28,23 @@ describe('BnplController', () => {
     expect(controller.listPersonas()).toBe(summaries);
     expect(Reflect.getMetadata('path', BnplController)).toBe('v1/bnpl');
     expect(Reflect.getMetadata('path', BnplController.prototype.listPersonas)).toBe('personas');
+  });
+
+  it('forwards the bank login body to the service on POST sessions/:token/bank-login', async () => {
+    const bankLogin = jest.fn().mockResolvedValue({ phase: 'collect' });
+    const controller = new BnplController(
+      { bankLogin } as unknown as BnplService,
+      {} as PersonaService,
+      {} as ConfigService<AppConfig, true>,
+    );
+
+    await expect(
+      controller.bankLogin('tok', { persona: 'james_watson', method: 'qr' }),
+    ).resolves.toEqual({ phase: 'collect' });
+    expect(bankLogin).toHaveBeenCalledWith('tok', 'james_watson', 'qr');
+    expect(Reflect.getMetadata('path', BnplController.prototype.bankLogin)).toBe(
+      'sessions/:token/bank-login',
+    );
   });
 
   describe('GET /v1/bnpl/sessions/:token/onboarding', () => {

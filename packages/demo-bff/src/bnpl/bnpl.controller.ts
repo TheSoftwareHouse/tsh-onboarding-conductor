@@ -4,6 +4,7 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/com
 import { AppConfig } from '../config/app.config';
 import { PersonaService, PersonaSummary } from '../personas/persona.service';
 import { BnplService } from './bnpl.service';
+import { BankLoginDto } from './dto/bank-login.dto';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { GetSessionQuery } from './dto/get-session.query';
 import { CreatedSession, ProcessingView, SessionView } from './dto/session-view';
@@ -50,6 +51,12 @@ export class BnplController {
     @Body() dto: SubmitSessionDto,
   ): Promise<SessionView | ProcessingView> {
     return this.service.submit(token, dto.values);
+  }
+
+  @Post('sessions/:token/bank-login')
+  @HttpCode(200)
+  bankLogin(@Param('token') token: string, @Body() dto: BankLoginDto): Promise<SessionView> {
+    return this.service.bankLogin(token, dto.persona, dto.method);
   }
 
   @Post('sessions/:token/run')

@@ -15,18 +15,28 @@ export interface SessionField {
   value: JsonValue | null;
 }
 
+export type AccountType = 'CHECKING' | 'SAVINGS';
+export type BankProfile = 'high' | 'medium' | 'low' | 'test';
+export type BankLoginMethod = 'qr' | 'device';
+
 export interface SessionAccount {
-  bankName: string | null;
-  owner: string | null;
-  iban: string | null;
+  /** Opaque demo id (`account-01`, ...): the position in the persona file. */
+  id: string;
+  /** `null` for an account type the demo does not name. */
+  type: AccountType | null;
+  name: string;
+  /** The last four of the IBAN; the pages add the masking prefix. */
   accountNumber: string | null;
   balance: number | null;
   currency: string | null;
+  bankName: string | null;
+  owner: string | null;
 }
 
 export interface CreatedSession {
   token: string;
-  persona: string;
+  /** `null` for a session started without a scenario. */
+  persona: string | null;
 }
 
 export interface SessionView {
@@ -40,7 +50,7 @@ export interface SessionView {
   /** Set when the credit check asked for another attempt; the phase is then `collect`. */
   retry?: true;
   attempt?: number;
-  persona: string;
+  persona: string | null;
   accounts?: SessionAccount[];
 }
 
@@ -105,8 +115,13 @@ function sessionPath(token: string, suffix = ''): string {
   return `${BFF_SESSIONS_PATH}/${encodeURIComponent(token)}${suffix}`;
 }
 
-export function createSession(persona: string, signal?: AbortSignal): Promise<CreatedSession> {
-  return request<CreatedSession>(BFF_SESSIONS_PATH, { method: 'POST', body: { persona }, signal });
+/** Without `persona` the session is generic: the bank's profile picker chooses the scenario. */
+export function createSession(persona?: string, signal?: AbortSignal): Promise<CreatedSession> {
+  return request<CreatedSession>(BFF_SESSIONS_PATH, {
+    method: 'POST',
+    body: persona === undefined ? {} : { persona },
+    signal,
+  });
 }
 
 /** `wait` (seconds, 0-25) makes the BFF hold the request while the session is processing. */
@@ -129,6 +144,15 @@ export function submitSession(
     body: { values },
     signal,
   });
+}
+
+/** The simulated bank login: sets the session's persona and records the connection. */
+export function bankLogin(
+  token: string,
+  body: { persona: string; method: BankLoginMethod },
+  signal?: AbortSignal,
+): Promise<SessionView> {
+  return request<SessionView>(sessionPath(token, '/bank-login'), { method: 'POST', body, signal });
 }
 
 export function runSession(token: string, signal?: AbortSignal): Promise<ProcessingView> {
@@ -185,6 +209,9 @@ export interface PersonaSummary {
   story: string;
   expectedBand: Decision;
   expectedScore: number;
+  profile: BankProfile;
+  /** E.g. "High score · High disposable income · No incidents". */
+  profileLabel: string;
   /** Test-only personae: not offered as a card on the start page. */
   hidden?: boolean;
 }

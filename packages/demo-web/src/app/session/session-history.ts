@@ -3,7 +3,7 @@ const MAX_ENTRIES = 20;
 
 export interface StoredSession {
   token: string;
-  persona: string;
+  persona: string | null;
   startedAt: string;
 }
 
@@ -15,7 +15,7 @@ function isStoredSession(value: unknown): value is StoredSession {
 
   return (
     typeof entry.token === 'string' &&
-    typeof entry.persona === 'string' &&
+    (typeof entry.persona === 'string' || entry.persona === null) &&
     typeof entry.startedAt === 'string'
   );
 }
@@ -32,7 +32,7 @@ export function readSessions(): StoredSession[] {
   }
 }
 
-export function rememberSession(token: string, persona: string): void {
+export function rememberSession(token: string, persona: string | null): void {
   try {
     const next = [
       { token, persona, startedAt: new Date().toISOString() },

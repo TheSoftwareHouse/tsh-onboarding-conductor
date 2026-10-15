@@ -21,6 +21,7 @@ const bankData = (name: string, extra: Record<string, unknown> = {}): CreditBank
       accounts: [
         {
           balance: 100,
+          iban: 'GB29NWBK60161331926819',
           owners: [{ name }],
           transactions: [
             { id: 't1', amount: 2500, description: 'Salary' },
@@ -149,7 +150,7 @@ describe('MockCreditProvider', () => {
       },
     });
     expect(result.report.accounts).toEqual([
-      { balance: 100, owners: [{ name: 'Sherlock Holmes' }] },
+      { balance: 100, iban: '****6819', owners: [{ name: 'Sherlock Holmes' }] },
     ]);
   });
 

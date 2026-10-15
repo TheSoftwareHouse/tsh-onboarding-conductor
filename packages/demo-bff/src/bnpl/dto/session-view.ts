@@ -13,7 +13,7 @@ export interface SessionField {
 
 export interface CreatedSession {
   token: string;
-  persona: string;
+  persona: string | null;
 }
 
 export interface SessionView {
@@ -27,7 +27,8 @@ export interface SessionView {
   /** Set when the credit check asked for another attempt; the phase is then `collect`. */
   retry?: true;
   attempt?: number;
-  persona: string;
+  persona: string | null;
+  /** Present once the session has a persona; on a result only the accounts the customer selected. */
   accounts?: PersonaAccountSummary[];
 }
 

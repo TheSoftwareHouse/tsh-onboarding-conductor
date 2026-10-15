@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../config/app.config';
 import { EngineClient } from '../engine/engine.client';
 import { EngineError } from '../engine/engine-error';
-import { PersonaService } from '../personas/persona.service';
+import { accountIdAt, PersonaService } from '../personas/persona.service';
 import { rebaseDates } from '../personas/rebase-dates';
 
 const BANK_DATA_FIELD = 'bankData';
@@ -21,7 +21,7 @@ export class BankDataUploadError extends Error {
 }
 
 /**
- * Pushes a persona's bank data into an onboarding the way a customer's browser would upload a
+ * Pushes a persona's selected accounts into an onboarding the way a customer's browser would upload a
  * document: reserve, upload to the presigned form, complete, then submit the document id.
  */
 @Injectable()
@@ -37,18 +37,24 @@ export class BankDataPusher {
   }
 
   /**
-   * `parked: true` means the submit ran the connector chain and the onboarding now waits on the
+   * `selectedAccountIds` are the opaque ids (`account-01`, …) the engine recorded; an account
+   * outside the list is never uploaded. `parked: true` means the submit ran the connector chain and the onboarding now waits on the
    * provider (`ONBOARDING_AWAITING_CONNECTOR`); the caller polls `/state`, never resubmits.
    */
   async push(
     onboardingId: string,
     personaId: string,
+    selectedAccountIds: readonly string[],
     today: Date = new Date(),
   ): Promise<PushResult> {
-    const content = Buffer.from(
-      JSON.stringify(rebaseDates(this.personas.load(personaId), today)),
-      'utf8',
-    );
+    const bankData = this.personas.load(personaId);
+    const selected = {
+      ...bankData,
+      accounts: bankData.accounts.filter((_, index) =>
+        selectedAccountIds.includes(accountIdAt(index)),
+      ),
+    };
+    const content = Buffer.from(JSON.stringify(rebaseDates(selected, today)), 'utf8');
 
     const reservation = await this.engine.reserveDocument(onboardingId, {
       field: BANK_DATA_FIELD,

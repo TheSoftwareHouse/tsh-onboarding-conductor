@@ -5,7 +5,7 @@ import { BffError, getSession, type SessionView } from '@/api/bnpl/bnpl.client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
-import { pageFor, sessionPath, type JourneyPage } from './session-routes';
+import { isPageFor, pageFor, sessionPath, type JourneyPage } from './session-routes';
 
 export type SessionState =
   | { status: 'loading' }
@@ -33,12 +33,10 @@ export function useSessionView(page: JourneyPage): SessionState & { token: strin
 
     getSession(token, { wait: 0, signal: controller.signal })
       .then((view) => {
-        const target = pageFor(view);
-
-        if (target === page) {
+        if (isPageFor(view, page)) {
           setState({ status: 'ready', view });
         } else {
-          void navigate(sessionPath(token, target), { replace: true });
+          void navigate(sessionPath(token, pageFor(view)), { replace: true });
         }
       })
       .catch((error: unknown) => {

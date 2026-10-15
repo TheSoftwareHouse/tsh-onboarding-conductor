@@ -2,16 +2,21 @@
 
 Open Banking data pushed to Algoan by the BNPL demo (`POST /v2/customers/{customerId}/analyses`,
 `format: ALGOAN`, `dataOrigin: OPEN_BANKING`). Each file is one `{ accounts: [...] }` document
-with a single `CHECKING` / `PERSONAL` GBP account at "Algoan Demo" and its transactions.
+with a `CHECKING` and a `SAVINGS` `PERSONAL` GBP account at "Algoan Demo" and their transactions
+(the demo's account-selection step lets the user pick which of the two is analysed; the analysis
+needs the `CHECKING` one).
 
-Sandbox scores measured on 2026-10-15 (credit score version `1.0.0`, payment score `1.1.0`).
+Sandbox scores measured on 2026-10-15 (credit score version `1.0.0`, payment score `1.1.0`), the
+second time with both accounts pushed: the savings account (monthly transfers from the current
+account, a little interest) leaves every score unchanged, so the numbers below hold for both
+accounts and for the checking account alone.
 The score is deterministic for identical data and dates; it drifts slowly as the window moves.
 
-| File                      | Owner           | Credit score | Payment score | Band (default `bands`) | Profile                                                                                                                                                                                       |
-| ------------------------- | --------------- | ------------ | ------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `en/sherlock_holmes.json` | SHERLOCK HOLMES | 965          | 10            | `approved` (≥ 700)     | Upstream sample. £2 500/month wage, mortgage, four consumer credits, two split payments, no incidents, stable cash flows.                                                                     |
-| `en/james_watson.json`    | JAMES WATSON    | 598          | 3             | `review` (400–699)     | Upstream sample. £1 350/month wage, frequent gambling, overdraft fees, unpaid direct debits, two consumer loans. (The upstream README says "< 100"; today's sandbox model scores it 598.)     |
-| `en/james_moriarty.json`  | JAMES MORIARTY  | 362          | 2             | `declined` (< 400)     | Authored here from Watson's file: no wage, Universal Credit only (£620/month), heavier gambling, debt-collection and bailiff payments, extra unpaid direct debit, deeper overdraft (−£3 784). |
+| File                      | Accounts                              | Owner           | Credit score | Payment score | Band (default `bands`) | Profile                                                                                                                                                                                       |
+| ------------------------- | ------------------------------------- | --------------- | ------------ | ------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `en/sherlock_holmes.json` | Current £3 633.03 + Savings £2 150.40 | SHERLOCK HOLMES | 965          | 10            | `approved` (≥ 700)     | Upstream sample. £2 500/month wage, mortgage, four consumer credits, two split payments, no incidents, stable cash flows.                                                                     |
+| `en/james_watson.json`    | Current −£362.05 + Savings £40.00     | JAMES WATSON    | 598          | 3             | `review` (400–699)     | Upstream sample. £1 350/month wage, frequent gambling, overdraft fees, unpaid direct debits, two consumer loans. (The upstream README says "< 100"; today's sandbox model scores it 598.)     |
+| `en/james_moriarty.json`  | Current −£3 784.19 + Savings £5.00    | JAMES MORIARTY  | 362          | 2             | `declined` (< 400)     | Authored here from Watson's file: no wage, Universal Credit only (£620/month), heavier gambling, debt-collection and bailiff payments, extra unpaid direct debit, deeper overdraft (−£3 784). |
 
 Bands are the `credit-assessment` step's `bands` config (`approveFrom`, `reviewFrom`), so a workflow
 can move the thresholds; the scores above are what the sandbox returns for these files.

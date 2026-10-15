@@ -12,6 +12,7 @@ export interface BankAccount {
   owners?: Array<{ name?: string }>;
   bank?: { name?: string };
   iban?: string;
+  type?: string;
   number?: string;
   transactions?: BankTransaction[];
   [key: string]: unknown;

@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/table';
 
 import { NotComputed } from './NotComputed';
-import { formatGbp, maskIdentifier } from './report-selectors';
+import { formatGbp } from './report-selectors';
 
 function formatBalance(account: SessionAccount): string {
   if (account.balance === null) {
@@ -33,19 +33,21 @@ export function AccountsTab({ accounts }: { accounts: SessionAccount[] }) {
         <TableRow>
           <TableHead>Bank</TableHead>
           <TableHead>Owner</TableHead>
-          <TableHead>IBAN</TableHead>
+          <TableHead>Account</TableHead>
           <TableHead>Account number</TableHead>
           <TableHead className="text-right">Balance</TableHead>
           <TableHead>Currency</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {accounts.map((account, index) => (
-          <TableRow key={`${account.iban ?? account.accountNumber ?? 'account'}-${index}`}>
+        {accounts.map((account) => (
+          <TableRow key={account.id}>
             <TableCell>{account.bankName ?? 'n/a'}</TableCell>
             <TableCell>{account.owner ?? 'n/a'}</TableCell>
-            <TableCell>{maskIdentifier(account.iban) ?? 'n/a'}</TableCell>
-            <TableCell>{maskIdentifier(account.accountNumber) ?? 'n/a'}</TableCell>
+            <TableCell>{account.name}</TableCell>
+            <TableCell>
+              {account.accountNumber === null ? 'n/a' : `**** ${account.accountNumber}`}
+            </TableCell>
             <TableCell className="text-right tabular-nums">{formatBalance(account)}</TableCell>
             <TableCell>{account.currency ?? 'n/a'}</TableCell>
           </TableRow>

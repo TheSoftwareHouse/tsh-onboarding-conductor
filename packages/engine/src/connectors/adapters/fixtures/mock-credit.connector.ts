@@ -7,6 +7,7 @@ import type {
 } from '../../ports/connector-adapter.port';
 import { AwaitingCallbackConnectorResolver } from '../../resolvers/awaiting-callback-connector.resolver';
 import { CompletedOnboardingDocumentResolver } from '../../resolvers/completed-onboarding-document.resolver';
+import { maskAccountIdentifiers } from '../built-in/shared/mask-account-identifiers';
 import { CreditConnector } from '../built-in/credit/credit-connector';
 import {
   CreditBankDataInvalidError,
@@ -153,8 +154,10 @@ const buildReport = (document: BankDocument, score: CreditScore) => {
         categories: [insightCategory('living', expenses)],
       },
     },
-    accounts: document.accounts.map((account) =>
-      Object.fromEntries(Object.entries(account).filter(([key]) => key !== 'transactions')),
+    accounts: maskAccountIdentifiers(
+      document.accounts.map((account) =>
+        Object.fromEntries(Object.entries(account).filter(([key]) => key !== 'transactions')),
+      ),
     ),
     transactions: {
       resources: transactions.map((transaction) => ({

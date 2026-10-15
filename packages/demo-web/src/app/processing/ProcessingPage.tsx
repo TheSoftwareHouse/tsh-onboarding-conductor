@@ -35,7 +35,7 @@ export function ProcessingPage() {
       if (outcome.kind === 'result') {
         void navigate(sessionPath(token, 'result'), { replace: true });
       } else if (outcome.kind === 'retry') {
-        void navigate(sessionPath(token, 'consent'), { replace: true });
+        void navigate(sessionPath(token, 'accounts'), { replace: true });
       } else {
         setState({ status: 'timeout' });
       }

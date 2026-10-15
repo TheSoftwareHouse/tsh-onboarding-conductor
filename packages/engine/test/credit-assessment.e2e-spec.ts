@@ -98,6 +98,32 @@ describe('Credit assessment step (e2e)', () => {
       .send({ firstName: 'Sherlock', lastName: 'Holmes', email: 'sherlock@example.com' })
       .expect(201);
     await submitConsent(onboardingId);
+    await submitBankJourney(onboardingId);
+  };
+
+  /** The bank journey between the credit consent and the bank data: the steps the retry edge skips back over. */
+  const submitBankJourney = async (onboardingId: string) => {
+    const submit = (body: Record<string, unknown>) =>
+      http().post(`/v1/onboardings/${onboardingId}/submit`).send(body).expect(201);
+
+    await submit({ bankId: 'algoan_demo_bank', bankName: 'Algoan Demo Bank' });
+    await submit({
+      bankConnectionReference: '0123456789abcdef0123456789abcdef',
+      bankConnectionMethod: 'device',
+      bankProfile: 'high',
+    });
+    await submitAccountSelection(onboardingId);
+  };
+
+  const submitAccountSelection = async (onboardingId: string) => {
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ selectedAccounts: ['account-01', 'account-02'] })
+      .expect(201);
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ bankDataAccessVersion: '2026-10', bankDataAccessConsent: true })
+      .expect(201);
   };
 
   const submitConsent = (onboardingId: string) =>
@@ -264,7 +290,7 @@ describe('Credit assessment step (e2e)', () => {
     expect(submitted.creditOutcome).toBe('approved');
   });
 
-  it('loops Fail Case runs back to the consent step until the attempt cap, then sends the last failure to review', async () => {
+  it('loops Fail Case runs back to the account selection step until the attempt cap, then sends the last failure to review', async () => {
     const onboardingId = await start();
     await submitCollectSteps(onboardingId);
     const firstReference = await parkOn(onboardingId, bankDataFor('Fail Case'));
@@ -273,19 +299,19 @@ describe('Credit assessment step (e2e)', () => {
     const retried = await readState(onboardingId);
     expect(retried.terminal).toBe(false);
     expect(retried.pending).toBeNull();
-    expect(retried.currentStep).toBe('credit_consent');
+    expect(retried.currentStep).toBe('account_selection');
     await expect(readContext(onboardingId)).resolves.toMatchObject({
       creditAttemptCount: 1,
       creditOutcome: 'retry',
     });
 
-    await submitConsent(onboardingId);
+    await submitAccountSelection(onboardingId);
     const secondReference = await parkOn(onboardingId, bankDataFor('Fail Case'));
     expect(secondReference).toBe(`mock:${onboardingId}:2`);
     await postCallback(onboardingId, secondReference).expect(204);
-    expect((await readState(onboardingId)).currentStep).toBe('credit_consent');
+    expect((await readState(onboardingId)).currentStep).toBe('account_selection');
 
-    await submitConsent(onboardingId);
+    await submitAccountSelection(onboardingId);
     const thirdReference = await parkOn(onboardingId, bankDataFor('Fail Case'));
     expect(thirdReference).toBe(`mock:${onboardingId}:3`);
     await postCallback(onboardingId, thirdReference).expect(204);
