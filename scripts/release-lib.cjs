@@ -4,7 +4,10 @@
  * here is testable with plain strings (`release-lib.test.cjs`).
  *
  * A squash merge's subject is the PR title, which CONTRIBUTING.md requires to be a Conventional
- * Commit. A title that is not one still releases; it lands under "Other changes".
+ * Commit. A title that is not one still releases; it lands under "Changed".
+ *
+ * Entries follow Keep a Changelog (keepachangelog.com): an Added / Changed / Fixed section each, one
+ * short line per change and no pull request links.
  */
 
 const CONVENTIONAL_SUBJECT = /^([A-Za-z]+)(?:\(([^)]*)\))?(!)?: (.+)$/;
@@ -55,11 +58,11 @@ function nextVersion(current, parsedCommits) {
   return `${major}.${minor}.${patch + 1}`;
 }
 
+// Keep a Changelog's order. A breaking change stays in its type's section, marked on its line.
 const GROUPS = [
-  { title: 'Breaking changes', includes: (commit) => commit.breaking },
-  { title: 'Features', includes: (commit) => commit.type === 'feat' },
-  { title: 'Fixes', includes: (commit) => commit.type === 'fix' },
-  { title: 'Other changes', includes: () => true },
+  { title: 'Added', includes: (commit) => commit.type === 'feat' },
+  { title: 'Changed', includes: (commit) => commit.type !== 'feat' && commit.type !== 'fix' },
+  { title: 'Fixed', includes: (commit) => commit.type === 'fix' },
 ];
 
 /** Titles are untrusted text rendered into Markdown: `<` could open raw HTML. */
@@ -67,22 +70,24 @@ function escapeHtml(text) {
   return text.replace(/</g, '&lt;');
 }
 
-function renderLine(commit, repoUrl) {
-  const scope = commit.scope ? `**${escapeHtml(commit.scope)}:** ` : '';
-  const link = commit.pr ? ` ([#${commit.pr}](${repoUrl}/pull/${commit.pr}))` : '';
-  return `- ${scope}${escapeHtml(commit.description)}${link}`;
+function capitalize(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** Each commit lands in the first group that claims it; commits keep the order they were given. */
-function renderEntry(version, isoDate, parsedCommits, repoUrl) {
-  const remaining = [...parsedCommits];
+/** `- Scope — Description`, the scope omitted when the title has none. */
+function renderLine(commit) {
+  const breaking = commit.breaking ? '**Breaking:** ' : '';
+  const topic = commit.scope ? `${capitalize(escapeHtml(commit.scope))} — ` : '';
+  return `- ${breaking}${topic}${capitalize(escapeHtml(commit.description))}`;
+}
+
+/** Empty sections are left out; commits keep the order they were given. */
+function renderEntry(version, isoDate, parsedCommits) {
   const sections = [];
   for (const group of GROUPS) {
-    const members = remaining.filter(group.includes);
+    const members = parsedCommits.filter(group.includes);
     if (members.length === 0) continue;
-    for (const member of members) remaining.splice(remaining.indexOf(member), 1);
-    const lines = members.map((commit) => renderLine(commit, repoUrl));
-    sections.push(`### ${group.title}\n\n${lines.join('\n')}`);
+    sections.push(`### ${group.title}\n\n${members.map(renderLine).join('\n')}`);
   }
   return [`## ${version} — ${isoDate}`, ...sections].join('\n\n') + '\n';
 }

@@ -39,6 +39,9 @@ const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 const SEMVER = /^\d+\.\d+\.\d+$/;
 const CHANGELOG_INTRO = `# Changelog
 
+All notable changes to this project are documented in this file. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
 One product version covers the whole monorepo. Every pull request merged into \`main\` bumps it and
 adds an entry here, generated from the squash-merge commit subject (the PR title). See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning).
@@ -122,13 +125,6 @@ function rewriteVersion(path, next) {
   return rewritten;
 }
 
-function repositoryUrl() {
-  const { repository } = JSON.parse(readText(ROOT_PACKAGE));
-  const url = typeof repository === 'string' ? repository : repository && repository.url;
-  if (!url) throw new Error(`${ROOT_PACKAGE} has no repository.url`);
-  return url.replace(/^git\+/, '').replace(/\.git$/, '');
-}
-
 function newestTag() {
   try {
     return execFileSync('git', ['describe', '--tags', '--match', 'v*', '--abbrev=0', 'HEAD'], {
@@ -189,7 +185,7 @@ function main() {
   const changelog = existsSync(join(REPO_ROOT, CHANGELOG)) ? readText(CHANGELOG) : CHANGELOG_INTRO;
   if (commits.length > 0 && !hasEntry(changelog, next)) {
     const isoDate = new Date().toISOString().slice(0, 10);
-    const entry = renderEntry(next, isoDate, commits, repositoryUrl());
+    const entry = renderEntry(next, isoDate, commits);
     writes.set(CHANGELOG, prependEntry(changelog, entry));
   }
 

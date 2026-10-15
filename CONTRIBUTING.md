@@ -59,8 +59,8 @@ tool by hand produces confusing failures.
 
 ## Versioning
 
-Every merge into `main` is released automatically: `.github/workflows/release.yml` bumps the version,
-adds a `CHANGELOG.md` entry and tags `vX.Y.Z`
+Every merge into `main` is released automatically: the Version bump workflow
+(`.github/workflows/release.yml`) bumps the version, adds a `CHANGELOG.md` entry and tags `vX.Y.Z`
 ([decision 0046](docs/decisions/0046-commit-driven-versioning.md)). You add nothing to the pull
 request — no version change, no changelog edit.
 
@@ -72,9 +72,10 @@ The squash-merge title becomes the changelog line, so write it as a Conventional
 feat(engine): postal code field type (#123)
 ```
 
-- `feat` is listed under **Features**, `fix` under **Fixes**, any other type — or a title that is
-  not a Conventional Commit — under **Other changes**. The scope is shown in bold and `(#123)`
-  becomes a link to the pull request.
+- `feat` is listed under **Added**, `fix` under **Fixed**, any other type — or a title that is not
+  a Conventional Commit — under **Changed**
+  ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)). The line reads `Scope — Description`;
+  `(#123)` is dropped, so the description alone has to say what changed.
 - Check the title in the merge dialog. For a pull request with one commit, GitHub proposes that
   commit's title instead of the pull request's.
 

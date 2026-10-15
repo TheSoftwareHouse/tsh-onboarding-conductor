@@ -9,8 +9,6 @@ const {
   hasEntry,
 } = require('./release-lib.cjs');
 
-const REPO = 'https://github.com/example/repo';
-
 describe('parseCommit', () => {
   it('parses a conventional subject with a scope and a PR number', () => {
     assert.deepEqual(parseCommit('feat(engine): add x (#123)', ''), {
@@ -95,13 +93,10 @@ describe('nextVersion', () => {
 
 describe('renderEntry', () => {
   it('escapes < in descriptions and scopes', () => {
-    const entry = renderEntry(
-      '0.1.0',
-      '2026-10-13',
-      [parseCommit('fix(<b>): handle <script> tags', '')],
-      REPO,
-    );
-    assert.match(entry, /\*\*&lt;b>:\*\* handle &lt;script> tags/);
+    const entry = renderEntry('0.1.0', '2026-10-13', [
+      parseCommit('fix(<b>): handle <script> tags', ''),
+    ]);
+    assert.match(entry, /- &lt;b> — Handle &lt;script> tags/);
     assert.doesNotMatch(entry, /</);
   });
 
@@ -114,58 +109,54 @@ describe('renderEntry', () => {
     parseCommit('fix: second fix', ''),
   ];
 
-  it('groups in a fixed order, keeps input order inside a group and links the PR', () => {
+  it('groups into Added, Changed and Fixed, keeps input order and links no pull request', () => {
     assert.equal(
-      renderEntry('0.1.0', '2026-10-13', commits, REPO),
+      renderEntry('0.1.0', '2026-10-13', commits),
       [
         '## 0.1.0 — 2026-10-13',
         '',
-        '### Breaking changes',
+        '### Added',
         '',
-        `- **api:** breaking one ([#5](${REPO}/pull/5))`,
+        '- Panel — First feature',
+        '- **Breaking:** Api — Breaking one',
         '',
-        '### Features',
+        '### Changed',
         '',
-        `- **panel:** first feature ([#3](${REPO}/pull/3))`,
+        '- First other',
+        '- Plain title',
         '',
-        '### Fixes',
+        '### Fixed',
         '',
-        `- **engine:** first fix ([#2](${REPO}/pull/2))`,
-        '- second fix',
-        '',
-        '### Other changes',
-        '',
-        `- first other ([#1](${REPO}/pull/1))`,
-        `- Plain title ([#4](${REPO}/pull/4))`,
+        '- Engine — First fix',
+        '- Second fix',
         '',
       ].join('\n'),
     );
   });
 
   it('omits empty groups', () => {
-    const entry = renderEntry('0.0.2', '2026-10-13', [parseCommit('fix: only (#9)', '')], REPO);
-    assert.equal(entry.includes('Breaking changes'), false);
-    assert.equal(entry.includes('Features'), false);
-    assert.equal(entry.includes('Other changes'), false);
-    assert.equal(entry.includes('### Fixes'), true);
+    const entry = renderEntry('0.0.2', '2026-10-13', [parseCommit('fix: only (#9)', '')]);
+    assert.equal(entry.includes('### Added'), false);
+    assert.equal(entry.includes('### Changed'), false);
+    assert.equal(entry.includes('### Fixed'), true);
   });
 });
 
 describe('prependEntry', () => {
-  const entry = '## 0.0.2 — 2026-10-14\n\n### Fixes\n\n- b\n';
+  const entry = '## 0.0.2 — 2026-10-14\n\n### Fixed\n\n- b\n';
 
   it('inserts before the first existing entry, after the intro', () => {
     const changelog = '# Changelog\n\nIntro.\n\n## 0.0.1 — 2026-10-13\n\n- a\n';
     assert.equal(
       prependEntry(changelog, entry),
-      '# Changelog\n\nIntro.\n\n## 0.0.2 — 2026-10-14\n\n### Fixes\n\n- b\n\n## 0.0.1 — 2026-10-13\n\n- a\n',
+      '# Changelog\n\nIntro.\n\n## 0.0.2 — 2026-10-14\n\n### Fixed\n\n- b\n\n## 0.0.1 — 2026-10-13\n\n- a\n',
     );
   });
 
   it('appends to an intro-only file', () => {
     assert.equal(
       prependEntry('# Changelog\n\nIntro.\n', entry),
-      '# Changelog\n\nIntro.\n\n## 0.0.2 — 2026-10-14\n\n### Fixes\n\n- b\n',
+      '# Changelog\n\nIntro.\n\n## 0.0.2 — 2026-10-14\n\n### Fixed\n\n- b\n',
     );
   });
 });

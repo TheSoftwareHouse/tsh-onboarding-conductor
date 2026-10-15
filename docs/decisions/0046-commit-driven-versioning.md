@@ -20,12 +20,14 @@ newest `v*` tag and bumps:
 
 The script writes the version into every version file, prepends the entry to the generated
 `CHANGELOG.md`, commits `chore(release): vX.Y.Z [skip ci]` and creates a lightweight tag `vX.Y.Z`.
+Entries follow Keep a Changelog: `feat` under Added, `fix` under Fixed, the rest under Changed, one
+short `Scope — Description` line per merge and no pull request links.
 It never pushes; the workflow pushes the branch only when the script committed, and pushes the tag
 only when the script created it.
 
 **A version set by hand in a PR is released as it is.** When the root version has no tag yet, the
-script tags it without bumping; a `CHANGELOG` entry is committed if the PR did not write one. That is how `0.0.1` is baselined (the first run
-after the merge tags `v0.0.1`) and how a maintainer jumps to `0.1.0` or `1.0.0`.
+script tags it without bumping; a `CHANGELOG` entry is committed if the PR did not write one. That is how `0.1.0` is baselined (the first run
+after the merge tags `v0.1.0`) and how a maintainer jumps to `0.2.0` or `1.0.0`.
 
 **Changesets are removed.** `@changesets/cli`, the `changeset` script and `.changeset/` are gone;
 no author action is needed for a release.

@@ -1,4 +1,4 @@
-name: Release
+name: Version bump
 
 # Every merge into main is released: `scripts/release.cjs` works out the next version from the
 # squash-merge subjects since the last `v*` tag, writes it into every version file, prepends the
@@ -14,19 +14,19 @@ on:
       - main
   workflow_dispatch:
 
-# One release at a time, and never cancelled: a cancelled run could leave a tag created locally but
-# never pushed. Each run checks out main by branch, not the triggering SHA, so a run that starts
+# One version bump at a time, and never cancelled: a cancelled run could leave a tag created locally
+# but never pushed. Each run checks out main by branch, not the triggering SHA, so a run that starts
 # after two quick merges releases both in one version and the run queued behind it is a no-op,
 # instead of the second run trying to release an older commit on top of the first one's release.
 concurrency:
-  group: release
+  group: version-bump
   cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  version-bump:
     # Expression only. The commit message is a PR title, i.e. untrusted text: it may be compared in
     # an expression like this one, but must never be interpolated into a `run:` script.
     if: >-
@@ -59,7 +59,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Release
+      - name: Bump version
         run: node scripts/release.cjs
 
       # The script ends in one of three states, and only what it created is pushed:
