@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { EnvironmentBadge } from './EnvironmentBadge';
 import { SessionBar } from './SessionBar/SessionBar';
 import { BrandLockup } from '@/components/ui/BrandLockup/BrandLockup';
 import { SideNav, SideNavGroup, SideNavItem } from '@/components/ui/SideNav/SideNav';
@@ -13,8 +14,9 @@ export interface AppSidebarProps {
 export function AppSidebar({ rememberedSearch }: AppSidebarProps): ReactElement {
   return (
     <aside className="flex w-66 flex-none flex-col border-r border-border-rule bg-bg-page">
-      <div className="flex h-header flex-none items-center border-b border-border-rule px-6">
+      <div className="flex h-header flex-none flex-col items-start justify-center gap-2 border-b border-border-rule px-6">
         <BrandLockup />
+        <EnvironmentBadge />
       </div>
       <SideNav label="Sections">
         {ADMIN_NAV_GROUPS.map((group) => (

@@ -2622,6 +2622,15 @@ One `AppConfig` class (`config/app.config.ts`), validated by `validateConfig` at
 `.env.dist` is the documented sample; `ConfigModule` reads `.env` (with `.env.dist` last on the
 search path).
 
+**Every deployment names its environment.** `ENVIRONMENT_NAME` is a required lowercase slug
+(`^[a-z0-9][a-z0-9-]{0,62}$`) — `dev`, `staging`, `pre-prod`, `prod` or whatever a promotion path
+calls its stages — and `NODE_ENV` is required and one of `development`, `production` or `test`
+(`NodeEnv`, `config/environment.config.ts`); neither has a default, so a deployment that omits one
+refuses to start. The name is a label for operators (the admin panel shows it, §12) and never
+changes behaviour; `NODE_ENV=production` is what the production-only rules read, and `test` is what
+lets `CONNECTOR_MOCKS` apply. One engine serves one environment: connector credentials, selections
+and onboardings are not partitioned by it ([0047](decisions/0047-deployment-environment-name.md)).
+
 Beyond `class-validator` decorators, `validateConfig` enforces cross-field rules that a decorator
 cannot express:
 
@@ -3030,7 +3039,9 @@ detail properties reads them through its own reader, `readDraftError` or
 messages at construction through `describeCode`.
 
 Every signed-in page renders inside `AdminLayout` (`src/app/layout/`): a fixed sidebar —
-brand, the sections under their `group` heading, and the signed-in operator with sign-out — beside
+brand with the engine's environment under it (`EnvironmentBadge`: the `ENVIRONMENT_NAME`, outlined
+red when `NODE_ENV=production` whatever it is called, absent under `pnpm dev` where no engine rendered
+`/config.js`), the sections under their `group` heading, and the signed-in operator with sign-out — beside
 a scrolling content column. The layout mounts no header of its own: **every page renders its own
 `PageHeader`**, because the page is what owns the actions and the status that band carries, and a
 header mounted a level above its own controls could only be reached by portalling into it. A
@@ -3720,10 +3731,10 @@ Decisions worth keeping:
   that is unset, empty or blank is omitted rather than written as `""`, because `readRuntimeEnv()`
   drops empty values anyway. `VITE_ENGINE_API_BASE_URL` defaults to `/`: the panel is served from
   the engine's own origin, so a relative base URL is correct however the deployment publishes it,
-  and an absolute one would break the moment `ENGINE_PORT` was remapped. `VITE_NODE_ENV` is the
-  one derived key: it is always the engine's own `NODE_ENV`, never read from a variable of that
-  name, so it needs no Compose or `.env.dist` entry and cannot disagree with what the engine
-  loaded. Under `pnpm dev` and in
+  and an absolute one would break the moment `ENGINE_PORT` was remapped. `VITE_NODE_ENV` and
+  `VITE_ENVIRONMENT_NAME` are the derived keys: always the engine's own `NODE_ENV` and
+  `ENVIRONMENT_NAME`, never read from variables of those names, so they need no Compose or
+  `.env.dist` entry and cannot disagree with what the engine loaded. Under `pnpm dev` and in
   Vitest, `window.__ENV__` is never set, so `import.meta.env` alone decides behaviour — unchanged
   from before this mechanism existed.
 

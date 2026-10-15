@@ -18,6 +18,7 @@ import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-web
 import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
 import { parseConnectorCallbackUnsignedTypes } from './connector-callback-unsigned-types.config';
 import { parseConnectorMocks } from './connector-mocks.config';
+import { NodeEnv, parseEnvironmentName } from './environment.config';
 import { isEncryptionKeyConfigured, parseEncryptionKey } from './encryption.config';
 import { parseHttpConnectorSecrets } from './http-connector-secrets.config';
 
@@ -121,9 +122,19 @@ export class AppConfig {
   @Type(() => Number)
   PORT: number = 3000;
 
+  /**
+   * Required: `production` turns on every production-only rule (`config/environment.config.ts`),
+   * and `test` marks a test run, the only one `CONNECTOR_MOCKS` applies to.
+   */
+  @IsEnum(NodeEnv)
+  @Type(() => String)
+  NODE_ENV!: NodeEnv;
+
+  /** Which environment this deployment is — `dev`, `staging`, `pre-prod`, `prod` — shown to operators. */
   @IsString()
-  @IsOptional()
-  NODE_ENV: string = 'development';
+  @IsNotEmpty()
+  @Type(() => String)
+  ENVIRONMENT_NAME!: string;
 
   @IsString()
   @IsNotEmpty()
@@ -559,6 +570,8 @@ export function validateConfig(config: Record<string, unknown>) {
 
   validatedConfig.WEBHOOK_OUTBOX_QUEUE_NAME = validatedConfig.WEBHOOK_OUTBOX_QUEUE_NAME.trim();
 
+  validatedConfig.ENVIRONMENT_NAME = parseEnvironmentName(validatedConfig.ENVIRONMENT_NAME);
+
   validatedConfig.CLIENT_WEBHOOK_BASE_URL = validateClientWebhookUrl(
     validatedConfig.CLIENT_WEBHOOK_BASE_URL,
     validatedConfig.NODE_ENV,
@@ -652,7 +665,7 @@ export function validateConfig(config: Record<string, unknown>) {
     }
 
     validatedConfig.ADMIN_REQUIRED_ROLES = requiredRoles.join(',');
-  } else if (validatedConfig.NODE_ENV === 'production') {
+  } else if (validatedConfig.NODE_ENV === NodeEnv.PRODUCTION) {
     // The flag is a local escape hatch, and `.env.dist` ships it as false so a fresh clone runs
     // without an Entra tenant. That file sits on the engine's env search path, so a deployment
     // started without explicit environment variables would silently pick it up and serve

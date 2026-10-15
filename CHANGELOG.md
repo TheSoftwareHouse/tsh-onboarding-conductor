@@ -9,6 +9,11 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ## Unreleased
 
+### Added
+
+- Deployment environment name — Every deployment sets a required `ENVIRONMENT_NAME` slug and a
+  required `NODE_ENV`; the admin panel shows the name in its sidebar.
+
 ### Changed
 
 - Versioning — The version is bumped by hand with `pnpm version:bump`, which also regenerates the

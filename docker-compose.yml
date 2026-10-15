@@ -79,7 +79,9 @@ services:
       context: .
       dockerfile: packages/engine/Dockerfile
     environment:
-      NODE_ENV: development
+      # From .env, with no default: an engine that does not know its environment refuses to start.
+      NODE_ENV: ${NODE_ENV:-}
+      ENVIRONMENT_NAME: ${ENVIRONMENT_NAME:-}
       # Compose pins the API role to an API-capable mode; direct (non-Compose) engine
       # starts still follow MODE from .env per .env.dist.
       MODE: api-only
@@ -178,7 +180,8 @@ services:
     # Reuses the engine image built above; no separate build definition.
     image: tsh-onboarding-conductor-engine:local
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-}
+      ENVIRONMENT_NAME: ${ENVIRONMENT_NAME:-}
       MODE: worker-only
       ADMIN_PANEL_ORIGIN: ${ADMIN_PANEL_ORIGIN:-http://localhost:5173}
       # The worker serves no HTTP admin routes, but shares the engine's configuration
