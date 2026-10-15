@@ -2303,6 +2303,14 @@ it land elsewhere: a client submit refused because the row is parked is an
 `submit` only), and a callback dropped because the locked row no longer holds the park it was decided
 for is a `webhook.inbound_callback_rejected` with reason `callback_superseded` (§5), beside
 `callback_already_applied`.
+An export through `GET /v1/onboardings/export` records `onboardings.exported`, actor type
+`operator`, resource type `onboardings_export` and resource id `onboardings`, written once the columns have resolved and
+before the first byte of the file; an export that fails earlier writes no such row. Metadata (`OnboardingsExportAuditMetadata`) is only the filter criteria the
+request supplied — `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`,
+`agreementStatus`, `parked`, `pendingConnectorId`, `parkedBefore` — and never a row of exported data. An empty actor id becomes
+`ADMIN_ACCESS_UNKNOWN_ACTOR`. The action is in `ONBOARDINGS_EXPORT_ACTIONS`
+(`audit/audit.types.ts`). Today, apart from the `api.*` rows for failed admin requests, it is the
+only trace of an admin read.
 
 The agreement feature (§2, §9) adds three actions, allowlisted the same way
 (`AGREEMENT_RESOURCE_ALLOWLIST`, `filterAgreementMetadata`), and every one of them is written in the
@@ -2349,7 +2357,9 @@ engine or HTTP behaviour.
 
 `api.request_rejected` (status 400–499) and `api.request_failed` (status >= 500), resource type
 `api_endpoint`, are written by `ApiFailureAuditFilter` — a global `APP_FILTER` — for every
-unsuppressed exception on the `/v1` surface (§11). A throw site that already wrote its own
+unsuppressed exception on the `/v1` surface (§11). The one failure the filter's `catch` never sees,
+an error in the CSV export's stream, is recorded by the export's error handler through the filter's
+`recordFailure`. A throw site that already wrote its own
 domain-specific row marks the exception so the filter stays silent; `auth.*` denials are the one
 deliberate exception and write both rows, because the guard's audit write is fire-and-forget and
 suppressing on an unattempted write could leave a denial with no evidence at all. `resourceId` is the matched route template
@@ -2464,8 +2474,8 @@ timestamp (TypeORM parses the last 13 characters): `0001_init`, `0002_create_onb
 `0013_create_workflows`, `0016_create_connector_settings`, `0022_create_agreements`,
 `0024_create_encryption_keys`, `0028_add_onboardings_in_progress_version_index`,
 `0029_add_workflow_versions_one_draft_index`, `0030_create_workflow_connector_selections`,
-`0031_add_onboardings_pending_connector` and
-`0032_scope_workflow_connector_selections_per_version`. A file under the migrations glob may export nothing but its class:
+`0031_add_onboardings_pending_connector`, `0032_scope_workflow_connector_selections_per_version`
+and `0033_add_onboardings_created_at_index`. A file under the migrations glob may export nothing but its class:
 TypeORM instantiates every export as a migration.
 
 No migration has ever run against a deployed environment, so the set is folded rather than
@@ -2494,11 +2504,11 @@ family to one draft ([0034](decisions/0034-admin-authored-workflow-drafts.md)); 
 `(workflow_id, version, step_name)`, first copying each existing row to every published version
 of its family (a version without the step ignores the row; rows name compiled steps, which the stored document may not list)
 ([0042](decisions/0042-connector-selection-per-version.md)); its `down` keeps the highest
-version's row per step. The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
+version's row per step; `0033` adds `idx_onboardings_created_at_id` on `onboardings (created_at DESC, id DESC)`, the order of the admin list and of the CSV export's keyset batches ([0044](decisions/0044-streamed-onboardings-csv-export.md)). The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
 its fold: on a database created by this migration set there are no rows for it to convert —
 migrations run before the workflow publish — so it could never fire. The project is greenfield with
 no deployed data, so no other backfill runs either. The sequence's gaps — every number from `0001`
-to `0031` other than the thirteen that survive — are permanent: nothing deployed has run a migration,
+to `0033` other than the fifteen that survive — are permanent: nothing deployed has run a migration,
 so a table or column no longer wanted in its incremental shape loses that step in place instead of
 gaining a second migration to converge to it. Local stacks are the one place the incremental set
 did run: a Compose volume created before the fold has a `migrations` table that already lists the
@@ -2711,6 +2721,7 @@ values; it renders them into the panel's `/config.js` (§12).
 | GET    | `/v1/health/live`                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`, `agreementStatus` (`current` \| `outdated` \| `not_accepted`), `parked` (`true` \| `false`), `pendingConnectorId`, `parkedBefore` (ISO-8601, against the park's `parkedAt`)                                                                                                                                                                                                         |
+| GET    | `/v1/onboardings/export` — the same filters without `page` and `limit`; every match as `text/csv`, streamed                                                                                                                                                                                                                                                                                                                                                                               |
 | GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                                                                                                                                                                                                                                                                                                                             |
 | GET    | `/v1/onboardings/:id/state`                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -2770,6 +2781,89 @@ identity fields with `acceptedAt` in place of `created`. Every admin summary
 (`AdminOnboardingSummaryResponseDto`) — both the
 `GET /v1/onboardings` list items and `GET /v1/onboardings/:id` — carries `agreementStatus`.
 
+`GET /v1/onboardings/export` ([0044](decisions/0044-streamed-onboardings-csv-export.md)) returns
+every onboarding matching the list's filters, not one page — `ExportAdminOnboardingsQueryDto` is
+`ListAdminOnboardingsQueryDto` without `page` and `limit`, which the whitelist strips — and the
+list keeps its 100-row ceiling. It is declared above `GET /v1/onboardings/:id` because Nest matches
+in declaration order. The response is `200` with `Content-Type: text/csv; charset=utf-8`,
+`Cache-Control: no-store` and
+`Content-Disposition: attachment; filename="onboardings-<yyyyMMddTHHmmssZ>.csv"` (UTC), and
+a malformed filter is a `400` `VALIDATION_ERROR` as on the list, before any audit row. The body is a
+UTF-8 BOM, a header row, then one row per match in the list's order, `created_at DESC, id DESC`; no
+match yields the header alone. Against a running engine,
+`GET /v1/onboardings/export?workflowId=does-not-exist` returned those three headers and exactly
+`Onboarding id,Workflow id,Workflow version,Status,Current step,Agreement status,Rejection reason,Created at,Updated at,Completed at,Other data`
+after the BOM.
+
+The header row holds labels, not keys, and every label is derived from its key by one rule, with no
+hand-written labels or overrides. The fixed columns are `Onboarding id, Workflow id,
+Workflow version, Status, Current step, Agreement status, Rejection reason, Created at, Updated at,
+Completed at` (`expiresAt` is omitted: it is reserved and always `null`), then one `<name> score`
+column per score name, sorted, then one column per persisted field (`persist !== false`) labelled by
+its name, then a final `Other data`. A key (`onboardingId`, a score name, a field name, `otherData`)
+is humanized: it is split on `_`, `-`,
+whitespace, a lowercase-or-digit to uppercase boundary and the last capital of an uppercase run
+before a lowercase letter, and each word is lowercased unless it is two or more capitals with no digits
+(`onboardingId` becomes `Onboarding id`, `userID` becomes `User ID`, `amlRisk` becomes `Aml risk score`, `address2` becomes `Address2`); the
+first letter is capitalised, and a name with no words keeps its raw key. Labels are not made unique:
+a score and a field sharing a name give `Risk score` and `Risk`, and two names can collapse to one
+label (`first_name`, `firstName`), so a reader must go by column position. The score and data
+columns come from the workflow definitions, not from the stored data, because `context` may be
+encrypted (ADR 0024) and SQL cannot list its keys: one query lists the distinct
+`(workflow key, version)` pairs in the filtered set, `WorkflowRegistryService.getDefinitionForAdmin`
+resolves each — **`retired` revisions included**, since an export is a historical read — and the
+fields are the union over definitions ordered by workflow key then version, in step order, the
+first appearance winning. `Other data` holds, as JSON, every context key no declared column covers
+(a connector's `kycOutcome`, say) and is empty when there are none, so nothing collected is dropped.
+A version that no longer resolves (`WorkflowNotFoundException` or `WorkflowRevisionNotFoundError`)
+contributes no columns and its whole context lands in `Other data`; the export does not fail on it.
+
+Encoding follows RFC 4180: comma separator, CRLF line ends, a field quoted when it contains `"`,
+`,`, CR or LF with inner quotes doubled. Dates are ISO 8601 UTC, `null` and absent values are empty
+cells, numbers and booleans go through `String()`, and objects and arrays (uploaded documents,
+multi-selects) are `JSON.stringify`'d. **Formula guard:** a string cell starting with `=`, `+`, `-`,
+`@`, TAB or CR gets a leading `'`; numbers are never touched. The pure encoding lives in
+`onboardings/domain/onboardings-csv.ts`, with no Nest imports.
+
+`OnboardingsExportService.exportCsv` resolves the columns, writes the audit row, then returns an
+async generator that the controller wraps in a `StreamableFile` over `Readable.from`, so memory holds one batch rather
+than the table. It reads in
+keyset batches of 5000 over the list's own order, the cursor being the last row's `id`, bound as
+`:lastId` in
+`(created_at, id) < (SELECT created_at, id FROM onboardings WHERE id = :lastId)`; comparing in SQL
+avoids the millisecond truncation a JS `Date` would apply to Postgres' microsecond `timestamptz`,
+and unlike an offset it does not re-read rows shifted by concurrent inserts. A batch shorter than
+5000 ends the stream; each batch is one query, a range read on `idx_onboardings_created_at_id`.
+It uses `.limit()`, not `.take()`: every join is to-one, and with joins `.take()` makes TypeORM
+select the page's ids through a `DISTINCT` subquery and reload them by `IN (…)`, a reload Postgres
+answered with a scan of the whole table on every batch. Over 200k rows the batch reads alone took
+16–23 s that way and 6–8 s with `.limit()`. Reads use `dataSource.manager`, outside a transaction,
+as the list does.
+A batch does not join `onboarding_agreement_statuses`: joined, the view aggregates every
+`onboarding_agreements` row on every batch, which measured about 110 ms a batch at 100k rows. 5000 was chosen by measurement: on 200k rows it
+exported in 8.4 s against 10.1 s at 500, while 50,000 saved under a second for a 1.5 s first batch
+and more memory. The status lookup binds one parameter per id, so a batch must stay below the
+65,535 parameters Postgres accepts in one query. Instead
+a second query reads the view `WHERE onboarding_id IN (<the batch's ids>)`, which Postgres applies
+inside the view's grouping, and a missing row still means `not_accepted`. An export filtered by
+`agreementStatus` keeps the join, because the filter is a condition on it, and pays that cost.
+`context` is decrypted on hydration by the column transformer, so the file carries plaintext
+collected data.
+
+`OnboardingsExportService.exportCsv` resolves the columns first (the distinct workflow versions,
+which join the agreement-status view only when filtering on it, as a batch does, then the registry
+lookups), and only then writes an `onboardings.exported` audit row (§8) with
+`AuditService.logOnboardingsExport`, in its own transaction. A failure while resolving the columns
+throws out of the controller as an ordinary 500: the global filter audits it as
+`api.request_failed` and no export row exists. Once the stream has started the status is already
+`200`, so a failure after that point aborts the connection rather than ending the file early; the
+panel's axios download then rejects and saves nothing. The `StreamableFile` error handler records
+that failure as `api.request_failed` through `ApiFailureAuditFilter.recordFailure`, which `AuditModule`
+exports (the `APP_FILTER` binding uses `useExisting`, so it is the one global instance), while the
+export row written before it stays. A client that disconnects mid-export destroys the stream, which
+ends the generator; the controller does this on the response's `close` when it did not finish, since
+Nest only unpipes. A disconnect writes no failure row.
+
 There is exactly one exception filter, `ApiFailureAuditFilter`, registered as an `APP_FILTER` in
 `AuditModule`. It exists **only to observe**: it extends Nest's `BaseExceptionFilter` and its
 `catch()` calls `super.catch(exception, host)` first and unchanged, so serialization, status and
@@ -2815,8 +2909,8 @@ to callers, so the error-code table above gains no `VALIDATION_FAILED` entry.
 
 ### Authentication — Microsoft Entra ID on the admin surface
 
-Every route under `/v1/admin/` and the three admin onboarding reads (`GET /v1/onboardings`,
-`GET /v1/onboardings/:id`, `GET /v1/onboardings/:id/transitions`) require a verified Microsoft Entra
+Every route under `/v1/admin/` and the four admin onboarding reads (`GET /v1/onboardings`,
+`GET /v1/onboardings/export`, `GET /v1/onboardings/:id`, `GET /v1/onboardings/:id/transitions`) require a verified Microsoft Entra
 ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`) through
 the `AdminRoute()` decorator (`packages/engine/src/auth/admin-route.decorator.ts`), which applies the
 guard and writes its contract into the OpenAPI document in one step. Every other route — the
@@ -2933,7 +3027,7 @@ drift test compares byte for byte.
 
 `packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod, nuqs. Three sections, built from
 `ADMIN_SECTIONS` in `src/app/navigation.tsx`: **Onboardings**, a filterable, read-only list
-served from `GET /v1/onboardings` with a details page per onboarding; **Logs**, a
+served from `GET /v1/onboardings` with a details page per onboarding and an Export CSV download; **Logs**, a
 filterable, read-only view of the audit trail (§8); and **Connectors**, which writes connector
 settings. **Workflows** also writes, but only drafts (Workflows, below).
 
@@ -3064,9 +3158,21 @@ in either section's filter path, only in response-payload validation under `api/
 `Routes`, not in `AppProviders` — the adapter reads react-router's own hooks, which
 `AppProviders`, rendered above the router, cannot give it.
 
-Three things the design draws are deliberately absent, each for want of an endpoint: the applicant
-column of masked contact details, per-status counts on the inactive tabs, and an Export CSV action.
-A fourth, the "Started" date range, is absent because `ListAdminOnboardingsQueryDto` accepts no date
+The page header carries the design's **Export CSV** button: an outline button with a download icon
+calls `GET /v1/onboardings/export` with the applied filters (never the draft, and without
+`page`/`limit`), so the file matches the list on screen across every page. It is rendered only
+once a list fetch has succeeded — hidden while the list is loading or after it failed to load — and
+is labelled with that list's `pagination.total` (`Export 41 as CSV`), which is the export's row
+count for the same criteria. It is disabled while a request is in flight, while a draft filter
+is refused (`findDraftError`) and when the total is zero, and reads `Exporting…` meanwhile. The download goes through axios as a blob (`fetchAdminOnboardingsCsv`,
+`useOnboardingsExport`) because a navigation could not carry the Entra bearer token; a failure is an
+`Export failed` toast, and since a broken connection rejects the request, no truncated file is ever
+saved. The panel names the file itself, `onboardings-<yyyy-MM-ddTHH-mm>.csv` in local time (`toDateTimeLocalValue`, `:` swapped for `-`), and does
+not read `Content-Disposition`.
+
+Two things the design draws are deliberately absent, each for want of an endpoint: the applicant
+column of masked contact details and per-status counts on the inactive tabs. A third, the "Started"
+date range, is absent because `ListAdminOnboardingsQueryDto` accepts no date
 criteria — `createdAt` is returned and is the query's primary sort key, but nothing filters on it.
 Workflow and version stay free-text inputs rather than the design's dropdowns — turning them into
 one is out of this change's scope, even though `GET /v1/admin/workflows` (§12, below) now exists to
@@ -3221,8 +3327,8 @@ own (above), a page left open keeps showing the window as it was when last fetch
 Reload both refetch, which is how an operator brings it current.
 
 The Logs page carries its own list of absences, again each for want of a parameter the audit
-endpoint does not accept: **Export** (no export endpoint, the same call as Onboardings' CSV
-button); **Workflow** and **Version** (`ListAuditQueryDto` declares neither `workflowId` nor
+endpoint does not accept: **Export** (the audit endpoint has no export route, unlike
+`GET /v1/onboardings/export`); **Workflow** and **Version** (`ListAuditQueryDto` declares neither `workflowId` nor
 `workflowVersion` — unlike Onboardings, where the two stay free-text inputs, the audit endpoint has
 no criterion of any kind for either, so both are omitted outright); **Persona / applicant** (no
 applicant projection anywhere in the engine, the same call as the Onboardings applicant column);

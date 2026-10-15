@@ -522,6 +522,8 @@ describe('Admin endpoint authentication (e2e)', () => {
 
     const guarded: ReadonlyArray<[string, object]> = [
       ['OnboardingsController.list', OnboardingsController.prototype.list],
+      // The CSV download of the same operator list, so it shares the list's guard.
+      ['OnboardingsController.export', OnboardingsController.prototype.export],
       // Both serve the admin panel's onboarding detail view, so they belong to the operator read
       // surface rather than to the end user's own flow that `getState` answers.
       ['OnboardingsController.getForAdmin', OnboardingsController.prototype.getForAdmin],

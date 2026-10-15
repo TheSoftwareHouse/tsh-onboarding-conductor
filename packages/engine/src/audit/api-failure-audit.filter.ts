@@ -332,8 +332,11 @@ export class ApiFailureAuditFilter extends BaseExceptionFilter implements OnModu
   catch(exception: unknown, host: ArgumentsHost): void {
     super.catch(exception, host);
 
-    const request = host.switchToHttp().getRequest<AdminAuthenticatedRequest>();
+    this.recordFailure(exception, host.switchToHttp().getRequest<AdminAuthenticatedRequest>());
+  }
 
+  /** Schedules the failure row without touching the response, for failures `catch` never sees. */
+  recordFailure(exception: unknown, request: AdminAuthenticatedRequest): void {
     if (!isApiRequest(request) || isAuditRecorded(exception)) {
       return;
     }

@@ -3815,8 +3815,8 @@ describe('OnboardingsController (e2e)', () => {
     );
 
     // Each table's later `ALTER`s are folded into its creating migration (Task 4.0), so the
-    // surviving set is exactly these fourteen — and the gaps in the numbering are history, not an
-    // omission. 0029 to 0032 post-date the fold and are additive.
+    // surviving set is exactly these fifteen — and the gaps in the numbering are history, not an
+    // omission. 0029 to 0033 post-date the fold and are additive.
     expect(migrations).toEqual([
       { name: '0001_init' },
       { name: '0002_create_onboardings_1735689600000' },
@@ -3832,6 +3832,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0030_create_workflow_connector_selections_2052864000000' },
       { name: '0031_add_onboardings_pending_connector_2052950400000' },
       { name: '0032_scope_workflow_connector_selections_per_version_2053036800000' },
+      { name: '0033_add_onboardings_created_at_index_2053296000000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3987,6 +3988,7 @@ describe('OnboardingsController (e2e)', () => {
         'idx_onboardings_encryption_key',
         'idx_onboardings_plaintext_context',
         'idx_onboardings_in_progress_version',
+        'idx_onboardings_created_at_id',
       ]),
     );
     expect(indexesByName.get('onboardings_pkey')).toContain('UNIQUE INDEX onboardings_pkey');
@@ -4001,6 +4003,9 @@ describe('OnboardingsController (e2e)', () => {
     );
     expect(indexesByName.get('idx_onboardings_in_progress_version')).toContain(
       'ON public.onboardings USING btree (workflow_version_id) WHERE (completed_at IS NULL)',
+    );
+    expect(indexesByName.get('idx_onboardings_created_at_id')).toContain(
+      'ON public.onboardings USING btree (created_at DESC, id DESC)',
     );
 
     const constraints = await dataSource.query(

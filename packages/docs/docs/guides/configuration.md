@@ -53,6 +53,8 @@ Operator sign-in uses Microsoft Entra ID and is **on unless explicitly turned of
 
 The onboarding form data a user submits (`onboardings.context`) can be encrypted before it reaches the database. You turn this on and off from the admin panel's **Encryption** page, or by calling `PATCH /v1/admin/encryption` with `{ "enabled": true }` or `{ "enabled": false }`. Nothing in `.env` switches it; what `.env` holds is the key that makes it possible.
 
+Encryption protects the database, not what leaves it. The admin panel's **Export CSV** button, `GET /v1/onboardings/export`, writes the collected data decrypted into the file; each export leaves an `onboardings.exported` audit row naming the operator and the filters, never the data.
+
 ### Before you can turn it on: the key-encryption key
 
 Generate a key with:

@@ -193,6 +193,13 @@ export class WorkflowRegistryService implements OnModuleInit {
     return this.toWorkflow(await this.resolveStoredVersion(key, version, manager, false), manager);
   }
 
+  /** The normalized definition of a pinned revision: the same resolution as `getById`, except a `retired` revision is served. */
+  async getDefinitionForAdmin(key: string, version: number): Promise<NormalizedWorkflowDefinition> {
+    const storedVersion = await this.resolveStoredVersion(key, version, undefined, true);
+
+    return this.normalizeDefinition(storedVersion.definition);
+  }
+
   /**
    * The admin read of a definition: the same resolution as `getById`, except a pinned `retired` or
    * `draft` revision is served. A draft that does not compile is an authoring defect, not a 500.

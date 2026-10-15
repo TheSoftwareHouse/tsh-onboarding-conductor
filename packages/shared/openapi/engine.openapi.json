@@ -3440,7 +3440,7 @@
         ]
       },
       "get": {
-        "description": "One page of onboarding records, narrowed by the filters. Always paginated, so an operator can never pull the whole table in one request.",
+        "description": "One page of onboarding records, narrowed by the filters. Always paginated.",
         "operationId": "listOnboardings",
         "parameters": [
           {
@@ -4450,6 +4450,162 @@
         "summary": "Accept an agreement version",
         "tags": [
           "Onboarding flow"
+        ]
+      }
+    },
+    "/v1/onboardings/export": {
+      "get": {
+        "description": "Every onboarding matching the filters, not one page, streamed as RFC 4180 CSV with a UTF-8 BOM. Columns are the summary fields, then one `<Name> score` per score, then one per field as the matching workflows declare them, then `Other data` for any collected key no declared column covers. Headers are labels derived from the keys (`firstName` becomes `First name`). Rows follow the list order. Collected data is decrypted, so the export is audited as `onboardings.exported`. A failure before the first byte answers a 500; one after it aborts the connection instead of ending the file early. Both are audited as `api.request_failed`.",
+        "operationId": "exportOnboardings",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings currently in this status.",
+            "schema": {
+              "$ref": "#/components/schemas/WorkflowStatus"
+            }
+          },
+          {
+            "name": "workflowId",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings of this workflow.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "workflowVersion",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings pinned to this workflow revision.",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "currentStep",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings waiting on this step.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "onboardingId",
+            "required": false,
+            "in": "query",
+            "description": "Exactly one onboarding, by id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "agreementStatus",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings whose derived agreement status is this one.",
+            "schema": {
+              "$ref": "#/components/schemas/OnboardingAgreementStatus"
+            }
+          },
+          {
+            "name": "parked",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings parked on an asynchronous connector (`true`), or only those not parked (`false`).",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "pendingConnectorId",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings parked on this connector id.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "parkedBefore",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings parked before this instant, by the park time the engine recorded. A row parked before that time was recorded never matches.",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The CSV file: a header row, then one row per matching onboarding.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Export onboardings as CSV",
+        "tags": [
+          "Admin: onboardings"
         ]
       }
     },

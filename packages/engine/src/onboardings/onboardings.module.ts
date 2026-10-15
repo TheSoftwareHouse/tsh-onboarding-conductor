@@ -14,6 +14,7 @@ import { OnboardingDocumentsRepository } from './onboarding-documents.repository
 import { OnboardingStateService } from './onboarding-state.service';
 import { OnboardingTransitionsService } from './onboarding-transitions.service';
 import { OnboardingsController } from './onboardings.controller';
+import { OnboardingsExportService } from './onboardings-export.service';
 import { OnboardingsRepository } from './onboardings.repository';
 import { OnboardingsService } from './onboardings.service';
 import { PendingConnectorReconcileService } from './pending-connector-reconcile.service';
@@ -39,6 +40,7 @@ import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manua
     OnboardingsRepository,
     OnboardingDocumentsRepository,
     OnboardingsService,
+    OnboardingsExportService,
     OnboardingStateService,
     OnboardingTransitionsService,
     DocumentUploadService,
