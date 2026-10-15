@@ -6,19 +6,26 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Query,
   Req,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { Readable } from 'node:stream';
 import {
   ApiBody,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiProduces,
   ApiTags,
 } from '@nestjs/swagger';
 import { AgreementNotFoundException } from '../agreements/errors/agreement-not-found.exception';
 import { AgreementNotPublishedException } from '../agreements/errors/agreement-not-published.exception';
+import { ApiFailureAuditFilter } from '../audit/api-failure-audit.filter';
 import { AdminRoute } from '../auth/admin-route.decorator';
 import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
 import { PendingConnectorReconcileUnsupportedException } from '../connectors/errors/pending-connector-reconcile-unsupported.exception';
@@ -37,6 +44,7 @@ import { WebhookDeliveryFailedException } from '../webhook/errors/webhook-delive
 import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from '../workflows/errors/workflow-retired.exception';
 import { AdminOnboardingSummaryResponseDto } from './dto/admin-onboarding-summary.response.dto';
+import { ExportAdminOnboardingsQueryDto } from './dto/export-admin-onboardings.query.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { ListAdminOnboardingsResponseDto } from './dto/list-admin-onboardings.response.dto';
 import { ListOnboardingTransitionsResponseDto } from './dto/list-onboarding-transitions.response.dto';
@@ -75,6 +83,7 @@ import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manua
 import { DocumentUploadService } from './document-upload.service';
 import { OnboardingStateService } from './onboarding-state.service';
 import { OnboardingTransitionsService } from './onboarding-transitions.service';
+import { OnboardingsExportService } from './onboardings-export.service';
 import { OnboardingsService } from './onboardings.service';
 import { PendingConnectorReconcileService } from './pending-connector-reconcile.service';
 
@@ -112,16 +121,24 @@ const CONNECTOR_EXECUTION_ERRORS = [
   ),
 ] as const;
 
+/** `yyyyMMddTHHmmssZ` in UTC, for the export's file name. */
+const formatExportTimestamp = (date: Date): string =>
+  date.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+
 // Tags are declared per route rather than on the controller: this class serves the end customer's
 // flow, an operator's manual review and the admin reads, which are three different audiences.
 @Controller('v1/onboardings')
 export class OnboardingsController {
+  private readonly logger = new Logger(OnboardingsController.name);
+
   constructor(
     private readonly onboardingsService: OnboardingsService,
     private readonly documentUploadService: DocumentUploadService,
     private readonly onboardingStateService: OnboardingStateService,
     private readonly onboardingTransitionsService: OnboardingTransitionsService,
     private readonly pendingConnectorReconcileService: PendingConnectorReconcileService,
+    private readonly onboardingsExportService: OnboardingsExportService,
+    private readonly apiFailureAuditFilter: ApiFailureAuditFilter,
   ) {}
 
   @Post()
@@ -368,9 +385,7 @@ export class OnboardingsController {
   @ApiOperation({
     operationId: 'listOnboardings',
     summary: 'List onboardings',
-    description:
-      'One page of onboarding records, narrowed by the filters. Always paginated, so an operator ' +
-      'can never pull the whole table in one request.',
+    description: 'One page of onboarding records, narrowed by the filters. Always paginated.',
   })
   @ApiOkResponse({
     type: ListAdminOnboardingsResponseDto,
@@ -379,6 +394,74 @@ export class OnboardingsController {
   @ApiErrorResponses(VALIDATION_ERROR)
   list(@Query() query: ListAdminOnboardingsQueryDto): Promise<ListAdminOnboardingsResponseDto> {
     return this.onboardingsService.listForAdmin(query);
+  }
+
+  @Get('export')
+  @AdminRoute()
+  @ApiTags(API_TAGS.adminOnboardings.name)
+  @ApiOperation({
+    operationId: 'exportOnboardings',
+    summary: 'Export onboardings as CSV',
+    description:
+      'Every onboarding matching the filters, not one page, streamed as RFC 4180 CSV with a UTF-8 ' +
+      'BOM. Columns are the summary fields, then one `<Name> score` per score, then one per field as ' +
+      'the matching workflows declare them, then `Other data` for any collected key no declared column ' +
+      'covers. Headers are labels derived from the keys (`firstName` becomes `First name`). Rows follow the list order. Collected data is decrypted, so the export is audited as ' +
+      '`onboardings.exported`. A failure before the first byte answers a 500; one after it aborts the ' +
+      'connection instead of ending the file early. Both are audited as `api.request_failed`.',
+  })
+  @ApiProduces('text/csv')
+  @ApiOkResponse({
+    description: 'The CSV file: a header row, then one row per matching onboarding.',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+  })
+  @ApiErrorResponses(VALIDATION_ERROR)
+  async export(
+    @Query() query: ExportAdminOnboardingsQueryDto,
+    @Req() request: AdminAuthenticatedRequest,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
+    const csv = await this.onboardingsExportService.exportCsv(
+      query,
+      resolveOperatorId(request.adminTokenClaims),
+    );
+
+    response.setHeader('Cache-Control', 'no-store');
+
+    const stream = Readable.from(csv);
+
+    // Nest only unpipes on a disconnect; destroying the stream is what ends the generator.
+    response.once('close', () => {
+      if (!response.writableFinished) {
+        stream.destroy();
+      }
+    });
+
+    return new StreamableFile(stream, {
+      type: 'text/csv; charset=utf-8',
+      disposition: `attachment; filename="onboardings-${formatExportTimestamp(new Date())}.csv"`,
+    }).setErrorHandler((error, handlerResponse) => {
+      const res = handlerResponse as unknown as Response;
+      this.logger.error('Onboardings export stream failed', error.stack);
+      this.apiFailureAuditFilter.recordFailure(error, request);
+
+      if (res.destroyed) {
+        return;
+      }
+
+      if (res.headersSent) {
+        res.destroy(error);
+        return;
+      }
+
+      // The stream headers are already set, so a direct caller would otherwise save this JSON as the CSV.
+      res.removeHeader('Content-Disposition');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        message: 'Internal server error',
+      });
+    });
   }
 
   @Get(':id/transitions')

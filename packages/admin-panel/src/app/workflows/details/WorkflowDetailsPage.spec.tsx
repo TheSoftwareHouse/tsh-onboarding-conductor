@@ -1,19 +1,24 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/services/api/api-error';
 import { createQueryClient } from '@/services/query-client/create-query-client';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fetchAdminWorkflows, type AdminWorkflowSummary } from '@/api/workflows/admin-workflows';
 import {
   fetchWorkflowDefinition,
   type WorkflowDefinition,
   type WorkflowStepDefinition,
 } from '@/api/workflows/workflow-definitions';
 import { fetchWorkflowVersions, type WorkflowVersion } from '@/api/workflows/workflow-versions';
-import { fetchWorkflowDocument, type WorkflowDraftDocument } from '@/api/workflows/workflow-drafts';
+import {
+  fetchWorkflowDocument,
+  type WorkflowVersionDocument,
+} from '@/api/workflows/workflow-drafts';
+import { workflowQueries } from '@/api/workflows/workflow-queries';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { WorkflowDetailsPage } from './WorkflowDetailsPage';
 
@@ -32,7 +37,12 @@ vi.mock('@/api/workflows/workflow-drafts', async (importOriginal) => {
   return { ...actual, fetchWorkflowDocument: vi.fn() };
 });
 
-vi.mock('./components/DraftEditor/JsonEditor', () => ({
+vi.mock('@/api/workflows/admin-workflows', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/workflows/admin-workflows')>();
+  return { ...actual, fetchAdminWorkflows: vi.fn() };
+});
+
+vi.mock('./components/JsonEditor', () => ({
   JsonEditor: ({ value, label }: { value: string; label: string }) => (
     <textarea aria-label={label} value={value} readOnly />
   ),
@@ -41,6 +51,7 @@ vi.mock('./components/DraftEditor/JsonEditor', () => ({
 const mockedFetchDocument = vi.mocked(fetchWorkflowDocument);
 const mockedFetchDefinition = vi.mocked(fetchWorkflowDefinition);
 const mockedFetchVersions = vi.mocked(fetchWorkflowVersions);
+const mockedFetchList = vi.mocked(fetchAdminWorkflows);
 
 const WORKFLOW_ID = 'kyc';
 const UNPINNED_VERSION = 2;
@@ -99,6 +110,7 @@ function definition(version: number, extraStep?: string): WorkflowDefinition {
             authoredId: 'twilio_verify',
             selected: false,
             selectableIds: ['twilio_verify'],
+            versions: [],
             name: 'twilio_verify',
             type: 'phone-verification',
             order: 1,
@@ -129,13 +141,13 @@ function versions(...entries: Array<[number, WorkflowVersion['status']]>): Workf
   }));
 }
 
-function renderPage(search = ''): void {
+function renderPage(search = '', client: QueryClient = createQueryClient()): void {
   window.history.replaceState({}, '', `${ADMIN_ROUTES.workflows.details(WORKFLOW_ID)}${search}`);
 
   render(
     <BrowserRouter>
       <NuqsAdapter>
-        <QueryClientProvider client={createQueryClient()}>
+        <QueryClientProvider client={client}>
           <Routes>
             <Route path={ADMIN_ROUTES.workflows.detailsPattern} element={<WorkflowDetailsPage />} />
           </Routes>
@@ -177,6 +189,17 @@ describe('WorkflowDetailsPage', () => {
     expect(screen.getByText('email')).toBeInTheDocument();
     expect(screen.getByText('text · required · format email')).toBeInTheDocument();
     expect(screen.getByText('Collect data')).toBeInTheDocument();
+  });
+
+  it('shows the zoom controls on the graph canvas', async () => {
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+    renderPage();
+    await findInspectorHeading('collect');
+
+    const canvas = document.querySelector('.react-flow') as HTMLElement;
+    for (const name of ['Zoom out', 'Zoom in', 'Fit']) {
+      expect(within(canvas).getByRole('button', { name })).toBeInTheDocument();
+    }
   });
 
   it('changes the inspector and ?step= when a node is clicked', async () => {
@@ -266,6 +289,39 @@ describe('WorkflowDetailsPage', () => {
     expect(screen.getByRole('combobox', { name: 'Version' })).toHaveValue('2');
   });
 
+  it('explains above the tabs that no version is shown when none is published or drafted', async () => {
+    mockedFetchVersions.mockResolvedValue(versions([1, 'retired']));
+    renderPage('?view=json');
+
+    expect(await screen.findByText(/This workflow has no published version/)).toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(mockedFetchDocument).not.toHaveBeenCalled();
+  });
+
+  it('offers a Retry on the JSON tab when the unpinned definition fails', async () => {
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+    mockedFetchDefinition.mockRejectedValueOnce(
+      new ApiError('Request failed with status 500.', { status: 500 }),
+    );
+    mockedFetchDocument.mockResolvedValue({
+      workflowId: WORKFLOW_ID,
+      version: 2,
+      status: 'published',
+      name: 'KYC flow',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      document: { id: WORKFLOW_ID, version: 2, steps: [] },
+    });
+    renderPage('?view=json');
+
+    expect(await screen.findByText(/Unable to load this version/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(
+      await screen.findByRole('textbox', { name: 'Workflow document (JSON, read-only)' }),
+    ).toBeInTheDocument();
+  });
+
   it('pins the definition to a ?version= from the URL', async () => {
     mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
     renderPage('?version=1');
@@ -294,15 +350,67 @@ describe('WorkflowDetailsPage', () => {
     expect(screen.getByText('v1 retired')).toBeInTheDocument();
   });
 
-  it('reports a ?version= the workflow does not hold', async () => {
+  it('reports a ?version= the workflow does not hold in place of the tabs', async () => {
     mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
-    mockedFetchDefinition.mockRejectedValue(
-      new ApiError('Request failed with status 404.', { status: 404 }),
-    );
     renderPage('?version=9');
 
     expect(await screen.findByText(/Version 9 does not exist/)).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Version' })).toHaveValue('');
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(mockedFetchDefinition).not.toHaveBeenCalled();
+  });
+
+  it('reports a ?version= the workflow does not hold on the JSON tab too, without reading a document', async () => {
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+    renderPage('?version=9&view=json');
+
+    expect(await screen.findByText(/Version 9 does not exist/)).toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(mockedFetchDocument).not.toHaveBeenCalled();
+  });
+
+  it('re-reads a cached versions list that lacks the pinned version before calling it missing', async () => {
+    const client = createQueryClient();
+    client.setQueryData(workflowQueries.versions(WORKFLOW_ID).queryKey, versions([2, 'published']));
+    mockedFetchVersions.mockResolvedValue(versions([3, 'published'], [2, 'published']));
+    renderPage('?version=3', client);
+
+    expect(await findInspectorHeading('collect')).toBeInTheDocument();
+    expect(mockedFetchVersions).toHaveBeenCalledTimes(1);
+    expect(mockedFetchDefinition).toHaveBeenCalledWith(WORKFLOW_ID, 3);
+    expect(screen.queryByText(/Version 3 does not exist/)).not.toBeInTheDocument();
+  });
+
+  it('reports a pinned version missing from a re-read cached list without reading it', async () => {
+    const client = createQueryClient();
+    client.setQueryData(workflowQueries.versions(WORKFLOW_ID).queryKey, versions([2, 'published']));
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+    renderPage('?version=9', client);
+
+    expect(await screen.findByText(/Version 9 does not exist/)).toBeInTheDocument();
+    expect(mockedFetchVersions).toHaveBeenCalledTimes(1);
+    expect(mockedFetchDefinition).not.toHaveBeenCalled();
+  });
+
+  it('shows the loading state, not the tabs, while a stale cached list is re-read on the JSON tab', async () => {
+    const client = createQueryClient();
+    client.setQueryData(workflowQueries.versions(WORKFLOW_ID).queryKey, versions([2, 'published']));
+    mockedFetchVersions.mockReturnValue(new Promise(() => undefined));
+    renderPage('?version=9&view=json', client);
+
+    expect(await screen.findByText('Loading workflow…')).toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(mockedFetchDocument).not.toHaveBeenCalled();
+  });
+
+  it('reports a pinned version missing from a re-read cached list on the JSON tab without reading a document', async () => {
+    const client = createQueryClient();
+    client.setQueryData(workflowQueries.versions(WORKFLOW_ID).queryKey, versions([2, 'published']));
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+    renderPage('?version=9&view=json', client);
+
+    expect(await screen.findByText(/Version 9 does not exist/)).toBeInTheDocument();
+    expect(mockedFetchDocument).not.toHaveBeenCalled();
   });
 
   it('lists every version including retired and switches to it on its initial step', async () => {
@@ -324,7 +432,7 @@ describe('WorkflowDetailsPage', () => {
     expect(window.location.search).toContain('version=1');
     expect(window.location.search).not.toContain('step=');
     expect(screen.getByText('v1 retired')).toBeInTheDocument();
-    expect(screen.getByText(/stored revisions never change shape/)).toBeInTheDocument();
+    expect(screen.getByText(/a retired version never runs/)).toBeInTheDocument();
   });
 
   it('shows the terminal note for a terminal step', async () => {
@@ -360,9 +468,61 @@ describe('WorkflowDetailsPage', () => {
     expect(within(screen.getByRole('complementary')).getByText('↻ retry')).toBeInTheDocument();
   });
 
-  it('keeps the list search on the breadcrumb and drops version and step', async () => {
+  it('opens a published version on Graph with its stats', async () => {
     mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
-    renderPage('?search=kyc&version=1&step=verify');
+    renderPage();
+
+    expect(await findInspectorHeading('collect')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Graph', selected: true })).toBeInTheDocument();
+    expect(screen.getByText('3 steps')).toBeInTheDocument();
+    expect(mockedFetchDocument).not.toHaveBeenCalled();
+  });
+
+  it('shows the stored document for ?view=json', async () => {
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+    mockedFetchDocument.mockResolvedValue({
+      workflowId: WORKFLOW_ID,
+      version: 2,
+      status: 'published',
+      name: 'KYC flow',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      document: { id: WORKFLOW_ID, version: 2, steps: [] },
+    });
+    renderPage('?view=json');
+
+    const editor = await screen.findByRole('textbox', {
+      name: 'Workflow document (JSON, read-only)',
+    });
+    expect(editor).toHaveValue(JSON.stringify({ id: WORKFLOW_ID, version: 2, steps: [] }, null, 2));
+    expect(mockedFetchDocument).toHaveBeenCalledWith(WORKFLOW_ID, 2);
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+  });
+
+  it('clears ?view= and lands on Graph when the version changes', async () => {
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
+    mockedFetchDocument.mockResolvedValue({
+      workflowId: WORKFLOW_ID,
+      version: 2,
+      status: 'published',
+      name: 'KYC flow',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      document: {},
+    });
+    renderPage('?view=json');
+    await screen.findByRole('textbox', { name: 'Workflow document (JSON, read-only)' });
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Version' }), '1');
+
+    expect(await findInspectorHeading('collect')).toBeInTheDocument();
+    expect(window.location.search).not.toContain('view=');
+    expect(screen.getByRole('tab', { name: 'Graph', selected: true })).toBeInTheDocument();
+  });
+
+  it('keeps the list search on the breadcrumb and drops version, step and view', async () => {
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
+    renderPage('?search=kyc&version=1&step=verify&view=graph');
     await findInspectorHeading('verify');
 
     expect(screen.getByRole('link', { name: 'Workflows' })).toHaveAttribute(
@@ -420,7 +580,7 @@ describe('WorkflowDetailsPage', () => {
   });
 
   describe('a draft version', () => {
-    const draftDocument: WorkflowDraftDocument = {
+    const draftDocument: WorkflowVersionDocument = {
       workflowId: WORKFLOW_ID,
       version: 3,
       status: 'draft',
@@ -445,6 +605,15 @@ describe('WorkflowDetailsPage', () => {
       expect(mockedFetchDocument).toHaveBeenCalledWith(WORKFLOW_ID, 3);
     });
 
+    it('does not link to onboardings', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [3, 'draft']));
+      mockedFetchDocument.mockResolvedValue(draftDocument);
+      renderPage('?version=3');
+
+      await screen.findByRole('textbox', { name: 'Workflow document (JSON)' });
+      expect(screen.queryByRole('link', { name: /View onboardings/ })).not.toBeInTheDocument();
+    });
+
     it('opens the draft without ?version= when the family has no published version', async () => {
       mockedFetchVersions.mockResolvedValue(versions([3, 'draft'], [1, 'retired']));
       mockedFetchDocument.mockResolvedValue(draftDocument);
@@ -456,12 +625,121 @@ describe('WorkflowDetailsPage', () => {
       expect(mockedFetchDocument).toHaveBeenCalledWith(WORKFLOW_ID, 3);
     });
 
+    it('moves to the read-only view when the draft was published since the versions were read', async () => {
+      mockedFetchVersions
+        .mockResolvedValueOnce(versions([2, 'published'], [3, 'draft']))
+        .mockResolvedValue(versions([3, 'published'], [2, 'retired']));
+      mockedFetchDocument.mockResolvedValue({ ...draftDocument, status: 'published' });
+      renderPage('?version=3');
+
+      expect(await findInspectorHeading('collect')).toBeInTheDocument();
+      expect(
+        screen.queryByRole('textbox', { name: 'Workflow document (JSON)' }),
+      ).not.toBeInTheDocument();
+      expect(mockedFetchDefinition).toHaveBeenCalledWith(WORKFLOW_ID, 3);
+    });
+
     it('still renders the graph for a published version', async () => {
       mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [3, 'draft']));
       renderPage('?version=2');
 
       expect(await findInspectorHeading('collect')).toBeInTheDocument();
       expect(mockedFetchDocument).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('New draft', () => {
+    const summaryFor = (overrides: Partial<AdminWorkflowSummary>): AdminWorkflowSummary => ({
+      workflowId: WORKFLOW_ID,
+      name: 'KYC flow',
+      scope: 'users',
+      servingVersion: 2,
+      versionCount: 2,
+      draftCount: 0,
+      inProgressCount: 0,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      mockedFetchList.mockResolvedValue({
+        records: [summaryFor({})],
+        pagination: { page: 1, limit: 100, total: 1, totalPages: 1 },
+      });
+      mockedFetchDocument.mockResolvedValue({
+        workflowId: WORKFLOW_ID,
+        version: 2,
+        status: 'published',
+        name: 'KYC flow',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        document: { id: WORKFLOW_ID, version: 2, name: 'KYC flow', steps: [] },
+      });
+    });
+
+    it('is shown on a published version', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
+      renderPage('?version=2');
+
+      expect(await screen.findByRole('button', { name: 'New draft' })).toBeInTheDocument();
+    });
+
+    it('is shown on a retired version', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
+      renderPage('?version=1');
+
+      expect(await screen.findByRole('button', { name: 'New draft' })).toBeInTheDocument();
+    });
+
+    it('is shown on a built-in family', async () => {
+      mockedFetchList.mockResolvedValue({
+        records: [summaryFor({ scope: 'built-in', name: null })],
+        pagination: { page: 1, limit: 100, total: 1, totalPages: 1 },
+      });
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+      renderPage('?version=2');
+
+      expect(await screen.findByRole('button', { name: 'New draft' })).toBeInTheDocument();
+    });
+
+    it('is shown on a published version of a family that has a draft', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([3, 'draft'], [2, 'published']));
+      renderPage('?version=2');
+
+      expect(await screen.findByRole('button', { name: 'New draft' })).toBeInTheDocument();
+    });
+
+    it('is not shown on a draft', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [3, 'draft']));
+      mockedFetchDocument.mockResolvedValue({
+        workflowId: WORKFLOW_ID,
+        version: 3,
+        status: 'draft',
+        name: 'KYC draft',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        document: { id: WORKFLOW_ID, version: 3, steps: [] },
+      });
+      renderPage('?version=3');
+
+      await screen.findByRole('textbox', { name: 'Workflow document (JSON)' });
+      expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
+    });
+
+    it('opens the New draft dialog on Fork with the shown workflow and version chosen', async () => {
+      const user = userEvent.setup();
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
+      renderPage('?version=1');
+
+      await user.click(await screen.findByRole('button', { name: 'New draft' }));
+
+      expect(await screen.findByRole('dialog', { name: 'New draft' })).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /Fork an existing version/ })).toBeChecked();
+      expect(await screen.findByRole('combobox', { name: 'Source version' })).toHaveTextContent(
+        'v1',
+      );
+      expect(screen.getByRole('combobox', { name: 'Source workflow' })).toHaveValue('KYC flow');
     });
   });
 });

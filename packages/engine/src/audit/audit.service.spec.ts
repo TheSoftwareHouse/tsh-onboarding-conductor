@@ -1216,6 +1216,30 @@ describe('AuditService', () => {
       );
     });
 
+    it('keeps the scope and per-version previous connectors of a per-version selection', async () => {
+      const { sut, repository, dataSource } = createSut();
+      const metadata = {
+        workflowId: 'eu-b2c',
+        stepName: 'submit_kyc',
+        connectorId: 'veriff_kyc',
+        scope: 'all' as const,
+        versions: [
+          { version: 1, previousConnectorId: null },
+          { version: 2, previousConnectorId: 'sumsub_kyc' },
+        ],
+      };
+
+      await sut.logWorkflowChange(dataSource, {
+        action: 'workflow.connector_selected',
+        actorId: 'operator-oid',
+        resourceId: 'eu-b2c',
+        metadata: { ...metadata, smuggled: 'x' } as never,
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual(metadata);
+    });
+
     it('drops anything but the allowlisted metadata', async () => {
       const { sut, repository, dataSource } = createSut();
 
@@ -1300,6 +1324,102 @@ describe('AuditService', () => {
         previousConnectorId: null,
         connectorId: 'veriff_kyc',
       });
+    });
+  });
+
+  describe('onboardings export', () => {
+    function createSut() {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const manager = createManager();
+      const dataSource = {
+        transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
+      } as unknown as DataSource;
+
+      return {
+        repository,
+        manager,
+        dataSource,
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    }
+
+    it('writes an operator row with the supplied filters, in its own transaction', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logOnboardingsExport(dataSource, {
+        actorId: 'operator-oid',
+        filters: { status: 'completed', workflowId: 'passport-check', workflowVersion: 2 },
+      });
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(repository.insert).toHaveBeenCalledWith(manager, {
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        action: 'onboardings.exported',
+        entryType: 'success',
+        resourceType: 'onboardings_export',
+        resourceId: 'onboardings',
+        metadata: { status: 'completed', workflowId: 'passport-check', workflowVersion: 2 },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      });
+    });
+
+    it('records an empty metadata object when no filter was supplied', async () => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logOnboardingsExport(dataSource, { actorId: 'operator-oid', filters: {} });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual({});
+    });
+
+    it('keeps the parked-connector criteria', async () => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logOnboardingsExport(dataSource, {
+        actorId: 'operator-oid',
+        filters: {
+          parked: false,
+          pendingConnectorId: 'veriff_kyc',
+          parkedBefore: '2026-07-21T10:00:00.000Z',
+        },
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual({
+        parked: false,
+        pendingConnectorId: 'veriff_kyc',
+        parkedBefore: '2026-07-21T10:00:00.000Z',
+      });
+    });
+
+    it('drops undefined criteria and anything outside the filter fields', async () => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logOnboardingsExport(dataSource, {
+        actorId: 'operator-oid',
+        filters: { status: undefined, currentStep: 'review', rows: [{ name: 'Ada' }] } as never,
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual({ currentStep: 'review' });
+    });
+
+    it('names an actor rather than storing a blank one', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logOnboardingsExport(dataSource, { actorId: '', filters: {} });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ actorId: 'unknown' }),
+      );
     });
   });
 
@@ -1875,6 +1995,7 @@ describe('AuditService', () => {
       'workflow_draft.created',
       'workflow_draft.updated',
       'workflow_draft.deleted',
+      'workflow_draft.published',
     ] as const)(
       'files %s against the version row, naming the operator, on the caller manager',
       async (action) => {
@@ -1960,6 +2081,26 @@ describe('AuditService', () => {
 
       const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
       expect(insertedRow.metadata).toEqual({ workflowId: 'kyc', version: 2 });
+    });
+
+    it('files a publication with only the allowed metadata keys', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logWorkflowDraft(manager, {
+        action: 'workflow_draft.published',
+        actorId: 'operator-oid',
+        resourceId: VERSION_ID,
+        metadata: { workflowId: 'kyc', version: 2, document: { id: 'kyc' } } as never,
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          action: 'workflow_draft.published',
+          entryType: 'success',
+          metadata: { workflowId: 'kyc', version: 2 },
+        }),
+      );
     });
 
     it('rejects an action outside the draft allowlist', async () => {

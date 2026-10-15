@@ -5,6 +5,7 @@ import {
   listStepTypes,
   WorkflowInvalidError,
 } from '@tsh/ddl-schema';
+import type { EntityManager } from 'typeorm';
 import { Workflow } from './domain/workflow';
 import type {
   StepTypesListResponseDto,
@@ -30,7 +31,10 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 export class WorkflowCompilationService {
   constructor(private readonly workflowRegistryService: WorkflowRegistryService) {}
 
-  async compile(document: unknown): Promise<WorkflowCompilationResponseDto> {
+  async compile(
+    document: unknown,
+    manager?: EntityManager,
+  ): Promise<WorkflowCompilationResponseDto> {
     if (!isPlainObject(document)) {
       throw new WorkflowInvalidException('INVALID_SHAPE');
     }
@@ -40,7 +44,7 @@ export class WorkflowCompilationService {
       // because its checks — the adapters', the source-key sweep — are stated over what startup
       // would be handed, and compiling a graph twice costs less than a second seam would.
       const report = compileWorkflowReport(document);
-      const normalized = await this.workflowRegistryService.validateDefinition(document);
+      const normalized = await this.workflowRegistryService.validateDefinition(document, manager);
 
       return {
         definition: report.definition,

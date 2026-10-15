@@ -21,4 +21,17 @@ describe('Callout', () => {
     // The icon is decorative: the copy alone carries the band's meaning.
     expect(document.querySelector('svg[aria-hidden="true"]')).toBeInTheDocument();
   });
+
+  it('renders the notice variant as a tinted, bordered status band', () => {
+    render(
+      <Callout variant="notice" role="status">
+        Heads up
+      </Callout>,
+    );
+
+    const band = screen.getByRole('status');
+    expect(band).toHaveTextContent('Heads up');
+    expect(band).toHaveClass('border', 'bg-tsh-yellow-200');
+    expect(band).not.toHaveClass('border-b');
+  });
 });

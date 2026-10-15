@@ -2,8 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { isUniqueViolation } from '../database/unique-violation';
-import type { AdminWorkflowDraftDocumentResponseDto } from './dto/admin-workflow-draft-document.response.dto';
 import type { AdminWorkflowDraftResponseDto } from './dto/admin-workflow-draft.response.dto';
+import type { AdminWorkflowPublicationResponseDto } from './dto/admin-workflow-publication.response.dto';
+import type { AdminWorkflowVersionDocumentResponseDto } from './dto/admin-workflow-version-document.response.dto';
 import { MAX_WORKFLOW_VERSION } from './dto/workflow-version.params.dto';
 import type { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { WorkflowDraftExistsException } from './errors/workflow-draft-exists.exception';
@@ -13,6 +14,9 @@ import { WorkflowNotFoundException } from './errors/workflow-not-found.exception
 import { WorkflowScopeConflictException } from './errors/workflow-scope-conflict.exception';
 import { WorkflowVersionExistsException } from './errors/workflow-version-exists.exception';
 import { WorkflowVersionNotDraftException } from './errors/workflow-version-not-draft.exception';
+import { WorkflowVersionNotLatestException } from './errors/workflow-version-not-latest.exception';
+import { WorkflowCompilationService } from './workflow-compilation.service';
+import { WorkflowFileLoaderService } from './workflow-file-loader.service';
 import { WorkflowRegistryService } from './workflow-registry.service';
 import { DRAFT_WORKFLOW_STATUS } from './workflow-status';
 import { DRAFT_FAMILY_SCOPE, WorkflowsRepository } from './workflows.repository';
@@ -46,6 +50,8 @@ export class WorkflowDraftsService {
     private readonly dataSource: DataSource,
     private readonly workflowsRepository: WorkflowsRepository,
     private readonly workflowRegistryService: WorkflowRegistryService,
+    private readonly workflowCompilationService: WorkflowCompilationService,
+    private readonly workflowFileLoaderService: WorkflowFileLoaderService,
     private readonly auditService: AuditService,
   ) {}
 
@@ -79,10 +85,19 @@ export class WorkflowDraftsService {
   async getDocument(
     workflowId: string,
     version: number,
-  ): Promise<AdminWorkflowDraftDocumentResponseDto> {
-    const draft = await this.getDraft(this.dataSource.manager, workflowId, version);
+  ): Promise<AdminWorkflowVersionDocumentResponseDto> {
+    const revision = await this.workflowsRepository.findRevision(
+      this.dataSource.manager,
+      this.workflowRegistryService.getActiveScopes(),
+      workflowId,
+      version,
+    );
 
-    return { ...this.toResponse(draft), document: draft.definition };
+    if (revision === null) {
+      throw new WorkflowNotFoundException();
+    }
+
+    return { ...this.toResponse(revision), document: revision.definition };
   }
 
   async update(
@@ -149,6 +164,85 @@ export class WorkflowDraftsService {
         metadata: { workflowId, version },
       });
     });
+  }
+
+  /** Makes the stored draft the family's latest published version; see ADR 0040. */
+  async publish(
+    workflowId: string,
+    version: number,
+    operator: string,
+  ): Promise<AdminWorkflowPublicationResponseDto> {
+    return this.dataSource.transaction(async (manager) => {
+      await this.workflowsRepository.lockPublishing(manager);
+
+      const draft = await this.getDraft(manager, workflowId, version, true);
+      const latest = await this.workflowsRepository.findLatestPublished(
+        manager,
+        this.workflowRegistryService.getActiveScopes(),
+        workflowId,
+      );
+
+      if (latest !== null && latest.version >= version) {
+        throw new WorkflowVersionNotLatestException(workflowId, version, latest.version);
+      }
+
+      // Boot skips a file shadowing a draft, but would refuse it against a published row.
+      const isShadowed = await this.workflowFileLoaderService.hasRevision(
+        this.workflowRegistryService.getActiveScopes(),
+        workflowId,
+        version,
+      );
+
+      if (isShadowed) {
+        throw new WorkflowVersionExistsException(workflowId, version);
+      }
+
+      await this.workflowCompilationService.compile(draft.definition, manager);
+
+      const published = await this.workflowsRepository.publishDraft(
+        manager,
+        draft.workflowVersionId,
+      );
+
+      if (published === null) {
+        throw new WorkflowNotFoundException();
+      }
+
+      const label = await this.relabel(manager, draft);
+
+      await this.auditService.logWorkflowDraft(manager, {
+        action: 'workflow_draft.published',
+        actorId: operator,
+        resourceId: published.workflowVersionId,
+        metadata: { workflowId, version },
+      });
+
+      return { ...this.toResponse(published), name: label ?? published.workflow.name ?? null };
+    });
+  }
+
+  /** Writes the document's `name` to the family unless a non-draft revision outranks this one; returns what it wrote. */
+  private async relabel(
+    manager: EntityManager,
+    draft: WorkflowVersionEntity,
+  ): Promise<string | undefined> {
+    const { name } = this.parseIdentity(draft.definition);
+
+    if (name === undefined) {
+      return undefined;
+    }
+
+    const isOutranked = (await this.listFamily(manager, draft.workflow.key)).some(
+      (stored) => stored.status !== DRAFT_WORKFLOW_STATUS && stored.version > draft.version,
+    );
+
+    if (isOutranked) {
+      return undefined;
+    }
+
+    await this.workflowsRepository.relabelFamily(manager, draft.workflowId, name);
+
+    return name;
   }
 
   /**

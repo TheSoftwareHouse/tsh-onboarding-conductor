@@ -1,4 +1,4 @@
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { OnboardingAgreementStatusView } from './entity/onboarding-agreement-status.view';
 import { OnboardingEntity } from './entity/onboarding.entity';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
@@ -17,6 +17,9 @@ describe('OnboardingsRepository', () => {
       addOrderBy: jest.fn(),
       skip: jest.fn(),
       take: jest.fn(),
+      limit: jest.fn(),
+      select: jest.fn(),
+      distinct: jest.fn(),
       clone: jest.fn(),
     };
     const queryBuilder = {
@@ -24,6 +27,7 @@ describe('OnboardingsRepository', () => {
       getCount: jest.fn().mockResolvedValue(0),
       getMany: jest.fn().mockResolvedValue([]),
       getOne: jest.fn().mockResolvedValue(null),
+      getRawMany: jest.fn().mockResolvedValue([]),
     };
 
     for (const method of Object.keys(chainable)) {
@@ -36,6 +40,7 @@ describe('OnboardingsRepository', () => {
   const createHarness = () => {
     const queryBuilder = createQueryBuilderMock();
     const repositoryMock = {
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
       create: jest.fn(),
       save: jest.fn(),
@@ -157,6 +162,158 @@ describe('OnboardingsRepository', () => {
 
       expect(filter).toBeDefined();
       expect(filter![1]).toEqual({ workflowVersion: 7 });
+    });
+  });
+
+  describe('findAdminExportBatch', () => {
+    const findCursor = (queryBuilder: ReturnType<typeof createQueryBuilderMock>) =>
+      queryBuilder.andWhere.mock.calls.find(([condition]) => String(condition).includes(':lastId'));
+
+    it('adds no cursor clause on the first batch', async () => {
+      const harness = createHarness();
+
+      await harness.sut.findAdminExportBatch(harness.manager, createQuery(), null, 500);
+
+      expect(findCursor(harness.queryBuilder)).toBeUndefined();
+      expect(harness.queryBuilder.limit).toHaveBeenCalledWith(500);
+      expect(harness.queryBuilder.take).not.toHaveBeenCalled();
+    });
+
+    it('binds the last id as a keyset cursor when afterId is set', async () => {
+      const harness = createHarness();
+
+      await harness.sut.findAdminExportBatch(harness.manager, createQuery(), 'onboarding-9', 500);
+
+      const cursor = findCursor(harness.queryBuilder);
+
+      expect(cursor![0]).not.toContain('onboarding-9');
+      expect(cursor![1]).toEqual({ lastId: 'onboarding-9' });
+    });
+
+    it('applies the list filters and the list order', async () => {
+      const harness = createHarness();
+
+      await harness.sut.findAdminExportBatch(
+        harness.manager,
+        createQuery({ workflowId: 'passport-check', status: 'approved' }),
+        null,
+        500,
+      );
+
+      expect(harness.queryBuilder.andWhere).toHaveBeenCalledWith('workflow.key = :workflowId', {
+        workflowId: 'passport-check',
+      });
+      expect(harness.queryBuilder.andWhere).toHaveBeenCalledWith('onboarding.status = :status', {
+        status: 'approved',
+      });
+      expect(harness.queryBuilder.orderBy).toHaveBeenCalledWith('onboarding.createdAt', 'DESC');
+      expect(harness.queryBuilder.addOrderBy).toHaveBeenCalledWith('onboarding.id', 'DESC');
+    });
+
+    it("reads the batch's agreement statuses by id instead of joining the view", async () => {
+      const harness = createHarness();
+      const accepted = Object.assign(new OnboardingEntity(), { id: 'onboarding-1' });
+      const unlinked = Object.assign(new OnboardingEntity(), { id: 'onboarding-2' });
+
+      harness.queryBuilder.getMany.mockResolvedValue([accepted, unlinked]);
+      (harness.repositoryMock.find as jest.Mock).mockResolvedValue([
+        { onboardingId: 'onboarding-1', agreementStatus: 'current' },
+      ]);
+
+      const result = await harness.sut.findAdminExportBatch(
+        harness.manager,
+        createQuery(),
+        null,
+        500,
+      );
+
+      expect(harness.queryBuilder.leftJoinAndMapOne).not.toHaveBeenCalled();
+      expect(harness.manager.getRepository).toHaveBeenCalledWith(OnboardingAgreementStatusView);
+      expect(harness.repositoryMock.find).toHaveBeenCalledWith({
+        where: { onboardingId: In(['onboarding-1', 'onboarding-2']) },
+      });
+      expect(result.map((onboarding) => onboarding.getAgreementStatus())).toEqual([
+        'current',
+        'not_accepted',
+      ]);
+    });
+
+    it('joins the view and skips the lookup when filtering on agreement status', async () => {
+      const harness = createHarness();
+
+      harness.queryBuilder.getMany.mockResolvedValue([
+        Object.assign(new OnboardingEntity(), { id: 'onboarding-1' }),
+      ]);
+
+      await harness.sut.findAdminExportBatch(
+        harness.manager,
+        createQuery({ agreementStatus: 'outdated' }),
+        null,
+        500,
+      );
+
+      expect(harness.queryBuilder.leftJoinAndMapOne).toHaveBeenCalledWith(
+        'onboarding.agreementStatusView',
+        OnboardingAgreementStatusView,
+        'agreementStatusView',
+        'agreementStatusView.onboardingId = onboarding.id',
+      );
+      expect(findStatusFilter(harness.queryBuilder)).toBeDefined();
+      expect(harness.repositoryMock.find).not.toHaveBeenCalled();
+    });
+
+    it('skips the status lookup for an empty batch', async () => {
+      const harness = createHarness();
+
+      await harness.sut.findAdminExportBatch(harness.manager, createQuery(), null, 500);
+
+      expect(harness.repositoryMock.find).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findWorkflowVersionsForAdmin', () => {
+    it('applies the filters and returns distinct pairs with numeric versions', async () => {
+      const harness = createHarness();
+
+      harness.queryBuilder.getRawMany.mockResolvedValue([
+        { workflowKey: 'passport-check', version: '2' },
+      ]);
+
+      const result = await harness.sut.findWorkflowVersionsForAdmin(
+        harness.manager,
+        createQuery({ workflowId: 'passport-check' }),
+      );
+
+      expect(harness.queryBuilder.andWhere).toHaveBeenCalledWith('workflow.key = :workflowId', {
+        workflowId: 'passport-check',
+      });
+      expect(harness.queryBuilder.distinct).toHaveBeenCalledWith(true);
+      expect(result).toEqual([{ workflowKey: 'passport-check', version: 2 }]);
+    });
+
+    it('does not join the agreement-status view without an agreement-status filter', async () => {
+      const harness = createHarness();
+
+      await harness.sut.findWorkflowVersionsForAdmin(harness.manager, createQuery());
+
+      expect(harness.queryBuilder.leftJoinAndMapOne).not.toHaveBeenCalled();
+    });
+
+    it('joins the view and filters on it when filtering on agreement status', async () => {
+      const harness = createHarness();
+
+      await harness.sut.findWorkflowVersionsForAdmin(
+        harness.manager,
+        createQuery({ agreementStatus: 'outdated' }),
+      );
+
+      expect(harness.queryBuilder.leftJoinAndMapOne).toHaveBeenCalledWith(
+        'onboarding.agreementStatusView',
+        OnboardingAgreementStatusView,
+        'agreementStatusView',
+        'agreementStatusView.onboardingId = onboarding.id',
+      );
+      expect(findStatusFilter(harness.queryBuilder)).toBeDefined();
     });
   });
 

@@ -10,16 +10,15 @@ instances, each with its own sidebar under `sidebars/`:
   Docusaurus' docs versioning: the current document is the `current` version at `/api`, and each
   minor archived under `packages/shared/openapi/versions/<major.minor>/` is a version at
   `/api/<major.minor>`, generated from its frozen document by an OpenAPI plugin entry of its own
-  (`docs/decisions/0040-versioned-openapi-documents.md`). `openapi-versions.ts` is the one place
+  (`docs/decisions/0045-versioned-openapi-documents.md`). `openapi-versions.ts` is the one place
   that knows where the documents and the generated versioning files are; the config and the
   scripts import it. Every page of an archived version shows Docusaurus' version banner, worded
   in `i18n/en/code.json` (the only translation file; the site has one locale), and the navbar's
   API entry is a `doc` item so it follows the version chosen in the dropdown.
 - **Fixtures** (`docs/fixtures`, served at `/fixtures`) — generated from `workflows/fixtures` and
   `workflows/built-in` by `scripts/generate-fixtures.mjs`, plus the hand-written gallery
-  `index.mdx`. An example's two files (`<name>-typed`, specialized steps; `<name>`, `custom` steps)
-  share one page at `/fixtures/<name>`, specialized form first; a built-in workflow has a page per
-  revision.
+  `index.mdx`. Every workflow file has a page at `/fixtures/<file stem>`; a built-in revision's
+  page links the revision written in the other form.
 
 `docs/decisions/0016-docusaurus-documentation-site.md` records the choices; `THEME.md` here is the
 design spec the stylesheet implements, and the reference when judging a visual deviation.
@@ -88,8 +87,8 @@ Vercel, project root directory `packages/docs`; `vercel.json` there runs the ins
   generated shape breaks there first, and the unwrapping must stay bounded: the module interop can
   hand back a wrapper whose `default` is itself.
 - `onBrokenLinks` throws, so a guide that links to a generated page (`/fixtures/<id>`,
-  `/api/<operation>`) fails the build when the id changes. A fixture id is the workflow file stem,
-  minus `-typed` for an example (`/fixtures/<name>-typed` does not exist); an operation's id is its
+  `/api/<operation>`) fails the build when the id changes. A fixture id is the workflow file stem;
+  an operation's id is its
   kebab-cased `operationId`.
 - pnpm blocks the post-install scripts of `core-js`, `@parcel/watcher` and
   `postman-code-generators` (`pnpm-workspace.yaml`); the site builds without them.

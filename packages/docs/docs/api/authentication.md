@@ -13,7 +13,7 @@ An end customer holds no operator identity, so `POST /v1/onboardings`, the state
 
 ## Admin routes require a bearer token
 
-Every route under `/v1/admin/` and the operator routes on onboardings (`GET /v1/onboardings`, `GET /v1/onboardings/{id}`, `GET /v1/onboardings/{id}/transitions`, `GET /v1/onboardings/{id}/agreements` and `POST /v1/onboardings/{id}/agreements`) carry the `entraBearer` security requirement:
+Every route under `/v1/admin/` and the operator routes on onboardings (`GET /v1/onboardings`, `GET /v1/onboardings/export`, `GET /v1/onboardings/{id}`, `GET /v1/onboardings/{id}/transitions`, `GET /v1/onboardings/{id}/agreements` and `POST /v1/onboardings/{id}/agreements`) carry the `entraBearer` security requirement:
 
 ```http
 Authorization: Bearer <access token>

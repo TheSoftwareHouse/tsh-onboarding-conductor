@@ -35,12 +35,12 @@ workflow document or an environment variable.
 | MUST     | Run `pnpm workflow:compile <path>` and `pnpm workflow:validate <path>` before starting the stack. Seconds against a minutes-long failed bootstrap, and the compile prints a `path` into the document.                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | MUST     | Wire every non-optional port of every step. `manual-review`'s `invalid` is the only optional one, and which ports **exist** is config-dependent (`decision` / `risk-score` gain `default` only with `fallback: true`, `connector-call` gains `rejected` only when a connector can refuse). Read them off `--report` — but note it lists an unwired optional port with `"arms": []` rather than omitting it, so an empty `arms` is a defect only on a required port.                                                                                                                                                               |
 | NEVER    | Change a stored revision's behaviour by editing it. Publish by adding a file with the same `id` and a higher `version` — onboardings in flight stay pinned to the version they started on.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| NEVER    | Add a port, an arm or an outcome the request did not ask for. `manual-review`'s `invalid` is a third terminal, and appending an unconditional arm to a conditional group re-routes what used to fall through — an all-conditional group is legal and deliberate, and `fixtures/conditional-fields-and-transitions-typed.workflow.json` ships two of them. Fixing a reported failure means changing what its `path` names and nothing else.                                                                                                                                                                                        |
+| NEVER    | Add a port, an arm or an outcome the request did not ask for. `manual-review`'s `invalid` is a third terminal, and appending an unconditional arm to a conditional group re-routes what used to fall through — an all-conditional group is legal and deliberate, and `fixtures/conditional-fields-and-transitions.workflow.json` ships two of them. Fixing a reported failure means changing what its `path` names and nothing else.                                                                                                                                                                                              |
 | MUST     | Keep field names unique across the **whole** document, not per step, including the names step types generate.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | MUST     | Put a step that publishes something a later step consumes on **every** path into that step. The contract is scoped to ancestors, so a collector on one branch is invisible to a consumer reachable from the other.                                                                                                                                                                                                                                                                                                                                                                                                                |
 | NEVER    | Invent a connector `id`, `errorHandler`, field `format` or step `type`. Read the registries (step 3) — a binding outside a step type's slot fails at load, and an unregistered `id` passes the DDL and is rejected by the engine later.                                                                                                                                                                                                                                                                                                                                                                                           |
 | NEVER    | Name a test double after a real or plausible vendor. A fixture connector announces itself as a mock in its `id`, as `mock_kyc_1` and `mock_email_delivery` do.                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| MUST     | Add a fixture as a **pair**: `<id>.workflow.json` written entirely in `custom` steps and `<id>-typed.workflow.json` with no `custom` step. `checked-in-workflows.spec.ts` fails a fixture that ships alone; add the id to its `IDENTICAL_PAIRS` when the two forms compile to the same steps, and to the comment above that list when they differ on purpose.                                                                                                                                                                                                                                                                     |
+| MUST     | Write a new fixture as **one** file, `<id>.workflow.json`, in specialized step types, with `custom` only for a step no type describes. `fixtures/` holds the flows the e2e suites start onboardings on, not a catalogue of examples.                                                                                                                                                                                                                                                                                                                                                                                              |
 | MUST     | Give every `kyc-identity-verification` step a `sourceKey` no other **workflow id** claims — whichever `kyc` adapter it binds — and carry it into a new revision **unchanged**: the key names the product at the provider, so two revisions splitting it would split that product's traffic. There are two built-in families, `eu-b2c-individual-kyc-eea` (v1 and v2 both declare `eu_b2c_individual_kyc_eea_v1`) and `eu-b2c-individual-kyc-eea-veriff` (`eu_b2c_individual_kyc_eea_veriff_v1`). Repeating one key across steps inside a single document is legal; a collision between two ids is `WORKFLOW_SOURCE_KEY_CONFLICT`. |
 | MUST     | Update `docs/IMPLEMENTATION.md` (§"Checked-in workflows") and `docs/EXTENDING.md`'s example list in the same change that adds or removes a committed workflow.                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
@@ -98,33 +98,30 @@ expensive mistake:
 
 **Step 1 — Pick the scope.** `built-in/` ships with the engine and loads everywhere; `fixtures/`
 backs local development and CI and is skipped when `NODE_ENV=production`; `users/` is a deployment's
-own. A definition demonstrating a DDL feature belongs in `fixtures/` — and ships as a pair, see the
-rules table. A production flow belongs in `built-in/`. Ask when the request does not make it obvious.
+own. A definition a test runs against belongs in `fixtures/`. A production flow belongs in
+`built-in/`. Ask when the request does not make it obvious.
 
 **Step 2 — Start from the closest existing definition.** Copy it to
 `workflows/<scope>/<id>.workflow.json` and change what differs:
 
-| Closest to                                 | Copy                                                                                                                                                 |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A production flow, end to end              | `built-in/eu-b2c-individual-kyc-eea-v2.workflow.json`                                                                                                |
-| A plain linear flow                        | `fixtures/base-typed.workflow.json`                                                                                                                  |
-| Branching on what the applicant answered   | `fixtures/conditional-fields-and-transitions-typed.workflow.json`                                                                                    |
-| Document or image capture                  | `fixtures/file-upload-typed.workflow.json`                                                                                                           |
-| An operator decides the outcome            | `fixtures/manual-review-typed.workflow.json`                                                                                                         |
-| Calling an arbitrary HTTP API              | `fixtures/http-request-typed.workflow.json`                                                                                                          |
-| One-time code over SMS, with a resend path | `fixtures/twilio-verify-typed.workflow.json`                                                                                                         |
-| Sending email                              | `fixtures/sendgrid-email-typed.workflow.json`, `fixtures/manual-smtp-typed.workflow.json`                                                            |
-| A provider that answers on a callback      | `fixtures/sumsub-kyc-typed.workflow.json` (needs a `levelName`), `fixtures/veriff-kyc-typed.workflow.json` (no per-workflow keys beyond `sourceKey`) |
-| Named scores and score-conditioned routing | `fixtures/scoring-typed.workflow.json` — routes with conditional edges carrying a score leaf, **not** a `risk-score` step, which has no fixture      |
-| A second provider behind the first         | `fixtures/connector-fallback-typed.workflow.json`                                                                                                    |
+| Closest to                                       | Copy                                                                                                                                                                                                |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A production flow, end to end                    | `built-in/eu-b2c-individual-kyc-eea-v2.workflow.json`                                                                                                                                               |
+| A plain linear flow                              | `fixtures/base.workflow.json`                                                                                                                                                                       |
+| Branching on what the applicant answered         | `fixtures/conditional-fields-and-transitions.workflow.json`                                                                                                                                         |
+| Document or image capture                        | `fixtures/file-upload.workflow.json`                                                                                                                                                                |
+| An operator decides the outcome                  | `fixtures/manual-review.workflow.json`                                                                                                                                                              |
+| One-time code over SMS                           | `fixtures/twilio-verify.workflow.json`                                                                                                                                                              |
+| Sending email                                    | `fixtures/sendgrid-email.workflow.json`                                                                                                                                                             |
+| Named scores and score-conditioned routing       | `fixtures/scoring.workflow.json`                                                                                                                                                                    |
+| KYC with a provider callback, OTP with a re-send | `built-in/eu-b2c-individual-kyc-eea-v2.workflow.json` (Sumsub, needs a `levelName`), `built-in/eu-b2c-individual-kyc-eea-veriff-v2.workflow.json` (Veriff, no per-workflow keys beyond `sourceKey`) |
 
-The `<name>.workflow.json` twin of each fixture is the same flow in `custom` steps — read it to see
-what a type compiles to, but do not copy it as a starting point for new work. Copy a fixture for its
-**shape**, then pick each step's type from what the request says it collects: `manual-review-typed`
-collects through a `form` and wires `invalid` because that fixture exists to demonstrate them, not
-because a review flow needs either. Write the typed form first: the twin is **transcribed, never
-re-authored** — `pnpm workflow:compile <typed-file>` with each step's `{status, data, transitions}`
-moved under `config` and `"type": "custom"` added is the twin exactly.
+The existing fixtures predate the specialized types and are written in `custom` steps — the
+compiled shape, verbatim — so copy one for its **shape**, then write each step in the specialized
+type that owns what the request says it collects.
+The built-in `-v2` revisions are the checked-in documents written in specialized step types; read
+one beside [references/step-types.md](references/step-types.md) for how
+those types are declared. `pnpm workflow:compile <file>` prints what any document compiles to.
 
 **Step 3 — Reconcile every declared identifier against the registries.** Read
 [references/step-types.md](references/step-types.md) for the type's ports and slot, then confirm the
@@ -134,8 +131,8 @@ adapter ids and error handlers yourself:
 grep -rnE "readonly (id|type) = |super\('" packages/engine/src/connectors/adapters packages/engine/src/connectors/error-handlers
 ```
 
-Provider values that have actually been made to work are recorded in `workflows/fixtures/` — diff a
-failing `config` against the fixture's rather than asking which value is right.
+Provider values that have actually been made to work are recorded in `workflows/built-in/` and `workflows/fixtures/` —
+diff a failing `config` against the checked-in one's rather than asking which value is right.
 
 **Step 4 — Declare.** Root first (`id`, `version`, `name`, `initial`, optional `webhook`, `scoring`
 and `meta`), then each step's `type`, `config`, `include`, `substeps`, `scoring` and `edges`. Two
@@ -193,7 +190,7 @@ started from.
 - [ ] Field names are unique across the whole document, generated ones included
 - [ ] Everything a step consumes from the contract is published by an ancestor on every path
 - [ ] Every connector `id`, `type` and `errorHandler` exists in a registry and fits the type's slot
-- [ ] A new fixture ships as a `custom` / `-typed` pair; a `kyc-identity-verification` `sourceKey` is unique across workflow ids and unchanged from the revision it supersedes
+- [ ] A new fixture is one file in specialized step types; a `kyc-identity-verification` `sourceKey` is unique across workflow ids and unchanged from the revision it supersedes
 - [ ] A behaviour change was published as a new `version`, not an edit to a stored one
 - [ ] `docs/IMPLEMENTATION.md` and `docs/EXTENDING.md` reflect the change
 ```

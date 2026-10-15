@@ -14,7 +14,11 @@ import {
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
 import { toPaginatedMeta } from '../pagination';
-import { ConnectorSelectionRules } from './domain/connector-selection';
+import {
+  ConnectorSelectionRules,
+  findSelectableConnector,
+  type ConnectorVersionEntry,
+} from './domain/connector-selection';
 import { Workflow } from './domain/workflow';
 import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import type { ListAdminWorkflowVersionsResponseDto } from './dto/list-admin-workflow-versions.response.dto';
@@ -32,7 +36,11 @@ import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-fo
 import { WorkflowFileLoaderService } from './workflow-file-loader.service';
 import { WorkflowConnectorSelectionsRepository } from './workflow-connector-selections.repository';
 import { WORKFLOW_SCOPES, type WorkflowScope } from './workflow-scope';
-import { DRAFT_WORKFLOW_STATUS, RETIRED_WORKFLOW_STATUS } from './workflow-status';
+import {
+  DRAFT_WORKFLOW_STATUS,
+  PUBLISHED_WORKFLOW_STATUS,
+  RETIRED_WORKFLOW_STATUS,
+} from './workflow-status';
 import { WorkflowsRepository } from './workflows.repository';
 
 const PRODUCTION_NODE_ENV = 'production';
@@ -76,7 +84,7 @@ export class WorkflowRegistryService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     const scopes = this.getActiveScopes();
     const manager = this.dataSource.manager;
-    const files = this.workflowFileLoaderService.load(scopes);
+    const files = await this.workflowFileLoaderService.load(scopes);
 
     // Validated before the publish, not after: an invalid file must fail the boot
     // without ever reaching the table, so fixing or removing it is enough to
@@ -185,6 +193,13 @@ export class WorkflowRegistryService implements OnModuleInit {
     return this.toWorkflow(await this.resolveStoredVersion(key, version, manager, false), manager);
   }
 
+  /** The normalized definition of a pinned revision: the same resolution as `getById`, except a `retired` revision is served. */
+  async getDefinitionForAdmin(key: string, version: number): Promise<NormalizedWorkflowDefinition> {
+    const storedVersion = await this.resolveStoredVersion(key, version, undefined, true);
+
+    return this.normalizeDefinition(storedVersion.definition);
+  }
+
   /**
    * The admin read of a definition: the same resolution as `getById`, except a pinned `retired` or
    * `draft` revision is served. A draft that does not compile is an authoring defect, not a 500.
@@ -195,10 +210,14 @@ export class WorkflowRegistryService implements OnModuleInit {
     try {
       const report = compileWorkflowReport(storedVersion.definition);
 
-      return (await this.toWorkflow(storedVersion)).describeDefinition(
+      const definition = (await this.toWorkflow(storedVersion)).describeDefinition(
         report.steps,
         this.createConnectorSelectionRules(),
+        await this.collectConnectorVersions(storedVersion),
       );
+
+      // The stored revision, which the admin writes address, even where the document's own `version` differs.
+      return { ...definition, workflowVersion: storedVersion.version };
     } catch (error) {
       if (storedVersion.status === DRAFT_WORKFLOW_STATUS) {
         if (error instanceof WorkflowInvalidError) {
@@ -314,19 +333,19 @@ export class WorkflowRegistryService implements OnModuleInit {
       : new WorkflowNotFoundException();
   }
 
-  /**
-   * The family's label rides along so the read-side projection can report it, and so do the
-   * family's connector selections: read per resolution, never cached, so a selection takes effect
-   * on the next request on every instance — the way connector settings do.
-   */
+  /** Carries the family's label and the version's selections, read per resolution, never cached. */
   private async toWorkflow(
     storedVersion: WorkflowVersionEntity,
     manager?: EntityManager,
   ): Promise<Workflow> {
-    const selections = await this.connectorSelectionsRepository.findByWorkflowId(
-      manager ?? this.dataSource.manager,
-      storedVersion.workflowId,
-    );
+    const selections =
+      storedVersion.status === DRAFT_WORKFLOW_STATUS
+        ? []
+        : await this.connectorSelectionsRepository.findByVersion(
+            manager ?? this.dataSource.manager,
+            storedVersion.workflowId,
+            storedVersion.version,
+          );
 
     return new Workflow(
       this.normalizeDefinition(storedVersion.definition),
@@ -334,6 +353,48 @@ export class WorkflowRegistryService implements OnModuleInit {
       storedVersion.workflow.name,
       selections,
     );
+  }
+
+  /** Per step name, the versions a selection reaches: non-retired published ones, plus the viewed. */
+  private async collectConnectorVersions(
+    viewed: WorkflowVersionEntity,
+  ): Promise<ReadonlyMap<string, readonly ConnectorVersionEntry[]>> {
+    const { manager } = this.dataSource;
+    const [revisions, selections] = await Promise.all([
+      this.workflowsRepository.findRevisions(manager, this.getActiveScopes(), viewed.workflow.key),
+      this.connectorSelectionsRepository.findByWorkflowId(manager, viewed.workflowId),
+    ]);
+    const entriesByStep = new Map<string, ConnectorVersionEntry[]>();
+
+    for (const revision of revisions) {
+      if (revision.status !== PUBLISHED_WORKFLOW_STATUS && revision.version !== viewed.version) {
+        continue;
+      }
+
+      for (const step of this.normalizeDefinition(revision.definition).steps) {
+        const authoredId = findSelectableConnector(step)?.id;
+
+        if (authoredId === undefined) {
+          continue;
+        }
+
+        const selection = selections.find(
+          (row) => row.version === revision.version && row.stepName === step.name,
+        );
+
+        entriesByStep.set(step.name, [
+          ...(entriesByStep.get(step.name) ?? []),
+          {
+            version: revision.version,
+            id: selection?.connectorId ?? authoredId,
+            authoredId,
+            selected: selection !== undefined,
+          },
+        ]);
+      }
+    }
+
+    return entriesByStep;
   }
 
   /**
@@ -358,7 +419,7 @@ export class WorkflowRegistryService implements OnModuleInit {
     for (const selection of await this.connectorSelectionsRepository.findAll(manager)) {
       if (!selectableIds.has(selection.connectorId)) {
         this.logger.warn(
-          `Connector selection for workflow=${selection.workflow.key} step=${selection.stepName} names connector id=${selection.connectorId}, which is not registered; executing that step will fail until the selection is cleared`,
+          `Connector selection for workflow=${selection.workflow.key} version=${selection.version} step=${selection.stepName} names connector id=${selection.connectorId}, which is not registered; executing that step will fail until the selection is cleared`,
         );
       }
     }
@@ -371,10 +432,14 @@ export class WorkflowRegistryService implements OnModuleInit {
    */
   async validateDefinition(
     definition: Readonly<Record<string, unknown>>,
+    manager?: EntityManager,
   ): Promise<NormalizedWorkflowDefinition> {
     const normalized = this.normalizeDefinition(definition);
     const storedWorkflows = (
-      await this.workflowsRepository.findAll(this.dataSource.manager, this.getActiveScopes())
+      await this.workflowsRepository.findAll(
+        manager ?? this.dataSource.manager,
+        this.getActiveScopes(),
+      )
     ).filter((storedWorkflow) => storedWorkflow.status !== DRAFT_WORKFLOW_STATUS);
     const sourceKeyDeclarations = storedWorkflows.flatMap((storedWorkflow) =>
       this.collectSourceKeys(

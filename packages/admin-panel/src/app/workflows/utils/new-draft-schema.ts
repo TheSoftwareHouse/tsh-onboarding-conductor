@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { WorkflowDocumentInput } from '@/api/workflows/workflow-drafts';
+import type { WorkflowScope } from '@/api/workflows/admin-workflows';
 import {
   MAX_DRAFT_VERSION,
   MAX_WORKFLOW_ID_LENGTH,
@@ -14,6 +15,7 @@ const WORKFLOW_ID_TOO_LONG = `The workflow id is at most ${MAX_WORKFLOW_ID_LENGT
 const VERSION_INVALID = `The version is a whole number from ${MIN_DRAFT_VERSION} to ${MAX_DRAFT_VERSION}.`;
 const UPLOAD_REQUIRED = 'Choose a .json file.';
 const UPLOAD_NOT_JSON = 'The file is not valid JSON.';
+const FORK_REQUIRED = 'Choose a workflow and a version.';
 const UPLOAD_NOT_OBJECT = 'The file must contain a JSON object.';
 
 // The engine's save precondition, shared by the typed fields and an uploaded document.
@@ -34,7 +36,13 @@ const draftDocumentSchema = z
 
 export type DraftUpload =
   | { status: 'invalid'; message: string }
-  | { status: 'ready'; document: WorkflowDocumentInput; id: string; version: number };
+  | {
+      status: 'ready';
+      document: WorkflowDocumentInput;
+      id: string;
+      version: number;
+      name: string;
+    };
 
 /** Reads an uploaded file's text as a draft source; only `id` and `version` are required, the editor judges the rest. */
 export function parseDraftUpload(text: string): DraftUpload {
@@ -55,6 +63,7 @@ export function parseDraftUpload(text: string): DraftUpload {
     document: result.data,
     id: result.data.id,
     version: result.data.version,
+    name: typeof result.data.name === 'string' ? result.data.name : '',
   };
 }
 
@@ -62,12 +71,22 @@ type ReadyUpload = Extract<DraftUpload, { status: 'ready' }>;
 
 const uploadFieldSchema = z.custom<DraftUpload | null>();
 
+/** The version a fork copies: its document, verbatim, and where its family lives. */
+export interface ForkSource {
+  workflowId: string;
+  scope: WorkflowScope;
+  document: WorkflowDocumentInput;
+}
+
+const forkFieldSchema = z.custom<ForkSource | null>();
+
 // Both sources carry every field, so the form holds one shape; an upload prefills the id and version fields.
 const draftFieldsSchema = z.object({
   workflowId: z.string(),
   version: z.string(),
   name: z.string(),
   upload: uploadFieldSchema,
+  fork: forkFieldSchema,
 });
 
 const emptySourceSchema = draftFieldsSchema.extend({
@@ -93,13 +112,41 @@ const uploadSourceSchema = emptySourceSchema.extend({
   }),
 });
 
-/** The dialog's values in, the document to post out: the Empty template or the uploaded file with the typed id and version. */
+const forkSourceSchema = emptySourceSchema.extend({
+  source: z.literal('fork'),
+  fork: forkFieldSchema.superRefine((fork, context): fork is ForkSource => {
+    if (fork !== null) {
+      return true;
+    }
+    context.addIssue({ code: z.ZodIssueCode.custom, message: FORK_REQUIRED });
+    return false;
+  }),
+});
+
+// The typed id, version and name win over the source document's; an empty name removes the key.
+function withIdentity(
+  document: WorkflowDocumentInput,
+  id: string,
+  version: number,
+  name: string,
+): WorkflowDocumentInput {
+  const result = { ...document, id, version, name };
+  if (name === '') {
+    delete (result as Partial<typeof result>).name;
+  }
+  return result;
+}
+
+/** The dialog's values in, the document to post out: the Empty template, or a fork or upload with the typed id, version and name. */
 export const newDraftSchema = z
-  .discriminatedUnion('source', [emptySourceSchema, uploadSourceSchema])
+  .discriminatedUnion('source', [emptySourceSchema, uploadSourceSchema, forkSourceSchema])
   .transform((values): WorkflowDocumentInput => {
     const { workflowId, version, name } = values;
     if (values.source === 'upload') {
-      return { ...values.upload.document, id: workflowId, version };
+      return withIdentity(values.upload.document, workflowId, version, name);
+    }
+    if (values.source === 'fork') {
+      return withIdentity(values.fork.document, workflowId, version, name);
     }
 
     return { id: workflowId, version, ...(name === '' ? {} : { name }), steps: [] };

@@ -165,7 +165,7 @@ describe('WorkflowsController', () => {
         ).selectStepConnector(
           'eu-b2c',
           'submit_kyc',
-          { connectorId: 'veriff_kyc' },
+          { connectorId: 'veriff_kyc', scope: 'version', version: 2 },
           operatorRequest,
         ),
       ).resolves.toBe(projection);
@@ -173,6 +173,7 @@ describe('WorkflowsController', () => {
         'eu-b2c',
         'submit_kyc',
         'veriff_kyc',
+        { scope: 'version', version: 2 },
         'operator-oid',
       );
     });
@@ -190,7 +191,7 @@ describe('WorkflowsController', () => {
       ).selectStepConnector(
         'eu-b2c',
         'submit_kyc',
-        { connectorId: 'veriff_kyc' },
+        { connectorId: 'veriff_kyc', scope: 'all' },
         {} as AdminAuthenticatedRequest,
       );
 
@@ -198,6 +199,7 @@ describe('WorkflowsController', () => {
         'eu-b2c',
         'submit_kyc',
         'veriff_kyc',
+        { scope: 'all', version: undefined },
         ADMIN_ACCESS_UNKNOWN_ACTOR,
       );
     });
@@ -213,9 +215,19 @@ describe('WorkflowsController', () => {
           compilationService,
           draftsService,
           service,
-        ).clearStepConnector('eu-b2c', 'submit_kyc', operatorRequest),
+        ).clearStepConnector(
+          'eu-b2c',
+          'submit_kyc',
+          { scope: 'version', version: 1 },
+          operatorRequest,
+        ),
       ).resolves.toBeUndefined();
-      expect(service.clear).toHaveBeenCalledWith('eu-b2c', 'submit_kyc', 'operator-oid');
+      expect(service.clear).toHaveBeenCalledWith(
+        'eu-b2c',
+        'submit_kyc',
+        { scope: 'version', version: 1 },
+        'operator-oid',
+      );
     });
   });
 
@@ -226,6 +238,7 @@ describe('WorkflowsController', () => {
         getDocument: jest.fn().mockResolvedValue({ workflowId: 'flow', document: {} }),
         update: jest.fn().mockResolvedValue({ workflowId: 'flow' }),
         remove: jest.fn().mockResolvedValue(undefined),
+        publish: jest.fn().mockResolvedValue({ workflowId: 'flow', status: 'published' }),
       } as unknown as jest.Mocked<WorkflowDraftsService>;
       const request = {
         adminTokenClaims: { oid: OPERATOR },
@@ -255,7 +268,7 @@ describe('WorkflowsController', () => {
     it('reads the document of the addressed version', async () => {
       const { controller, service } = createDraftController();
 
-      await controller.getDocument({ workflowId: 'flow', version: 2 });
+      await controller.getVersionDocument({ workflowId: 'flow', version: 2 });
 
       expect(service.getDocument).toHaveBeenCalledWith('flow', 2);
     });
@@ -267,6 +280,15 @@ describe('WorkflowsController', () => {
       await controller.update({ workflowId: 'flow', version: 1 }, document, request);
 
       expect(service.update).toHaveBeenCalledWith('flow', 1, document, OPERATOR);
+    });
+
+    it('hands the address and the operator to publish', async () => {
+      const { controller, service, request } = createDraftController();
+
+      await expect(
+        controller.publish({ workflowId: 'flow', version: 2 }, request),
+      ).resolves.toEqual({ workflowId: 'flow', status: 'published' });
+      expect(service.publish).toHaveBeenCalledWith('flow', 2, OPERATOR);
     });
 
     it('hands the address and the operator to remove', async () => {

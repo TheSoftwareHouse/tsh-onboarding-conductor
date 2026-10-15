@@ -13,6 +13,7 @@ import {
   toIsoInstant,
   type AdminOnboardingFilters,
 } from './filter-admin-onboardings';
+import type { AdminOnboardingExportFilters } from '@/api/onboardings/onboardings-export';
 
 /** Trims like any free-text criterion, then falls back to absent for anything that is not a positive whole number. See ADR 0018. */
 const workflowVersionParser = createParser<string>({
@@ -77,6 +78,24 @@ export function toAdminOnboardingFilters(
     pendingConnectorId: state.pendingConnectorId ?? '',
     parkedBefore: state.parkedBefore ?? '',
     limit: state.limit,
+  };
+}
+
+/**
+ * The endpoint's own criteria, so URL-only keys never reach it; the list adds its page window.
+ * `parkedBefore` is carried in the URL as the calendar's local wall-clock value and resolved to
+ * the instant the engine compares against only here.
+ */
+export function toExportFilters(state: AdminOnboardingsSearchValues): AdminOnboardingExportFilters {
+  return {
+    status: state.status,
+    workflowId: state.workflowId,
+    workflowVersion: state.workflowVersion,
+    currentStep: state.currentStep,
+    onboardingId: state.onboardingId,
+    parked: state.parked,
+    pendingConnectorId: state.pendingConnectorId,
+    parkedBefore: state.parkedBefore === null ? null : toIsoInstant(state.parkedBefore),
   };
 }
 

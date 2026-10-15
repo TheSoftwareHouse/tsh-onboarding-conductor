@@ -6,7 +6,7 @@ directory, and the scope a definition ships in decides how it is treated.
 | Scope      | Directory   | Purpose                                             |
 | ---------- | ----------- | --------------------------------------------------- |
 | `built-in` | `built-in/` | Production-grade workflows shipped with the engine. |
-| `fixtures` | `fixtures/` | Example workflows backing local development and CI. |
+| `fixtures` | `fixtures/` | Workflows the e2e suites run against.               |
 | `users`    | `users/`    | Your own workflows.                                 |
 
 `built-in/` and `fixtures/` resolve relative to the repository root and are not
@@ -38,13 +38,14 @@ place, one `custom` step per step.
 is revision 1 as `custom` steps, one hand-written step each, and
 `eu-b2c-individual-kyc-eea-v2.workflow.json` is revision 2 through the
 specialized step types; a spec asserts the two are identical once normalized.
-Every example in `fixtures/` ships twice the same way: `<name>.workflow.json`
-in `custom` steps and `<name>-typed.workflow.json` in specialized steps.
-Copy whichever suits you; `docs/EXTENDING.md` covers the vocabulary, and
+`fixtures/` holds only the flows the e2e suites start onboardings on, each
+written once: the existing ones in `custom` steps, a new one in specialized
+step types. Copy whichever suits you; `docs/EXTENDING.md` covers the
+vocabulary, and
 `pnpm workflow:compile <file>` prints what a document compiles to — or where it
 fails.
 
-`fixtures/` is skipped when `NODE_ENV=production`, so example workflows never
+`fixtures/` is skipped when `NODE_ENV=production`, so test workflows never
 reach a production deployment.
 
 ## Database as the runtime source

@@ -2,11 +2,13 @@ import { mutationOptions } from '@/services/query-client/mutation-options';
 import {
   deleteWorkflowConnectorSelection,
   putWorkflowConnectorSelection,
+  type ConnectorSelectionTarget,
 } from './workflow-connector-selection';
 import {
   compileWorkflowDocument,
   createWorkflowDraft,
   deleteWorkflowDraft,
+  publishWorkflowDraft,
   updateWorkflowDraft,
   type WorkflowDocumentInput,
   type WorkflowDraft,
@@ -59,21 +61,39 @@ export const workflowMutations = {
       mutationFn: () => deleteWorkflowDraft(workflowId, version),
       meta: { invalidates: [workflowQueries.lists()] },
     }),
+  publish: (workflowId: string, version: number) =>
+    mutationOptions({
+      mutationFn: () => publishWorkflowDraft(workflowId, version),
+      meta: {
+        // Awaited so the page swaps the editor for the graph before the caller navigates.
+        awaits: [workflowQueries.versions(workflowId).queryKey],
+        // Never `detailsFor`: it would refetch the mounted editor's document.
+        invalidates: [workflowQueries.lists(), workflowQueries.detail(workflowId).queryKey],
+      },
+    }),
   compile: () =>
     mutationOptions({
       mutationFn: (document: WorkflowDocumentInput) => compileWorkflowDocument(document),
     }),
-  // A selection binds every version of the family, so every read below the family is awaited:
+  // A selection may change every version's read, so every read below the family is awaited:
   // the caller's toast fires once the inspector shows the new slot.
   selectConnector: (workflowId: string) =>
     mutationOptions({
-      mutationFn: ({ stepName, connectorId }: { stepName: string; connectorId: string }) =>
-        putWorkflowConnectorSelection(workflowId, stepName, connectorId),
+      mutationFn: ({
+        stepName,
+        connectorId,
+        target,
+      }: {
+        stepName: string;
+        connectorId: string;
+        target: ConnectorSelectionTarget;
+      }) => putWorkflowConnectorSelection(workflowId, stepName, connectorId, target),
       meta: { awaits: [workflowQueries.detailsFor(workflowId)] },
     }),
   clearConnector: (workflowId: string) =>
     mutationOptions({
-      mutationFn: (stepName: string) => deleteWorkflowConnectorSelection(workflowId, stepName),
+      mutationFn: ({ stepName, target }: { stepName: string; target: ConnectorSelectionTarget }) =>
+        deleteWorkflowConnectorSelection(workflowId, stepName, target),
       meta: { awaits: [workflowQueries.detailsFor(workflowId)] },
     }),
 };

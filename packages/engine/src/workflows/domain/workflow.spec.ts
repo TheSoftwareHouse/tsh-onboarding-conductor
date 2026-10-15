@@ -141,6 +141,7 @@ describe('Workflow', () => {
           authoredId: 'mock_kyc_1',
           selected: false,
           selectableIds: ['mock_kyc_1'],
+          versions: [],
           fallbacks: [
             {
               id: 'mock_kyc_2',
@@ -291,6 +292,56 @@ describe('Workflow', () => {
 
         expect(primary.selected).toBe(false);
         expect(primary.id).toBe('mock_kyc_1');
+      });
+
+      it('copies the versions the registry gathered for a selectable step', () => {
+        const entries = [
+          { version: 1, id: 'veriff_kyc', authoredId: 'mock_kyc_1', selected: true },
+          { version: 2, id: 'mock_kyc_1', authoredId: 'mock_kyc_1', selected: false },
+        ];
+        const [collect, done] = new Workflow(selectable).describeDefinition(
+          undefined,
+          undefined,
+          new Map([['collect', entries]]),
+        ).steps;
+
+        expect(collect.connectors[0].versions).toEqual(entries);
+        expect(done.connectors).toEqual([]);
+      });
+
+      it('reports no versions without a map', () => {
+        expect(describePrimary([], []).versions).toEqual([]);
+      });
+
+      it('reports no versions for a step that is not selectable', () => {
+        const [multi] = new Workflow(
+          normalizeUntypedSteps({
+            id: 'multi',
+            version: 1,
+            initial: 'collect',
+            steps: [
+              {
+                ...SELECTABLE_STEPS[0],
+                connectors: [
+                  { ...((SELECTABLE_STEPS[0].connectors as unknown[])[0] as object) },
+                  {
+                    ...((SELECTABLE_STEPS[0].connectors as unknown[])[0] as object),
+                    name: 'second',
+                    id: 'mock_kyc_2',
+                    order: 2,
+                  },
+                ],
+              },
+              SELECTABLE_STEPS[1],
+            ],
+          }),
+        ).describeDefinition(
+          undefined,
+          undefined,
+          new Map([['collect', [{ version: 1, id: 'a', authoredId: 'a', selected: false }]]]),
+        ).steps;
+
+        expect(multi.connectors.map((connector) => connector.versions)).toEqual([[], []]);
       });
 
       it('hands the effective declarations to the connector port', async () => {

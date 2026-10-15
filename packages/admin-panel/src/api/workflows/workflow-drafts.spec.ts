@@ -5,6 +5,7 @@ import {
   createWorkflowDraft,
   deleteWorkflowDraft,
   fetchWorkflowDocument,
+  publishWorkflowDraft,
   updateWorkflowDraft,
   readDraftError,
   type WorkflowDraftErrorCode,
@@ -36,6 +37,12 @@ const DRAFT = {
   updatedAt: '2026-10-06T09:00:00.000Z',
 };
 const DOCUMENT = { id: 'kyc', version: 2, steps: [] };
+const WORKFLOW = {
+  workflowId: 'kyc',
+  workflowVersion: 2,
+  initialStep: 'start',
+  steps: [{ name: 'start', status: 'start', terminal: true, transitions: [] }],
+};
 
 function axiosFailure(status: number, data?: unknown): AxiosError {
   const axiosError = new AxiosError(`Request failed with status code ${status}`);
@@ -90,12 +97,37 @@ describe('workflow draft requests', () => {
     expect(mockedDelete).toHaveBeenCalledWith('/v1/admin/workflows/kyc/versions/2');
   });
 
-  it('compiles a document and reports its authored step count', async () => {
+  it('posts to the encoded publish path with no body and returns the publication', async () => {
+    const published = { ...DRAFT, status: 'published' };
+    mockedPost.mockResolvedValueOnce({ data: published });
+
+    await expect(publishWorkflowDraft('kyc basic', 2)).resolves.toEqual(published);
+    expect(mockedPost).toHaveBeenCalledWith('/v1/admin/workflows/kyc%20basic/versions/2/publish');
+  });
+
+  it('rejects a publication whose status is still draft as malformed', async () => {
+    mockedPost.mockResolvedValueOnce({ data: DRAFT });
+
+    const error = await catchError(publishWorkflowDraft('kyc', 2));
+
+    expect(error.message).toBe('Response contains a malformed workflow draft.');
+  });
+
+  it.each(['published', 'retired'])('reads a %s version document', async (status) => {
+    mockedGet.mockResolvedValueOnce({ data: { ...DRAFT, status, document: DOCUMENT } });
+
+    await expect(fetchWorkflowDocument('kyc', 2)).resolves.toMatchObject({ status });
+  });
+
+  it('compiles a document and returns its step count and parsed workflow', async () => {
     mockedPost.mockResolvedValueOnce({
-      data: { definition: {}, steps: [{}, {}], workflow: {} },
+      data: { definition: {}, steps: [{}, {}], workflow: WORKFLOW },
     });
 
-    await expect(compileWorkflowDocument(DOCUMENT)).resolves.toEqual({ stepCount: 2 });
+    const result = await compileWorkflowDocument(DOCUMENT);
+
+    expect(result.stepCount).toBe(2);
+    expect(result.workflow).toMatchObject({ workflowId: 'kyc', initialStep: 'start' });
     expect(mockedPost).toHaveBeenCalledWith('/v1/admin/workflows/compile', DOCUMENT);
   });
 });
@@ -107,6 +139,7 @@ describe('draft ApiError', () => {
     'WORKFLOW_SCOPE_CONFLICT',
     'WORKFLOW_DRAFT_IN_USE',
     'WORKFLOW_VERSION_NOT_DRAFT',
+    'WORKFLOW_VERSION_NOT_LATEST',
   ];
 
   it.each(CONFLICT_CODES)('parses the 409 code %s', async (code) => {
@@ -120,6 +153,22 @@ describe('draft ApiError', () => {
     expect(error.message).toBe(code);
     expect(error.status).toBe(409);
     expect(error.body).toMatchObject({ status: 'published' });
+  });
+
+  it('reads NOT_LATEST from a publish refusal', async () => {
+    mockedPost.mockRejectedValueOnce(
+      axiosFailure(409, {
+        code: 'WORKFLOW_VERSION_NOT_LATEST',
+        message: 'WORKFLOW_VERSION_NOT_LATEST',
+        workflowId: 'kyc',
+        version: 2,
+        latestPublishedVersion: 3,
+      }),
+    );
+
+    const error = await catchError(publishWorkflowDraft('kyc', 2));
+
+    expect(readDraftError(error)?.code).toBe('WORKFLOW_VERSION_NOT_LATEST');
   });
 
   it('keeps the reason and path of a 400 WORKFLOW_INVALID', async () => {
@@ -181,5 +230,13 @@ describe('draft ApiError', () => {
     mockedPost.mockResolvedValueOnce({ data: { definition: {} } });
 
     await catchError(compileWorkflowDocument(DOCUMENT));
+  });
+
+  it('rejects a compile payload whose workflow is malformed', async () => {
+    mockedPost.mockResolvedValueOnce({ data: { steps: [], workflow: {} } });
+
+    const error = await catchError(compileWorkflowDocument(DOCUMENT));
+
+    expect(error.kind).toBe('invalid-payload');
   });
 });

@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { useMutation } from '@tanstack/react-query';
+import type { ConnectorSelectionTarget } from '@/api/workflows/workflow-connector-selection';
 import { workflowMutations } from '@/api/workflows/workflow-mutations';
 import { ApiError } from '@/services/api/api-error';
 
@@ -7,8 +8,12 @@ import { ApiError } from '@/services/api/api-error';
 export type ConnectorSelectionOutcome = { ok: true } | { ok: false; error: ApiError };
 
 export interface UseConnectorSelectionResult {
-  select: (stepName: string, connectorId: string) => Promise<ConnectorSelectionOutcome>;
-  clear: (stepName: string) => Promise<ConnectorSelectionOutcome>;
+  select: (
+    stepName: string,
+    connectorId: string,
+    target: ConnectorSelectionTarget,
+  ) => Promise<ConnectorSelectionOutcome>;
+  clear: (stepName: string, target: ConnectorSelectionTarget) => Promise<ConnectorSelectionOutcome>;
   isPending: boolean;
 }
 
@@ -25,9 +30,13 @@ export function useConnectorSelection(workflowId: string): UseConnectorSelection
   const clearMutation = useMutation(workflowMutations.clearConnector(workflowId));
 
   const select = useCallback(
-    async (stepName: string, connectorId: string): Promise<ConnectorSelectionOutcome> => {
+    async (
+      stepName: string,
+      connectorId: string,
+      target: ConnectorSelectionTarget,
+    ): Promise<ConnectorSelectionOutcome> => {
       try {
-        await selectMutation.mutateAsync({ stepName, connectorId });
+        await selectMutation.mutateAsync({ stepName, connectorId, target });
         return { ok: true };
       } catch (cause) {
         return { ok: false, error: toError(cause) };
@@ -37,9 +46,12 @@ export function useConnectorSelection(workflowId: string): UseConnectorSelection
   );
 
   const clear = useCallback(
-    async (stepName: string): Promise<ConnectorSelectionOutcome> => {
+    async (
+      stepName: string,
+      target: ConnectorSelectionTarget,
+    ): Promise<ConnectorSelectionOutcome> => {
       try {
-        await clearMutation.mutateAsync(stepName);
+        await clearMutation.mutateAsync({ stepName, target });
         return { ok: true };
       } catch (cause) {
         return { ok: false, error: toError(cause) };

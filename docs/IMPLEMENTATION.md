@@ -1,12 +1,11 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `feat/veriff-kyc-connector` at `e2b12b2` (2026-10-12) with the pull-request
-review fixes on top of it — the callback-only submit guard (§2 "The callback-fields guard", §3) and
-images-only uploads at Veriff (§4) — plus the phase-2 documentation of runtime connector selection
-and the persisted parked connector (§2, §4, §5, §8, §9, §11, §12;
-[0038](decisions/0038-runtime-connector-selection.md)) on top of the KYC connector kernel and the
-`veriff_kyc` provider (§4). Bump this when that work lands. Typed steps as the only authored form (§2.1,
-[0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
+**Status:** describes `main` at `c386315` (2026-10-12), where the KYC connector kernel, the
+`veriff_kyc` provider (§4) and runtime connector selection
+([0038](decisions/0038-runtime-connector-selection.md)) have landed, plus `feat/workfow-cleanup` on
+top of it: each fixture ships once as `custom` steps (§2 `fixtures/`) and the fixtures site gives
+every workflow file one page (§13). Bump this when that work lands. Typed steps as the only authored
+form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -261,17 +260,19 @@ classifies itself without a registry lookup — worth the redundancy only becaus
 startup failure rather than a silent disagreement.
 
 **Runtime selection.** An operator can change which adapter a step's connector slot runs without
-publishing a version ([0038](decisions/0038-runtime-connector-selection.md)). A selection is one
-row per workflow family and step (`workflow_connector_selections`, §9); `Workflow` applies it by
-replacing the `id` of the step's primary connector — config, field mapping, retry and error handler
-stay as authored — in every stored version that has the step, so execution, callback resolution and
-the admin projection see the same effective binding
-(`workflows/domain/connector-selection.ts`). It applies only to a step with exactly one connector
-declaration, and never to a fallback. `WorkflowRegistryService.toWorkflow` reads the family's rows on
-every resolution — no cache, so a selection takes effect on the next request on every instance. The
-compile dry run (`POST /v1/admin/workflows/compile`) ignores selections. Choosing the authored id
-stores a row too, a family-wide pin, since the authored id differs between versions; only
-`DELETE` clears it.
+publishing a version ([0038](decisions/0038-runtime-connector-selection.md), scope per
+[0042](decisions/0042-connector-selection-per-version.md)). A selection is one row per workflow
+version and step (`workflow_connector_selections`, §9); `Workflow` applies it by replacing the `id`
+of the step's primary connector — config, field mapping, retry and error handler stay as authored —
+in the version the row names, so execution, callback resolution and the admin projection see the
+same effective binding (`workflows/domain/connector-selection.ts`). It applies only to a step with
+exactly one connector declaration, and never to a fallback. `WorkflowRegistryService.toWorkflow`
+reads the resolved version's rows on every resolution — no cache, so a selection takes effect on the
+next request on every instance — and passes none for a `draft`, so a draft, and a version just
+published from one, runs its authored connector. A `retired` version keeps its rows and projects
+them, though resolution still refuses to run it. The compile dry run
+(`POST /v1/admin/workflows/compile`) ignores selections. Choosing the authored id stores a row too,
+a pin on that version; only `DELETE` clears it.
 
 **One set of rules for the read and the write.** `ConnectorSelectionRules`
 (`workflows/domain/connector-selection.ts`), built by
@@ -281,13 +282,14 @@ the first failing rule from the table below, or nothing; `listSelectableIds(step
 effectiveId)` is the admin projection's `selectableIds`: the authored and effective ids plus every
 selectable adapter `refuse` lets through, judged against the step as authored and sorted. So an id
 the panel offers is an id a save accepts, with one asymmetry: the projection is per version, while
-the write runs the rules across every non-retired version. A step with no connector or more than one
+the write runs the rules across the targeted versions. A step with no connector or more than one
 projects `[]`, a fallback's id is never listed, and a candidate whose `validateDeclaration` throws is
 left out rather than failing the read. Without a port — the compile dry run, a unit test — the list
 is the authored and effective ids alone.
 
-Saving runs `refuse` against **every non-retired version that has the step**, in order, and the
-first refusal names its version (`WORKFLOW_CONNECTOR_SELECTION_INVALID`, §11):
+Saving runs `refuse` against **the targeted versions only**, never a draft, in ascending version
+order, and the first refusal names its version (`WORKFLOW_CONNECTOR_SELECTION_INVALID`, §11); nothing
+is written unless every target accepts (the targets are below the table). The reasons:
 
 | Reason                    | Refused when                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -301,12 +303,29 @@ first refusal names its version (`WORKFLOW_CONNECTOR_SELECTION_INVALID`, §11):
 | `callback_fields_missing` | The step does not declare every field in the adapter's `callbackFields` (below)                        |
 | `declaration_invalid`     | The adapter's `validateDeclaration` throws for the declaration with the id replaced; the message rides |
 
+**Which versions a write targets.** `scope` is required on both writes (`400 VALIDATION_ERROR`
+otherwise). `version` targets that published version: a missing one is `404 WORKFLOW_NOT_FOUND`, a
+`draft` `409 WORKFLOW_VERSION_NOT_PUBLISHED`, a `retired` one `410 WORKFLOW_RETIRED`, and one without
+the step `404 WORKFLOW_STEP_NOT_FOUND`. `all` targets the covered set: every non-retired published
+version whose step of that name has exactly one connector. When none declares the step the answer is
+`404 WORKFLOW_STEP_NOT_FOUND`; when some do but none qualifies, the rules' `multiple_connectors` (or
+`no_connector`) names the highest of them. The write takes the advisory lock
+`${workflowId}:${stepName}`, per family and step, and upserts one row per target in one transaction.
+`DELETE` resolves targets the same way and keeps rows on retired versions.
+
+**The projection per version.** `selected` and `id` on a step's primary connector describe the
+viewed version only: for a `draft`, `selected` is `false` and `id` equals `authoredId`. The connector
+also carries `versions: [{ version, id, authoredId, selected }]`, ascending: the covered set, plus
+the viewed version when it is a draft or retired. It is `[]` for a step a selection cannot address
+and in the compile response. `WorkflowRegistryService.describeForAdmin` builds it from one
+`findRevisions` and one `findByWorkflowId`, and `Workflow.describeDefinition` copies it in.
+
 **The callback-fields guard.** An asynchronous adapter lists the `submittedData` keys its callback
 may emit in `ConnectorAdapter.callbackFields`, and a step bound to it must declare every one in
 `data`, or a verdict carrying one would be refused when it arrived. `normalizeDefinition` runs the
 check for every async connector of a step, fallbacks included, so a hand-written step missing a field
 fails the boot as a `WorkflowConnectorDeclarationInvalidError`; the selection service runs the same
-check per version (`callback_fields_missing`). It is what keeps the stored Sumsub revision 1, which
+check per targeted version (`callback_fields_missing`). It is what keeps the stored Sumsub revision 1, which
 does not declare `kycAttemptCount`, from being switched to Veriff and losing a retry verdict; a typed
 KYC step always passes.
 
@@ -720,7 +739,8 @@ identically. Files only seed: a version is inserted once, as `published`, and ne
 revision moved off `published` in the database is not republished by the next startup. A file whose
 `id` and `version` match a stored `draft` is skipped, not inserted and not compared: the engine
 starts, the draft row is unchanged, and the skip is logged at error level with the id, the version
-and the file, until the draft is deleted or renumbered. The one value files write more than once is
+and the file, until the draft is deleted or renumbered. Publishing such a draft is refused with
+`409 WORKFLOW_VERSION_EXISTS`. The one value files write more than once is
 the family's `name`: it follows the highest stored **non-draft** version that declares a root
 `name`, so publishing a renamed revision renames the workflow, a revision without one leaves the
 label alone, and a stored draft never causes a relabel.
@@ -750,7 +770,8 @@ special-cased, and it exists because `sourceKey` is how an operator names one wo
 deployment-specific connector configuration (`sumsub_kyc`'s or `veriff_kyc`'s, for two — §4) for correlation outside
 the engine; two documents silently sharing one would make that correlation ambiguous. Stored `draft`
 rows are left out of that sweep and out of the dry run's uniqueness check, so a draft may share a
-`sourceKey` with another workflow; the conflict can surface only once a publish step exists.
+`sourceKey` with another workflow; the conflict surfaces when the draft is published, whose compile
+answers `409 WORKFLOW_SOURCE_KEY_CONFLICT`.
 
 Beyond the JSON Schema, `validateAndNormalizeWorkflow` enforces a set of semantic invariants over
 the compiled form. They hold for every step type's output and are worth knowing before
@@ -841,7 +862,7 @@ parameter and serves the highest `published` revision. A draft that does not com
 `400 WORKFLOW_INVALID` (or `400 WORKFLOW_CONNECTOR_DECLARATION_INVALID`) on that read, not a 500.
 
 **Drafts are the one mutable revision** ([0034](decisions/0034-admin-authored-workflow-drafts.md)).
-Operators create, replace and delete `draft` rows through the admin API (§11), in `users` scope:
+Operators create, replace, delete and publish `draft` rows through the admin API (§11), in `users` scope:
 
 - Saving needs only a JSON object with a string `id` (at most 100 characters) and a positive integer
   `version` no larger than 2147483647, the `integer` column's maximum; the document is stored as authored and never compiled on save. The compile dry run tells
@@ -855,14 +876,43 @@ Operators create, replace and delete `draft` rows through the admin API (§11), 
   versions is deleted.
 - Update and delete are refused while an onboarding references the row (`WORKFLOW_DRAFT_IN_USE`),
   because `fk_onboardings_workflow_version` is `ON DELETE RESTRICT`.
-- `GET .../versions/:version/document` returns the stored document and is served only for a draft; a
-  `published` or `retired` version answers `409 WORKFLOW_VERSION_NOT_DRAFT` with no document, so the
-  `config` exclusion on the admin definition read still holds for everything that can run.
+- `GET .../versions/:version/document` returns the stored document verbatim for a version of any
+  status, connector `config` included ([0041](decisions/0041-admin-workflow-documents-for-every-status.md)),
+  so the route is admin-only; the definition read still omits `config`. An unknown version is
+  `404 WORKFLOW_NOT_FOUND`; there is no 409.
 - Each write is audited in its own transaction (§8) with identifiers only. Last write wins: there is
   no optimistic lock.
 
-Publishing (`draft → published`) and retiring have no endpoint; status changes beyond drafts are
-still made directly in the database.
+**Publishing** (`POST .../versions/:version/publish`, no body) turns the stored draft into a
+`published` revision, which is immutable from then on
+([0040](decisions/0040-publishing-admin-authored-drafts.md)). `WorkflowDraftsService.publish` runs one
+transaction:
+
+1. `pg_advisory_xact_lock` on the string key `'workflow:publish'` (hashed with `hashtext`), so publishes run one at a time and two families cannot
+   both pass the `sourceKey` check; it is taken before the row lock.
+2. The draft row is locked: `404 WORKFLOW_NOT_FOUND`, or `409 WORKFLOW_VERSION_NOT_DRAFT` for a
+   `published` or `retired` version.
+3. A `published` version of the family at or above the draft's answers
+   `409 WORKFLOW_VERSION_NOT_LATEST`, carrying `workflowId`, `version` and `latestPublishedVersion`.
+4. A workflow file declaring the same `id` and `version` answers `409 WORKFLOW_VERSION_EXISTS`:
+   startup skips such a file while the row is a draft, but would compare it with a published row
+   and fail the boot when the two differ. The scope directories are read asynchronously and only each
+   file's `id` and `version` are compared; a file that does not parse is skipped, left for the next
+   boot to refuse, rather than failing the publish. A file that cannot be read fails the publish
+   instead, since skipping it could let a shadowed version through.
+5. The stored document goes through the compile route's full compile on the transaction's snapshot,
+   including the `sourceKey` sweep over non-draft rows: `400 WORKFLOW_INVALID`,
+   `400 WORKFLOW_CONNECTOR_DECLARATION_INVALID` or `409 WORKFLOW_SOURCE_KEY_CONFLICT`. The row stays
+   a draft.
+6. The row flips to `published`. A root `name` of 1–200 characters is written to the family's label
+   unless a non-draft version above this one exists.
+7. `workflow_draft.published` is audited with `workflowId` and `version` only.
+
+The consequences: unpinned starts are served the new version at once, the family label may change,
+and publishing never changes another version's status, so an older `published` version keeps
+serving pinned lookups. The family has no draft afterwards, so the next version is an ordinary draft
+create. Retiring still has no endpoint; status changes beyond publishing are made directly in the
+database.
 
 ### Checked-in workflows (`workflows/`)
 
@@ -1012,34 +1062,30 @@ One limitation remains inherent to the engine: because context keys are never cl
 `kycCustomerMessage` written by an earlier `retry` survives into a later `verified` pass, which a
 consumer reading it must account for.
 
-#### `fixtures/` — examples, skipped when `NODE_ENV=production`
+#### `fixtures/` — e2e flows, skipped when `NODE_ENV=production`
 
 A fixture family cannot be extended from `users/` either. On production, where fixtures never load,
 a users file reusing a fixture id would create a `users` family of that name and then fail on every
 development database that stored the fixture — author such flows under an id of their own.
 
-Each example exists to exercise one mechanism end-to-end, and ships **twice**: `<name>.workflow.json`
-(id `<name>`) is written as `custom` steps, one per compiled step, which is the shape any untyped
-document converts to; `<name>-typed.workflow.json` (id `<name>-typed`) is the same example through
-the specialized step types and uses no `custom` step. The e2e suites address the plain ids, whose
-compiled steps are unchanged. `packages/engine/src/workflows/checked-in-workflows.spec.ts` guards the
-pairing, runs the adapters' load-time config checks over every checked-in file, and pins the seven
-pairs that compile to identical steps; the "Typed twin" column says how the other five differ.
+Each fixture is a flow an e2e suite starts onboardings on, written once. The ones below predate the
+specialized step types and are written as `custom` steps, one per compiled step, which is the shape
+any untyped document converts to; a new fixture is written in specialized step types. Nothing else
+lives here: a suite that needs a one-off flow writes it into a temporary `WORKFLOWS_USERS_DIR`
+instead.
+`packages/engine/src/workflows/checked-in-workflows.spec.ts` runs the adapters' load-time config
+checks over every checked-in file, holds every connector `sourceKey` to one family across all three
+scopes, and holds each fixture's file name to its `id`, which the fixtures site keys its URL by.
 
-| File | Connector types | Demonstrates | Typed twin |
-| ------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- -------------------- |
-| `base` | `kyc` | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression, one root `agreements` declaration (`base-terms`, bound to `accept_terms`) | Identical: two `connector-call` steps, the first including `contact-details`, its `success` arm carrying `webhook: { notify: false }`, and the same root `agreements` declaration |
-| `conditional-fields-and-transitions` | `kyc` | `when` on fields and on transitions, `persist: false`, branching manual review | `form`, a `connector-call` with conditional arms, two `manual-review` steps with a conditional `approve` arm and no `invalid` port; differs only by the stray-submit `success` arm every `manual-review` emits |
-| `twilio-verify` | `phone_verification` | The same shape against a real provider | One `otp-verify` including `contact-details`, so the send step still collects the number; adds the `request_code_resend` step and the stale-challenge arm |
-| `sendgrid-email` | `email_delivery` | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`) | Identical: `notify` including a `form`, the template keys on the binding's `fieldMapping` |
-| `manual-smtp` | `email_delivery` | Local MailHog send with an HTML template from connector config | Identical: `notify` including a `form`, `templatePath` on the binding's `config` |
-| `file-upload` | `kyc` | `file` field plus the document reservation flow | Identical: a `connector-call` carrying the `file` field |
-| `http-request` | `custom` | The generic HTTP connector with placeholders, query, and error statuses | Identical: `http-call` including a `form`, `fieldMapping` naming the two payload keys that differ from their fields |
-| `sumsub-kyc` | `kyc` | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter | A two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `POL`, and the field validations are the steps' and the step declares the optional `kycAttemptCount` callback field the hand-written twin predates |
-| `veriff-kyc` | `kyc` | The same shape against `veriff_kyc`: a provider that does not count attempts, so the custom form declares `kycAttemptCount` and the kernel keeps the running total; uploads are images only, since Veriff takes a PDF only once enabled on the account; the document country is `PL` (alpha-2), and no `levelName` or `questionnaireDefinitionId` | The `sumsub-kyc-typed` step graph with the `veriff_kyc` binding: a two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `PL`, and the field validations are the steps' |
-| `manual-review` | none | All three manual triggers and a recursive `success` transition | Identical: `manual-review` including a `form` |
-| `connector-fallback` | `email_delivery` | An unconfigured `sendgrid_email` primary retries three times 200 ms apart, falls through a `mock_email_delivery` link told to fail, and is delivered by `smtp` on `send_notification`; `optional_notice` swallows the same failure via `errorHandler: continue_on_error` with no fallback declared | Identical: the whole chain, retry and handler on the `notify` binding, the SMTP entry with its own `fieldMapping` and `config` |
-| `scoring` | `phone_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_verify` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting | Twelve compiled steps through specialized step types: step-level `scoring` on `identity-profile`, on `otp-verify` (landing on `verify_code`) and on `kyc-identity-verification`; the risk band routes through conditional edges on `success` and `verified`; `manual-review`'s `invalid` edge is score-gated with a fallback arm; `submit_kyc` also declares `kycAttemptCount` |
+| File                                 | Connector types                               | Demonstrates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `base`                               | `kyc`                                         | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression, one root `agreements` declaration (`base-terms`, bound to `accept_terms`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `conditional-fields-and-transitions` | `kyc`                                         | `when` on fields and on transitions, `persist: false`, branching manual review                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `twilio-verify`                      | `phone_verification`                          | The same shape against a real provider                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `sendgrid-email`                     | `email_delivery`                              | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `file-upload`                        | `kyc`                                         | `file` field plus the document reservation flow                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `manual-review`                      | none                                          | All three manual triggers and a recursive `success` transition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `scoring`                            | `phone_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_verify` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting |
 
 ---
 
@@ -1579,7 +1625,7 @@ KycCallbackEvent`, `fetchVerdict(settings, event, context) → KycVerdict` and a
 `WorkflowTransitionStatus` is only `success | rejected | manual.*` — so rather than bend the
 adapter into that vocabulary, it reports a domain outcome inside `submittedData` —
 `kycOutcome: 'verified' | 'human_review' | 'retry' | 'refused'` — and the workflow document routes
-on it with `when` conditions (`workflows/fixtures/sumsub-kyc.workflow.json`, §2). The connector never
+on it with `when` conditions (`workflows/built-in/eu-b2c-individual-kyc-eea.workflow.json`, §2). The connector never
 returns `rejected()` and does not declare `canReject`. See
 [0005](./decisions/0005-kyc-connector-outcome-contract.md).
 
@@ -2234,9 +2280,11 @@ not be reconstructible from the audit trail.
 A runtime connector selection (§2) records `workflow.connector_selected` on a `PUT` and
 `workflow.connector_selection_cleared` on a `DELETE` of `/v1/admin/workflows/:workflowId/steps/:stepName/connector`,
 both with entry type `success`, filed under resource type `workflow` with `resourceId` the workflow
-key, after the database commit. A `DELETE` is audited even when no selection existed. Metadata
-carries `workflowId`, `stepName`, `previousConnectorId` and `connectorId` — ids and names, no
-configuration — and goes through the same allowlist as the other families.
+key, one row per write, after the database commit. A `DELETE` is audited even when no selection
+existed. Metadata carries `workflowId`, `stepName`, `connectorId` (`null` on a clear), `scope` and
+`versions: [{ version, previousConnectorId }]` — ids and names, no configuration — and goes through
+the same allowlist as the other families. The allowlist still keeps a top-level
+`previousConnectorId`, so rows written before selections were per version read back.
 
 An operator reconcile of a parked onboarding (§5) writes one of two actions
 (`PENDING_CONNECTOR_ACTIONS`, `AuditService.logPendingConnectorReconcile`), both with actor type
@@ -2255,6 +2303,14 @@ it land elsewhere: a client submit refused because the row is parked is an
 `submit` only), and a callback dropped because the locked row no longer holds the park it was decided
 for is a `webhook.inbound_callback_rejected` with reason `callback_superseded` (§5), beside
 `callback_already_applied`.
+An export through `GET /v1/onboardings/export` records `onboardings.exported`, actor type
+`operator`, resource type `onboardings_export` and resource id `onboardings`, written once the columns have resolved and
+before the first byte of the file; an export that fails earlier writes no such row. Metadata (`OnboardingsExportAuditMetadata`) is only the filter criteria the
+request supplied — `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`,
+`agreementStatus`, `parked`, `pendingConnectorId`, `parkedBefore` — and never a row of exported data. An empty actor id becomes
+`ADMIN_ACCESS_UNKNOWN_ACTOR`. The action is in `ONBOARDINGS_EXPORT_ACTIONS`
+(`audit/audit.types.ts`). Today, apart from the `api.*` rows for failed admin requests, it is the
+only trace of an admin read.
 
 The agreement feature (§2, §9) adds three actions, allowlisted the same way
 (`AGREEMENT_RESOURCE_ALLOWLIST`, `filterAgreementMetadata`), and every one of them is written in the
@@ -2272,8 +2328,8 @@ its own — the links written at onboarding start, and the publish fan-out that 
 operator never named individually — which is exactly why they are audit rows rather than log lines.
 Metadata carries the agreement's identity and version and nothing of its content.
 
-Workflow drafts add `workflow_draft.created`, `workflow_draft.updated` and `workflow_draft.deleted`,
-written through `AuditService.logWorkflowDraft` in the same transaction as the write. The resource is
+Workflow drafts add `workflow_draft.created`, `workflow_draft.updated`, `workflow_draft.deleted` and
+`workflow_draft.published`, written through `AuditService.logWorkflowDraft` in the same transaction as the write. The resource is
 the `workflow_version` row's id. Metadata is limited to `workflowId` and `version`, plus
 `previousWorkflowId` and `previousVersion` on a rename; the document is never logged, because
 connector `config` may hold literal values.
@@ -2301,7 +2357,9 @@ engine or HTTP behaviour.
 
 `api.request_rejected` (status 400–499) and `api.request_failed` (status >= 500), resource type
 `api_endpoint`, are written by `ApiFailureAuditFilter` — a global `APP_FILTER` — for every
-unsuppressed exception on the `/v1` surface (§11). A throw site that already wrote its own
+unsuppressed exception on the `/v1` surface (§11). The one failure the filter's `catch` never sees,
+an error in the CSV export's stream, is recorded by the export's error handler through the filter's
+`recordFailure`. A throw site that already wrote its own
 domain-specific row marks the exception so the filter stays silent; `auth.*` denials are the one
 deliberate exception and write both rows, because the guard's audit write is fire-and-forget and
 suppressing on an unattempted write could leave a denial with no evidence at all. `resourceId` is the matched route template
@@ -2353,21 +2411,21 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 so a version is a row rather than half of a composite key — decision record
 [0028](decisions/0028-identity-and-version-tables.md) has the reasoning.
 
-| Table                           | Purpose                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`                   | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, `pending_connector` jsonb (nullable, plain — the connector the onboarding is parked on awaiting a callback, §5), expires_at, completed_at, rejection_reason, timestamps                                                                     |
-| `onboarding_documents`          | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                                             |
-| `client_webhook_outbox`         | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                                      |
-| `audit_log`                     | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                                   |
-| `connectors`                    | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                                    |
-| `workflows`                     | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below                    |
-| `workflow_versions`             | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                                   |
-| `workflow_connector_selections` | the operator's connector choice per family and step: composite PK `(workflow_id, step_name)`, `workflow_id` FK to `workflows` (`ON DELETE CASCADE`, `fk_workflow_connector_selections_workflow`), `connector_id` (checked against `^[a-z0-9_]+$`), `updated_at`, `updated_by`. `step_name` is not a foreign key — it names a step inside the versions' JSON |
-| `agreements`                    | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                                                                                |
-| `agreement_versions`            | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                                        |
-| `onboarding_agreements`         | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                                            |
-| `encryption_keys`               | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                                        |
-| `_engine_alive`                 | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                                                                       |
+| Table                           | Purpose                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`                   | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, `pending_connector` jsonb (nullable, plain — the connector the onboarding is parked on awaiting a callback, §5), expires_at, completed_at, rejection_reason, timestamps                                                                                                                 |
+| `onboarding_documents`          | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                                                                                         |
+| `client_webhook_outbox`         | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                                                                                  |
+| `audit_log`                     | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                                                                               |
+| `connectors`                    | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                                                                                |
+| `workflows`                     | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below                                                                |
+| `workflow_versions`             | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                                                                               |
+| `workflow_connector_selections` | the operator's connector choice per workflow version and step: composite PK `(workflow_id, version, step_name)`, `version` checked `> 0`, `workflow_id` FK to `workflows` (`ON DELETE CASCADE`, `fk_workflow_connector_selections_workflow`), `connector_id` (checked against `^[a-z0-9_]+$`), `updated_at`, `updated_by`. `step_name` is not a foreign key — it names a step inside the versions' JSON |
+| `agreements`                    | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                                                                                                                            |
+| `agreement_versions`            | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                                                                                    |
+| `onboarding_agreements`         | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                                                                                        |
+| `encryption_keys`               | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                                                                                    |
+| `_engine_alive`                 | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                                                                                                                   |
 
 Only `agreements` carries a `current_version_id`. An agreement version is created only by
 `POST /v1/admin/agreements`, which sets the pointer in the same statement that writes the version,
@@ -2410,13 +2468,14 @@ nothing a decorator does not already say. A reference the schema deliberately le
 directions and fails if entity and database ever disagree; see decision record
 [0027](decisions/0027-relations-declared-on-entities.md).
 
-Twelve migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Fourteen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters): `0001_init`, `0002_create_onboardings`,
 `0003_create_onboarding_documents`, `0006_create_client_webhook_outbox`, `0010_create_audit_log`,
 `0013_create_workflows`, `0016_create_connector_settings`, `0022_create_agreements`,
 `0024_create_encryption_keys`, `0028_add_onboardings_in_progress_version_index`,
-`0029_add_workflow_versions_one_draft_index`, `0030_create_workflow_connector_selections` and
-`0031_add_onboardings_pending_connector`. A file under the migrations glob may export nothing but its class:
+`0029_add_workflow_versions_one_draft_index`, `0030_create_workflow_connector_selections`,
+`0031_add_onboardings_pending_connector`, `0032_scope_workflow_connector_selections_per_version`
+and `0033_add_onboardings_created_at_index`. A file under the migrations glob may export nothing but its class:
 TypeORM instantiates every export as a migration.
 
 No migration has ever run against a deployed environment, so the set is folded rather than
@@ -2441,11 +2500,15 @@ partial unique index on `workflow_versions (workflow_id)` where `status = 'draft
 family to one draft ([0034](decisions/0034-admin-authored-workflow-drafts.md)); `0030` creates
 `workflow_connector_selections` with its check constraints, then adds the foreign key separately;
 `0031` adds `onboardings.pending_connector` with a check that it is `NULL` or a JSON object
-([0038](decisions/0038-runtime-connector-selection.md)). The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
+([0038](decisions/0038-runtime-connector-selection.md)); `0032` adds `workflow_connector_selections.version` and moves the primary key to
+`(workflow_id, version, step_name)`, first copying each existing row to every published version
+of its family (a version without the step ignores the row; rows name compiled steps, which the stored document may not list)
+([0042](decisions/0042-connector-selection-per-version.md)); its `down` keeps the highest
+version's row per step; `0033` adds `idx_onboardings_created_at_id` on `onboardings (created_at DESC, id DESC)`, the order of the admin list and of the CSV export's keyset batches ([0044](decisions/0044-streamed-onboardings-csv-export.md)). The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
 its fold: on a database created by this migration set there are no rows for it to convert —
 migrations run before the workflow publish — so it could never fire. The project is greenfield with
 no deployed data, so no other backfill runs either. The sequence's gaps — every number from `0001`
-to `0031` other than the thirteen that survive — are permanent: nothing deployed has run a migration,
+to `0033` other than the fifteen that survive — are permanent: nothing deployed has run a migration,
 so a table or column no longer wanted in its incremental shape loses that step in place instead of
 gaining a second migration to converge to it. Local stacks are the one place the incremental set
 did run: a Compose volume created before the fold has a `migrations` table that already lists the
@@ -2653,50 +2716,52 @@ values; it renders them into the panel's `/config.js` (§12).
 
 ## 11. HTTP surface and error contract
 
-| Method | Path                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/v1/health/live`                                                                                                                                                                                                                                                                                                                                                                                                           |
-| POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                                                                                                                                                                                                                                                                   |
-| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`, `agreementStatus` (`current` \| `outdated` \| `not_accepted`), `parked` (`true` \| `false`), `pendingConnectorId`, `parkedBefore` (ISO-8601, against the park's `parkedAt`)                                                                                                                                           |
-| GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                                                                                                                                                                                                                                                                 |
-| GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                                                                                                                                                                                                                                                               |
-| GET    | `/v1/onboardings/:id/state`                                                                                                                                                                                                                                                                                                                                                                                                 |
-| POST   | `/v1/onboardings/:id/submit`                                                                                                                                                                                                                                                                                                                                                                                                |
-| POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                                                                                                                                                                                                                                                        |
-| POST   | `/v1/onboardings/:id/pending-connector/reconcile` — admin; reads a parked connector's verdict back from its provider and applies it through the submit path (§5); `200 { outcome: applied \| still_pending \| superseded, onboarding }`, nothing is created                                                                                                                                                                 |
-| POST   | `/v1/onboardings/:id/documents`                                                                                                                                                                                                                                                                                                                                                                                             |
-| POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                                                                                                                                                                                                                                                        |
-| GET    | `/v1/onboardings/:id/agreements` — accepted-versus-latest per family, ordered by `key`                                                                                                                                                                                                                                                                                                                                      |
-| POST   | `/v1/onboardings/:id/agreements` — body `{ agreementId }`, links one published version; `200`, not `201`, because it is idempotent                                                                                                                                                                                                                                                                                          |
-| POST   | `/v1/onboardings/:id/agreements/:agreementId/accept` — `200`; the end user accepts a link the onboarding already holds, and the only unguarded agreement route                                                                                                                                                                                                                                                              |
-| POST   | `/v1/admin/agreements` — body `{ key, type }`, publishes the next version of a family; `201`                                                                                                                                                                                                                                                                                                                                |
-| GET    | `/v1/admin/agreements` — every published version, filters `key`, `type`, paginated                                                                                                                                                                                                                                                                                                                                          |
-| GET    | `/v1/admin/audit`                                                                                                                                                                                                                                                                                                                                                                                                           |
-| GET    | `/v1/admin/workflows` — every family the active scopes contain; filters `search`, `scope`, `hasDraft`, paginated, ordered by `key`                                                                                                                                                                                                                                                                                          |
-| GET    | `/v1/admin/workflows/:workflowId` — the highest `published` version's definition with each step's `source`, `fields` and `connectors` (identity and field mapping, never `config`) and the root `webhook`; takes no `version` parameter                                                                                                                                                                                     |
-| GET    | `/v1/admin/workflows/:workflowId/versions/:version` — the same definition for one stored revision, any status including `retired` and `draft`; `400 WORKFLOW_INVALID` for a draft that does not compile; `404 WORKFLOW_NOT_FOUND`                                                                                                                                                                                           |
-| GET    | `/v1/admin/workflows/:workflowId/versions` — every stored version, `{ items: [{ version, status, createdAt, updatedAt }] }`, highest first, unpaginated; `404 WORKFLOW_NOT_FOUND` for an unknown or out-of-scope family                                                                                                                                                                                                     |
-| POST   | `/v1/admin/workflows/compile` — an authored workflow; a dry run of every startup check, storing nothing; `200 { definition, steps, workflow }`                                                                                                                                                                                                                                                                              |
-| POST   | `/v1/admin/workflows` — a raw workflow document as the body; stores a draft in `users` scope without compiling it; `201` with the draft summary (`workflowId`, `version`, `status`, `name`, `createdAt`, `updatedAt`); `400 WORKFLOW_INVALID` for a body without a string `id` or a positive integer `version` of at most 2147483647; `409` `WORKFLOW_VERSION_EXISTS`, `WORKFLOW_DRAFT_EXISTS` or `WORKFLOW_SCOPE_CONFLICT` |
-| GET    | `/v1/admin/workflows/:workflowId/versions/:version/document` — the draft summary plus the stored `document` verbatim; `409 WORKFLOW_VERSION_NOT_DRAFT` for a `published` or `retired` version                                                                                                                                                                                                                               |
-| PUT    | `/v1/admin/workflows/:workflowId/versions/:version` — replaces a draft with the raw document in the body, which may change its `id` and `version`; `200` with the draft summary; `409` `WORKFLOW_VERSION_NOT_DRAFT`, `WORKFLOW_DRAFT_IN_USE` and the three create codes                                                                                                                                                     |
-| DELETE | `/v1/admin/workflows/:workflowId/versions/:version` — deletes a draft; `204`; `409 WORKFLOW_VERSION_NOT_DRAFT` or `WORKFLOW_DRAFT_IN_USE`                                                                                                                                                                                                                                                                                   |
-| PUT    | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — body `{ connectorId }`, binds the step's single connector slot to that adapter in every version of the family (§2); `200` with the slot's connector projection from the highest published version                                                                                                                                                             |
-| DELETE | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — removes the selection, back to the authored connector; `204`, also when none existed                                                                                                                                                                                                                                                                          |
-| GET    | `/v1/admin/step-types` — the step-type palette: type, category, `composable`, `configSchema`                                                                                                                                                                                                                                                                                                                                |
-| GET    | `/v1/admin/step-types/schema` — the workflow JSON Schema as the engine applies it                                                                                                                                                                                                                                                                                                                                           |
-| GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                                                                                                                                                                                                                                                                      |
-| GET    | `/v1/admin/connectors/:connectorId`                                                                                                                                                                                                                                                                                                                                                                                         |
-| PUT    | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string> }`, replaces wholesale; `?replace=true` opts into dropping a currently stored key that the body omits                                                                                                                                                                                                                                        |
-| PATCH  | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string \| null> }`, merges the submitted keys; `null` deletes one                                                                                                                                                                                                                                                                                    |
-| DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                                                                                                                                                                                                                                                         |
-| GET    | `/v1/admin/encryption` — `{ enabled, keyConfigured, keys, rotation: { interval, nextRotationAt }, progress: { pending, total } }`: the chosen state, whether this process holds the KEK, the full key history, the automatic-rotation schedule, derived sweep progress                                                                                                                                                      |
-| PATCH  | `/v1/admin/encryption` — body `{ enabled }`, turns encryption on (creating a key) or off (retiring the active key); idempotent; `200` with the same shape as `GET`                                                                                                                                                                                                                                                          |
-| POST   | `/v1/admin/encryption/reencryption` — moves every stored onboarding onto the active key, for a leaked data key; idempotent; `200` with the same shape as `GET`                                                                                                                                                                                                                                                              |
-| PATCH  | `/v1/admin/encryption/rotation` — body `{ interval }` (`48h`/`96h`/`1w`/`2w`/`1mo`, or `null` to stop rotating automatically), measured from the active key's creation; idempotent; `200` with the same shape as `GET`                                                                                                                                                                                                      |
-| POST   | `/v1/admin/encryption/keys` — rotates the key now; `201` with only the new key's id, never material                                                                                                                                                                                                                                                                                                                         |
-| POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                                                                                                                                                                                                                                                        |
-| GET    | `/v1/openapi.json` — the OpenAPI document (below); served by the HTTP adapter rather than a controller, so it is not itself an operation in the document                                                                                                                                                                                                                                                                    |
+| Method | Path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/v1/health/live`                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`, `agreementStatus` (`current` \| `outdated` \| `not_accepted`), `parked` (`true` \| `false`), `pendingConnectorId`, `parkedBefore` (ISO-8601, against the park's `parkedAt`)                                                                                                                                                                                                         |
+| GET    | `/v1/onboardings/export` — the same filters without `page` and `limit`; every match as `text/csv`, streamed                                                                                                                                                                                                                                                                                                                                                                               |
+| GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                                                                                                                                                                                                                                                                                                                             |
+| GET    | `/v1/onboardings/:id/state`                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| POST   | `/v1/onboardings/:id/submit`                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| POST   | `/v1/onboardings/:id/pending-connector/reconcile` — admin; reads a parked connector's verdict back from its provider and applies it through the submit path (§5); `200 { outcome: applied \| still_pending \| superseded, onboarding }`, nothing is created                                                                                                                                                                                                                               |
+| POST   | `/v1/onboardings/:id/documents`                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| GET    | `/v1/onboardings/:id/agreements` — accepted-versus-latest per family, ordered by `key`                                                                                                                                                                                                                                                                                                                                                                                                    |
+| POST   | `/v1/onboardings/:id/agreements` — body `{ agreementId }`, links one published version; `200`, not `201`, because it is idempotent                                                                                                                                                                                                                                                                                                                                                        |
+| POST   | `/v1/onboardings/:id/agreements/:agreementId/accept` — `200`; the end user accepts a link the onboarding already holds, and the only unguarded agreement route                                                                                                                                                                                                                                                                                                                            |
+| POST   | `/v1/admin/agreements` — body `{ key, type }`, publishes the next version of a family; `201`                                                                                                                                                                                                                                                                                                                                                                                              |
+| GET    | `/v1/admin/agreements` — every published version, filters `key`, `type`, paginated                                                                                                                                                                                                                                                                                                                                                                                                        |
+| GET    | `/v1/admin/audit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| GET    | `/v1/admin/workflows` — every family the active scopes contain; filters `search`, `scope`, `hasDraft`, paginated, ordered by `key`                                                                                                                                                                                                                                                                                                                                                        |
+| GET    | `/v1/admin/workflows/:workflowId` — the highest `published` version's definition with each step's `source`, `fields` and `connectors` (identity and field mapping, never `config`) and the root `webhook`; takes no `version` parameter                                                                                                                                                                                                                                                   |
+| GET    | `/v1/admin/workflows/:workflowId/versions/:version` — the same definition for one stored revision, any status including `retired` and `draft`; `400 WORKFLOW_INVALID` for a draft that does not compile; `404 WORKFLOW_NOT_FOUND`                                                                                                                                                                                                                                                         |
+| GET    | `/v1/admin/workflows/:workflowId/versions` — every stored version, `{ items: [{ version, status, createdAt, updatedAt }] }`, highest first, unpaginated; `404 WORKFLOW_NOT_FOUND` for an unknown or out-of-scope family                                                                                                                                                                                                                                                                   |
+| POST   | `/v1/admin/workflows/compile` — an authored workflow; a dry run of every startup check, storing nothing; `200 { definition, steps, workflow }`                                                                                                                                                                                                                                                                                                                                            |
+| POST   | `/v1/admin/workflows` — a raw workflow document as the body; stores a draft in `users` scope without compiling it; `201` with the draft summary (`workflowId`, `version`, `status`, `name`, `createdAt`, `updatedAt`); `400 WORKFLOW_INVALID` for a body without a string `id` or a positive integer `version` of at most 2147483647; `409` `WORKFLOW_VERSION_EXISTS`, `WORKFLOW_DRAFT_EXISTS` or `WORKFLOW_SCOPE_CONFLICT`                                                               |
+| GET    | `/v1/admin/workflows/:workflowId/versions/:version/document` — the version summary (`status` of any value) plus the stored `document` verbatim, connector `config` included; `404 WORKFLOW_NOT_FOUND`                                                                                                                                                                                                                                                                                     |
+| PUT    | `/v1/admin/workflows/:workflowId/versions/:version` — replaces a draft with the raw document in the body, which may change its `id` and `version`; `200` with the draft summary; `409` `WORKFLOW_VERSION_NOT_DRAFT`, `WORKFLOW_DRAFT_IN_USE` and the three create codes                                                                                                                                                                                                                   |
+| POST   | `/v1/admin/workflows/:workflowId/versions/:version/publish` — no body; compiles the stored draft and makes it `published`; `200` with the draft summary, `status: 'published'`, and no document; `409` `WORKFLOW_VERSION_NOT_DRAFT`, `WORKFLOW_VERSION_NOT_LATEST` and `WORKFLOW_VERSION_EXISTS` (a workflow file declares the same id and version), plus the compile route's `400 WORKFLOW_INVALID`, `400 WORKFLOW_CONNECTOR_DECLARATION_INVALID` and `409 WORKFLOW_SOURCE_KEY_CONFLICT` |
+| DELETE | `/v1/admin/workflows/:workflowId/versions/:version` — deletes a draft; `204`; `409 WORKFLOW_VERSION_NOT_DRAFT` or `WORKFLOW_DRAFT_IN_USE`                                                                                                                                                                                                                                                                                                                                                 |
+| PUT    | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — body `{ connectorId, scope: 'version' \| 'all', version? }` (`version` required exactly when `scope` is `version`), binds the step's single connector slot to that adapter on that published version or on the covered set (§2); `200` with the slot's connector projection, including `versions`, from the target version (the highest covered one for `all`); the refusals are listed in §2                               |
+| DELETE | `/v1/admin/workflows/:workflowId/steps/:stepName/connector?scope=version&version=N` or `?scope=all` — removes the selection on that version or on the covered set, back to the authored connector; `204`, also when none existed; rows on retired versions are kept                                                                                                                                                                                                                       |
+| GET    | `/v1/admin/step-types` — the step-type palette: type, category, `composable`, `configSchema`                                                                                                                                                                                                                                                                                                                                                                                              |
+| GET    | `/v1/admin/step-types/schema` — the workflow JSON Schema as the engine applies it                                                                                                                                                                                                                                                                                                                                                                                                         |
+| GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| GET    | `/v1/admin/connectors/:connectorId`                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| PUT    | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string> }`, replaces wholesale; `?replace=true` opts into dropping a currently stored key that the body omits                                                                                                                                                                                                                                                                                                      |
+| PATCH  | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string \| null> }`, merges the submitted keys; `null` deletes one                                                                                                                                                                                                                                                                                                                                                  |
+| DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| GET    | `/v1/admin/encryption` — `{ enabled, keyConfigured, keys, rotation: { interval, nextRotationAt }, progress: { pending, total } }`: the chosen state, whether this process holds the KEK, the full key history, the automatic-rotation schedule, derived sweep progress                                                                                                                                                                                                                    |
+| PATCH  | `/v1/admin/encryption` — body `{ enabled }`, turns encryption on (creating a key) or off (retiring the active key); idempotent; `200` with the same shape as `GET`                                                                                                                                                                                                                                                                                                                        |
+| POST   | `/v1/admin/encryption/reencryption` — moves every stored onboarding onto the active key, for a leaked data key; idempotent; `200` with the same shape as `GET`                                                                                                                                                                                                                                                                                                                            |
+| PATCH  | `/v1/admin/encryption/rotation` — body `{ interval }` (`48h`/`96h`/`1w`/`2w`/`1mo`, or `null` to stop rotating automatically), measured from the active key's creation; idempotent; `200` with the same shape as `GET`                                                                                                                                                                                                                                                                    |
+| POST   | `/v1/admin/encryption/keys` — rotates the key now; `201` with only the new key's id, never material                                                                                                                                                                                                                                                                                                                                                                                       |
+| POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| GET    | `/v1/openapi.json` — the OpenAPI document (below); served by the HTTP adapter rather than a controller, so it is not itself an operation in the document                                                                                                                                                                                                                                                                                                                                  |
 
 A global `ValidationPipe({ whitelist: true, transform: true })` is registered. Two routes are the
 deliberate exceptions: `DynamicSubmitBodyPipe` on submit and `RawWorkflowDocumentPipe` on compile
@@ -2716,6 +2781,89 @@ identity fields with `acceptedAt` in place of `created`. Every admin summary
 (`AdminOnboardingSummaryResponseDto`) — both the
 `GET /v1/onboardings` list items and `GET /v1/onboardings/:id` — carries `agreementStatus`.
 
+`GET /v1/onboardings/export` ([0044](decisions/0044-streamed-onboardings-csv-export.md)) returns
+every onboarding matching the list's filters, not one page — `ExportAdminOnboardingsQueryDto` is
+`ListAdminOnboardingsQueryDto` without `page` and `limit`, which the whitelist strips — and the
+list keeps its 100-row ceiling. It is declared above `GET /v1/onboardings/:id` because Nest matches
+in declaration order. The response is `200` with `Content-Type: text/csv; charset=utf-8`,
+`Cache-Control: no-store` and
+`Content-Disposition: attachment; filename="onboardings-<yyyyMMddTHHmmssZ>.csv"` (UTC), and
+a malformed filter is a `400` `VALIDATION_ERROR` as on the list, before any audit row. The body is a
+UTF-8 BOM, a header row, then one row per match in the list's order, `created_at DESC, id DESC`; no
+match yields the header alone. Against a running engine,
+`GET /v1/onboardings/export?workflowId=does-not-exist` returned those three headers and exactly
+`Onboarding id,Workflow id,Workflow version,Status,Current step,Agreement status,Rejection reason,Created at,Updated at,Completed at,Other data`
+after the BOM.
+
+The header row holds labels, not keys, and every label is derived from its key by one rule, with no
+hand-written labels or overrides. The fixed columns are `Onboarding id, Workflow id,
+Workflow version, Status, Current step, Agreement status, Rejection reason, Created at, Updated at,
+Completed at` (`expiresAt` is omitted: it is reserved and always `null`), then one `<name> score`
+column per score name, sorted, then one column per persisted field (`persist !== false`) labelled by
+its name, then a final `Other data`. A key (`onboardingId`, a score name, a field name, `otherData`)
+is humanized: it is split on `_`, `-`,
+whitespace, a lowercase-or-digit to uppercase boundary and the last capital of an uppercase run
+before a lowercase letter, and each word is lowercased unless it is two or more capitals with no digits
+(`onboardingId` becomes `Onboarding id`, `userID` becomes `User ID`, `amlRisk` becomes `Aml risk score`, `address2` becomes `Address2`); the
+first letter is capitalised, and a name with no words keeps its raw key. Labels are not made unique:
+a score and a field sharing a name give `Risk score` and `Risk`, and two names can collapse to one
+label (`first_name`, `firstName`), so a reader must go by column position. The score and data
+columns come from the workflow definitions, not from the stored data, because `context` may be
+encrypted (ADR 0024) and SQL cannot list its keys: one query lists the distinct
+`(workflow key, version)` pairs in the filtered set, `WorkflowRegistryService.getDefinitionForAdmin`
+resolves each — **`retired` revisions included**, since an export is a historical read — and the
+fields are the union over definitions ordered by workflow key then version, in step order, the
+first appearance winning. `Other data` holds, as JSON, every context key no declared column covers
+(a connector's `kycOutcome`, say) and is empty when there are none, so nothing collected is dropped.
+A version that no longer resolves (`WorkflowNotFoundException` or `WorkflowRevisionNotFoundError`)
+contributes no columns and its whole context lands in `Other data`; the export does not fail on it.
+
+Encoding follows RFC 4180: comma separator, CRLF line ends, a field quoted when it contains `"`,
+`,`, CR or LF with inner quotes doubled. Dates are ISO 8601 UTC, `null` and absent values are empty
+cells, numbers and booleans go through `String()`, and objects and arrays (uploaded documents,
+multi-selects) are `JSON.stringify`'d. **Formula guard:** a string cell starting with `=`, `+`, `-`,
+`@`, TAB or CR gets a leading `'`; numbers are never touched. The pure encoding lives in
+`onboardings/domain/onboardings-csv.ts`, with no Nest imports.
+
+`OnboardingsExportService.exportCsv` resolves the columns, writes the audit row, then returns an
+async generator that the controller wraps in a `StreamableFile` over `Readable.from`, so memory holds one batch rather
+than the table. It reads in
+keyset batches of 5000 over the list's own order, the cursor being the last row's `id`, bound as
+`:lastId` in
+`(created_at, id) < (SELECT created_at, id FROM onboardings WHERE id = :lastId)`; comparing in SQL
+avoids the millisecond truncation a JS `Date` would apply to Postgres' microsecond `timestamptz`,
+and unlike an offset it does not re-read rows shifted by concurrent inserts. A batch shorter than
+5000 ends the stream; each batch is one query, a range read on `idx_onboardings_created_at_id`.
+It uses `.limit()`, not `.take()`: every join is to-one, and with joins `.take()` makes TypeORM
+select the page's ids through a `DISTINCT` subquery and reload them by `IN (…)`, a reload Postgres
+answered with a scan of the whole table on every batch. Over 200k rows the batch reads alone took
+16–23 s that way and 6–8 s with `.limit()`. Reads use `dataSource.manager`, outside a transaction,
+as the list does.
+A batch does not join `onboarding_agreement_statuses`: joined, the view aggregates every
+`onboarding_agreements` row on every batch, which measured about 110 ms a batch at 100k rows. 5000 was chosen by measurement: on 200k rows it
+exported in 8.4 s against 10.1 s at 500, while 50,000 saved under a second for a 1.5 s first batch
+and more memory. The status lookup binds one parameter per id, so a batch must stay below the
+65,535 parameters Postgres accepts in one query. Instead
+a second query reads the view `WHERE onboarding_id IN (<the batch's ids>)`, which Postgres applies
+inside the view's grouping, and a missing row still means `not_accepted`. An export filtered by
+`agreementStatus` keeps the join, because the filter is a condition on it, and pays that cost.
+`context` is decrypted on hydration by the column transformer, so the file carries plaintext
+collected data.
+
+`OnboardingsExportService.exportCsv` resolves the columns first (the distinct workflow versions,
+which join the agreement-status view only when filtering on it, as a batch does, then the registry
+lookups), and only then writes an `onboardings.exported` audit row (§8) with
+`AuditService.logOnboardingsExport`, in its own transaction. A failure while resolving the columns
+throws out of the controller as an ordinary 500: the global filter audits it as
+`api.request_failed` and no export row exists. Once the stream has started the status is already
+`200`, so a failure after that point aborts the connection rather than ending the file early; the
+panel's axios download then rejects and saves nothing. The `StreamableFile` error handler records
+that failure as `api.request_failed` through `ApiFailureAuditFilter.recordFailure`, which `AuditModule`
+exports (the `APP_FILTER` binding uses `useExisting`, so it is the one global instance), while the
+export row written before it stays. A client that disconnects mid-export destroys the stream, which
+ends the generator; the controller does this on the response's `close` when it did not finish, since
+Nest only unpipes. A disconnect writes no failure row.
+
 There is exactly one exception filter, `ApiFailureAuditFilter`, registered as an `APP_FILTER` in
 `AuditModule`. It exists **only to observe**: it extends Nest's `BaseExceptionFilter` and its
 `catch()` calls `super.catch(exception, host)` first and unchanged, so serialization, status and
@@ -2727,21 +2875,21 @@ Errors themselves are unaffected: they are still small feature-local classes ext
 Nest HTTP exception, each owning a fixed `{code, message}`, and there is still no global error
 enum:
 
-| Code                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Status    |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `WORKFLOW_STEP_NOT_FOUND` (carries `stepName`), `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                                                                                                                                                                                                                   | 404       |
-| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                                                                                                                                                                                                                                                                                             | 400       |
-| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`), `WORKFLOW_CONNECTOR_SELECTION_INVALID` (carries `reason` — the table in §2 — `stepName`, `connectorId`, the refusing `workflowVersion` and, when there is one, `detail`)                                                                                                                                                                                            | 400       |
-| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`), `WORKFLOW_VERSION_EXISTS` (carries `workflowId` and `version`), `WORKFLOW_DRAFT_EXISTS` (carries `workflowId` and `draftVersion`), `WORKFLOW_SCOPE_CONFLICT` (carries `workflowId` and `scope`), `WORKFLOW_DRAFT_IN_USE` (carries `workflowId` and `version`), `WORKFLOW_VERSION_NOT_DRAFT` (carries `workflowId`, `version` and `status`), `WORKFLOW_VERSION_NOT_PUBLISHED` (carries `workflowId` and `version`; reached by no route yet) | 409       |
-| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser)                                                                                                                                                                                                                                                                    | 409       |
-| `ONBOARDING_AWAITING_CONNECTOR` — a client submit while the row is parked; carries `pendingConnector` (`connectorId`, `connectorName`, `connectorOrder`, never the provider reference) (§3); `ONBOARDING_NOT_AWAITING_CONNECTOR` — a reconcile of a row with no park; `PENDING_CONNECTOR_RECONCILE_UNSUPPORTED` — carries `connectorId` and `reason` (`adapter` \| `reference_missing`) (§5)                                                                                                                                 | 409       |
-| `ENCRYPTION_DISABLED` — `POST /v1/admin/encryption/keys` or `PATCH /v1/admin/encryption/rotation` while encryption is turned off; `ENCRYPTION_KEY_RING_CONFLICT` — two rotations at the same instant (the `uq_encryption_keys_active` loser); two operators turning encryption on at once is not a conflict, the loser is answered with the resulting state                                                                                                                                                                  | 409       |
-| `ENCRYPTION_KEY_NOT_CONFIGURED` — turning encryption on or rotating from a process with no `ENCRYPTION_KEY`                                                                                                                                                                                                                                                                                                                                                                                                                  | 503       |
-| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                                                                                                                                                                                                                                                                                       | 400       |
-| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                                                                                                                                                                                             | 401 / 503 |
-| `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 410       |
-| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                                                                                                                                                                                      | 503       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                      | 500       |
+| Code                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Status    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `WORKFLOW_STEP_NOT_FOUND` (carries `stepName`), `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                                                                                                                                                                                                                                                                                                                 | 404       |
+| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                                                                                                                                                                                                                                                                                                                                                                                           | 400       |
+| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`), `WORKFLOW_CONNECTOR_SELECTION_INVALID` (carries `reason` — the table in §2 — `stepName`, `connectorId`, the refusing `workflowVersion` and, when there is one, `detail`)                                                                                                                                                                                                                                                                                          | 400       |
+| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`), `WORKFLOW_VERSION_EXISTS` (carries `workflowId` and `version`), `WORKFLOW_DRAFT_EXISTS` (carries `workflowId` and `draftVersion`), `WORKFLOW_SCOPE_CONFLICT` (carries `workflowId` and `scope`), `WORKFLOW_DRAFT_IN_USE` (carries `workflowId` and `version`), `WORKFLOW_VERSION_NOT_DRAFT` (carries `workflowId`, `version` and `status`), `WORKFLOW_VERSION_NOT_LATEST` (carries `workflowId`, `version` and `latestPublishedVersion`), `WORKFLOW_VERSION_NOT_PUBLISHED` (carries `workflowId` and `version`; reached by no route yet) | 409       |
+| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser)                                                                                                                                                                                                                                                                                                                                                                  | 409       |
+| `ONBOARDING_AWAITING_CONNECTOR` — a client submit while the row is parked; carries `pendingConnector` (`connectorId`, `connectorName`, `connectorOrder`, never the provider reference) (§3); `ONBOARDING_NOT_AWAITING_CONNECTOR` — a reconcile of a row with no park; `PENDING_CONNECTOR_RECONCILE_UNSUPPORTED` — carries `connectorId` and `reason` (`adapter` \| `reference_missing`) (§5)                                                                                                                                                                                                                               | 409       |
+| `ENCRYPTION_DISABLED` — `POST /v1/admin/encryption/keys` or `PATCH /v1/admin/encryption/rotation` while encryption is turned off; `ENCRYPTION_KEY_RING_CONFLICT` — two rotations at the same instant (the `uq_encryption_keys_active` loser); two operators turning encryption on at once is not a conflict, the loser is answered with the resulting state                                                                                                                                                                                                                                                                | 409       |
+| `ENCRYPTION_KEY_NOT_CONFIGURED` — turning encryption on or rotating from a process with no `ENCRYPTION_KEY`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | 503       |
+| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 400       |
+| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 401 / 503 |
+| `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 410       |
+| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                                                                                                                                                                                                                                                                                    | 503       |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
@@ -2761,8 +2909,8 @@ to callers, so the error-code table above gains no `VALIDATION_FAILED` entry.
 
 ### Authentication — Microsoft Entra ID on the admin surface
 
-Every route under `/v1/admin/` and the three admin onboarding reads (`GET /v1/onboardings`,
-`GET /v1/onboardings/:id`, `GET /v1/onboardings/:id/transitions`) require a verified Microsoft Entra
+Every route under `/v1/admin/` and the four admin onboarding reads (`GET /v1/onboardings`,
+`GET /v1/onboardings/export`, `GET /v1/onboardings/:id`, `GET /v1/onboardings/:id/transitions`) require a verified Microsoft Entra
 ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`) through
 the `AdminRoute()` decorator (`packages/engine/src/auth/admin-route.decorator.ts`), which applies the
 guard and writes its contract into the OpenAPI document in one step. Every other route — the
@@ -2833,7 +2981,7 @@ document's. `openapi-document.spec.ts` holds every archived document to its fold
 under that `major.minor`, OpenAPI 3.1, no `nullable`) and below the current minor; the folder does
 not exist until the first minor has been cut. The documentation site renders each archived document
 as a version of the API reference (§13).
-`docs/decisions/0040-versioned-openapi-documents.md` records the choice.
+`docs/decisions/0045-versioned-openapi-documents.md` records the choice.
 
 **Decorators are explicit.** Every response shape is a class under the feature's `dto/` carrying
 `@ApiProperty`; request DTOs carry the same beside their class-validator rules; every route carries
@@ -2892,7 +3040,7 @@ rendering is the only one, and the drift test compares the parsed documents.
 
 `packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod, nuqs. Three sections, built from
 `ADMIN_SECTIONS` in `src/app/navigation.tsx`: **Onboardings**, a filterable, read-only list
-served from `GET /v1/onboardings` with a details page per onboarding; **Logs**, a
+served from `GET /v1/onboardings` with a details page per onboarding and an Export CSV download; **Logs**, a
 filterable, read-only view of the audit trail (§8); and **Connectors**, which writes connector
 settings. **Workflows** also writes, but only drafts (Workflows, below).
 
@@ -3023,9 +3171,21 @@ in either section's filter path, only in response-payload validation under `api/
 `Routes`, not in `AppProviders` — the adapter reads react-router's own hooks, which
 `AppProviders`, rendered above the router, cannot give it.
 
-Three things the design draws are deliberately absent, each for want of an endpoint: the applicant
-column of masked contact details, per-status counts on the inactive tabs, and an Export CSV action.
-A fourth, the "Started" date range, is absent because `ListAdminOnboardingsQueryDto` accepts no date
+The page header carries the design's **Export CSV** button: an outline button with a download icon
+calls `GET /v1/onboardings/export` with the applied filters (never the draft, and without
+`page`/`limit`), so the file matches the list on screen across every page. It is rendered only
+once a list fetch has succeeded — hidden while the list is loading or after it failed to load — and
+is labelled with that list's `pagination.total` (`Export 41 as CSV`), which is the export's row
+count for the same criteria. It is disabled while a request is in flight, while a draft filter
+is refused (`findDraftError`) and when the total is zero, and reads `Exporting…` meanwhile. The download goes through axios as a blob (`fetchAdminOnboardingsCsv`,
+`useOnboardingsExport`) because a navigation could not carry the Entra bearer token; a failure is an
+`Export failed` toast, and since a broken connection rejects the request, no truncated file is ever
+saved. The panel names the file itself, `onboardings-<yyyy-MM-ddTHH-mm>.csv` in local time (`toDateTimeLocalValue`, `:` swapped for `-`), and does
+not read `Content-Disposition`.
+
+Two things the design draws are deliberately absent, each for want of an endpoint: the applicant
+column of masked contact details and per-status counts on the inactive tabs. A third, the "Started"
+date range, is absent because `ListAdminOnboardingsQueryDto` accepts no date
 criteria — `createdAt` is returned and is the query's primary sort key, but nothing filters on it.
 Workflow and version stay free-text inputs rather than the design's dropdowns — turning them into
 one is out of this change's scope, even though `GET /v1/admin/workflows` (§12, below) now exists to
@@ -3180,8 +3340,8 @@ own (above), a page left open keeps showing the window as it was when last fetch
 Reload both refetch, which is how an operator brings it current.
 
 The Logs page carries its own list of absences, again each for want of a parameter the audit
-endpoint does not accept: **Export** (no export endpoint, the same call as Onboardings' CSV
-button); **Workflow** and **Version** (`ListAuditQueryDto` declares neither `workflowId` nor
+endpoint does not accept: **Export** (the audit endpoint has no export route, unlike
+`GET /v1/onboardings/export`); **Workflow** and **Version** (`ListAuditQueryDto` declares neither `workflowId` nor
 `workflowVersion` — unlike Onboardings, where the two stay free-text inputs, the audit endpoint has
 no criterion of any kind for either, so both are omitted outright); **Persona / applicant** (no
 applicant projection anywhere in the engine, the same call as the Onboardings applicant column);
@@ -3222,50 +3382,70 @@ row link below). The details route it points at, `/workflows/:workflowId`
 sidebar keeps Workflows active while it is open. It reads `workflowQueries.versions`
 (`src/api/workflows/workflow-versions.ts`) for the picker and the status chip, and, in parallel,
 `workflowQueries.detail` pinned to `?version=` or unpinned without it, so the engine serves the
-highest `published` version. Without `?version=`, a family with no published version opens its draft, if it has one. A 404 on the definition — nothing published or drafted, or a `?version=` the family
-does not hold — keeps the picker and asks for a version; a `retired` version is listed and
-selectable. `version` and `step` live in the URL (nuqs, `history: 'replace'`, `shallow: false`); an
-unknown `step` falls back to the definition's `initialStep`, and switching version clears `step`,
-so every version opens on its initial step. Under the title, a "View onboardings →" line, the
+highest `published` version. Without `?version=`, a family with no published version opens its draft, if it has one. Once the versions list has settled, a `?version=` the family
+does not hold, or no `?version=` with nothing published or drafted, replaces the tabs with "Version N does not exist." or
+"This workflow has no published version." and keeps the picker; neither tab renders, and no pinned definition or document
+is read. A list served from cache that lacks the pinned version is re-read once first, since a
+version may have been published elsewhere since; the page shows its loading state meanwhile. A 404 on the definition read itself, the list being stale, gives the same message inside the Graph tab. A
+`retired` version is listed and selectable. `version`, `step` and `view` live in the URL (nuqs, `history: 'replace'`, `shallow: false`); an
+unknown `step` falls back to the definition's `initialStep`, and switching version clears `step`
+and `view`, so every version opens on its initial step and its default tab. `?view=graph|json` picks
+the tab (`VersionTabs`, Base UI `Tabs`, Graph | JSON); a published or retired version defaults to
+Graph and a draft to JSON, and any other value falls back to that default. Under the title, a "View onboardings →" line, the
 onboarding details header's Workflow line mirrored, links to `/onboardings?workflowId=<id>` through
 the same shared serializer — the workflow only, never the shown version, and only once the versions
-have loaded. It sits there rather than among the header's controls, which the design reserves for the
-picker, View JSON and Edit as draft. The graph is
-`WorkflowGraph` under `src/app/workflows/details/components/` (dagre, top to bottom), with selection
-controlled by intercepting React Flow's node `select` changes; the page mounts the `ReactFlowProvider` so
-`WorkflowZoomControls` share it. Every edge except a plain, unguarded `success` carries a label
+have loaded. It is hidden on a draft, which cannot start an onboarding. It sits there rather than among the header's controls, which the design reserves for the
+picker and Edit as draft. The graph, with the
+inspector, is `VersionGraph`, which draws `WorkflowGraph` under `src/app/workflows/details/components/` (dagre, top to bottom), with selection
+controlled by intercepting React Flow's node `select` changes. `WorkflowZoomControls` (zoom out, zoom level, zoom in,
+Fit) float in a React Flow `Panel` at the canvas's top right, so the draft graph has them too and the stats band above
+holds only the counts. Every edge except a plain, unguarded `success` carries a label
 (the condition, the `manual.*` action, the status with its reasons, or `<status> · fallback`),
 capped at 22 characters and expanded in place on hover or focus while kept inside the canvas; the
 selected node is drawn with an outline, so its content never shifts. From the `xl` breakpoint the
 graph and inspector sit side by side and only the inspector scrolls; below it they stack and the
-area scrolls as a whole. App-wide, the `--font-display` and `--font-body` stacks in
+area scrolls as a whole. On the JSON tab of a published or retired version, `VersionDocument`
+(`components/VersionDocument/`) reads `workflowQueries.document` only once the tab mounts and shows
+the stored document in a read-only `JsonEditor` (`components/JsonEditor.tsx`, shared with the draft
+editor; read-only is CodeMirror's `EditorState.readOnly`, so Backspace and Delete change nothing), with
+a **Copy JSON** button that toasts "JSON copied." or the clipboard's failure, including a missing
+`navigator.clipboard` outside a secure context. While the unpinned
+definition is still loading the JSON tab shows "Loading version…", and a failure of that read the Graph tab's failure
+with Retry. App-wide, the `--font-display` and `--font-body` stacks in
 `tailwind.css` name `Inter Tight Variable` ahead of `Inter Tight`, the family the self-hosted
 variable font registers. The inspector beside it shows the selected step's fields,
-connectors (identity and field mapping) and outgoing transitions. It deliberately omits connector
-`config` and a View JSON action. Its one editing control is the connector binding. For a step's
-primary connector `StepConnectors` renders a native `<select>` of `selectableIds` — only when more
-than one adapter can serve the slot — showing the effective `id`, with `(authored)` after the id the
-document wrote, disabled while a write is in flight. Changing it calls
-`PUT /v1/admin/workflows/{id}/steps/{step}/connector` (§11) through `workflowMutations.selectConnector`,
-whose meta awaits every read of the family, so the outcome resolves once the new slot is on
-screen; the card shows "Applies to every version of this workflow. Onboardings already waiting on the previous
-connector finish with it." While `selected` is true a quiet "Use authored connector" button calls
-the `DELETE` (`workflowMutations.clearConnector`, same meta). Each outcome is a toast (Toasts, below): "Connector set to {id}" or "Authored connector
-restored", and "Unable to change connector" reading `Version N refused: …`
+connectors (identity and field mapping) and outgoing transitions. The inspector omits connector
+`config`; the JSON tab shows the stored document, `config` included (0041). Its one editing control is the connector binding, offered only on a published (or unpinned)
+version; a draft or retired version shows none. For a step's primary connector `StepConnectors`
+renders a native `<select>` of `selectableIds` — only when more than one adapter can serve the
+slot — showing the effective `id`, with `(authored)` after the id the document wrote. Changing it
+only sets local state; nothing is saved until a button is pressed, and the select and every button
+are disabled while a write is in flight. **Save for v{N}** (enabled when the choice differs from the
+effective `id`) calls `PUT /v1/admin/workflows/{id}/steps/{step}/connector` (§11) with
+`{ scope: 'version', version: N }` through `workflowMutations.selectConnector`, whose meta awaits
+every read of the family, so the outcome resolves once the new slot is on screen. **Apply to all
+published versions** appears when the connector's `versions` has two or more entries, is enabled
+while some entry's `id` differs from the choice, and sends `{ scope: 'all' }`. While `selected` is
+true a quiet **Restore on v{N}** calls the `DELETE` with `scope=version` (`workflowMutations.clearConnector`,
+same meta), and **Restore on all versions** appears when two or more versions are covered and one of
+them is selected, with `scope=all`. The card's helper text reads "Saves for this version, or for
+every published version with this step. Drafts and newly published versions run their authored
+connector. Onboardings already waiting on the previous connector finish with it." Each outcome is a toast (Toasts, below): "Connector set to {id} on v{N}" (or "on v1, v2"),
+"Authored connector restored on v{N}" (or "on every version"), and "Unable to change connector" reading `Version N refused: …`
 (`describeConnectorSelectionError`), where `N` is the `workflowVersion` the engine named and the
 rest is the engine's `detail` when it sent one — it names the missing field or the offending config
 key — else the panel's sentence for the `reason`, one per reason the engine declares, else the
 engine's own message for a reason this build does not know. The "→ Global settings" link keeps the
-effective id. Import JSON, Fork, every publish, retire or scheduling action and
+effective id. Import JSON, every publish, retire or scheduling action and
 the visual canvas the design draws are dropped; the design's "24 workflows" count beside the filter
 actions is dropped too, since the footer's "Showing x–y of n" already states it.
 
 Drafts are authored in the panel. The temporary banner that said the section was read-only is gone
 from `WorkflowsPage`; the `Callout` component stays. The drafts API is `src/api/workflows/workflow-drafts.ts`:
 `createWorkflowDraft` (`POST /v1/admin/workflows`), `fetchWorkflowDocument`
-(`GET .../versions/{v}/document`), `updateWorkflowDraft` and `deleteWorkflowDraft`
+(`GET .../versions/{v}/document`, returning a `WorkflowVersionDocument` of any status), `updateWorkflowDraft` and `deleteWorkflowDraft`
 (`PUT` / `DELETE .../versions/{v}`) and `compileWorkflowDocument`
-(`POST /v1/admin/workflows/compile`). A failure is an `ApiError` carrying `status`, `code` and the
+(`POST /v1/admin/workflows/compile`, returning `stepCount` and the compiled `workflow`, which the draft's graph renders). A failure is an `ApiError` carrying `status`, `code` and the
 raw `body`; `readDraftError` parses the body's `code`, `reason` and `path` for a code the engine
 names, and returns `null` for any other failure. The user-facing text per code is
 built in the routes (`utils/describe-draft-error.ts`), not in `src/api/`. Each workflow key is its parent key plus its own params, so invalidating
@@ -3276,33 +3456,100 @@ reads `GET .../versions/{v}` when pinned and `GET /v1/admin/workflows/{id}` when
 `?version=N` no longer exists; its signature and callers are unchanged.
 
 **New draft** is a primary button in the list's `PageHeader` that opens `NewDraftDialog`
-(`src/app/workflows/components/NewDraftDialog/`, Base UI `Dialog`). "Start from" offers two options.
+(`src/app/workflows/components/NewDraftDialog/`, Base UI `Dialog`). "Start from" offers three options,
+**Fork an existing version** (the default), **Empty workflow** and **Upload a definition file**.
 **Empty workflow** takes Workflow ID, Version (integer from 1, default 1) and an optional Name
 through react-hook-form, and posts `{ id, version, name?, steps: [] }`. **Upload a definition
 file** reads a `.json` file with `File.text()` and `JSON.parse` (`parseDraftUpload`);
 the document is validated in the editor, not on upload, so only a parse failure, a non-object or a
 missing `id` or `version` is rejected, as field validation. A read file prefills editable Workflow ID
-and Version fields, and the document is posted with those values in place of its own. Both sources validate through one
+and Version fields, plus an editable Name prefilled from the file's `name`, and the document is posted with
+those values in place of its own; an empty Name removes `name` from it, also in a fork.
+**Fork** copies a published or retired version into a new draft
+([0043](decisions/0043-forking-a-version-is-a-client-side-copy.md)); the engine does not change.
+`ForkSourceFields` holds a **Source workflow** `Combobox` and a **Source version** `Select`. The
+combobox searches `workflowQueries.listPages` (`limit 20` a page, `search` debounced 300 ms by
+`useDebouncedValue`) and keeps only families with a published or retired version
+(`versionCount - draftCount > 0`), built-in and fixture families included. The endpoint cannot
+leave draft-only families out, so the next page loads on its own while fewer than 20 forkable
+families show, and again when the list is scrolled to its end; the empty row shows only once
+every page is read. Choosing a family reads
+`workflowQueries.versions(id)`; the select offers its non-draft versions as `vN — status` and
+defaults to the latest published one, else the latest retired (`defaultForkVersion`). Choosing a
+version reads `workflowQueries.document(id, v)` and prefills the form; choosing the
+selected one again, or leaving Fork for Empty and coming back, keeps the operator's edits; coming back from a read upload clears the upload and prefills the source again. A `users` family keeps its ID and takes Version `max + 1` over every listed
+version of any status (`nextWorkflowVersion`); a `built-in` or `fixtures` family gets an empty
+ID, the hint "Built-in workflows are copied under a new ID." and Version 1, since a
+new ID is a new family. Name comes from the document, and editing the ID never changes the
+Version. A hint, "Changing the ID creates a new workflow.", sits in the ID field's hint slot for a `users` source.
+While a chosen source's reads load, including the lookup of a preselected family, the identity fields and Create are disabled and the combobox shows its loading row; a late document never prefills while another source is chosen. A failed read shows a
+`StatusRegion` with Retry. The **draft-exists guard** fires when the trimmed ID equals the
+source's and its versions list holds a draft: a notice band (`role="status"`) above the ID row reads "This
+workflow already has draft v{N}. Open it, or change the ID to create a new workflow." with "Open
+it" linking to `/workflows/<id>?version=N`; the footer's primary action becomes **Open draft v{N}**
+(a link to the same path), Create is disabled and outlined; the engine's
+`409 WORKFLOW_DRAFT_EXISTS` toast stays as the fallback. The schema's `fork` arm posts
+`{ ...fork.document, id, version, name? }` and rejects a form with no source ("Choose a workflow
+and a version."). All three sources validate through one
 `zod` schema, `utils/new-draft-schema.ts`, wired with `zodResolver`
 ([0035](decisions/0035-zod-schemas-for-client-validated-forms.md)): the engine's save
 precondition (`id` of 1–100 characters, `version` from 1 to 2147483647) is stated once there and
-shared by the typed fields and the uploaded document, and the schema's output is the document
+shared by the typed fields and the uploaded or forked document, and the schema's output is the document
 posted, so submit does no assembling of its own. On success the dialog toasts,
 invalidates `workflowQueries.lists()`, `versions(id)` and `detail(id, v)`, closes and navigates to
 `/workflows/<id>?version=<v>`; on failure it shows an error toast and stays open with its input.
 `steps: []` does not compile (`INVALID_VALUE`, `steps`); a draft may be invalid by design.
 
+The same **New draft** button sits in the details header of every published or retired version, in
+every scope; a draft's actions still come from `DraftEditor`. `WorkflowDetailsPage` renders
+`<NewDraftDialog initialFork={{ workflowId, version }} />`, which opens the
+same modal on Fork with that family and version chosen and prefilled by the rules above. The engine
+has no per-family summary read, so the scope and the combobox label come from
+`workflowQueries.list({ limit: 100, search: workflowId })`, matched on `workflowId` exactly. The
+`search` is an `ILIKE` on `key` or `name`, so a family whose ID is matched by more than 100 others
+falls outside that page; the combobox then starts empty and the operator picks the family by hand.
+The button still shows when the family has a draft, and the guard covers it.
+
+The dialog's pickers are Base UI wrappers in `src/components/ui/`
+([0031](decisions/0031-base-ui-toasts-for-admin-panel-mutation-outcomes.md)), generic and unaware of workflows.
+`Select` is controlled, takes typed `{ value, label }` items and is styled like the native select
+(`h-10`, mono text). `Combobox` is server-driven: the parent owns the input text, the selected
+item and the filtering (`filter={null}`), and it shows loading, error and empty rows.
+
 When the selected version is a `draft` (a pinned `?version=`, or the draft a family with no published
 version opens on), `WorkflowDetailsPage` renders `DraftEditor`
-(`src/app/workflows/details/components/DraftEditor/`) in place of the graph, stats and inspector.
+(`src/app/workflows/details/components/DraftEditor/`) in place of the read-only tabs; it has the same
+Graph | JSON `VersionTabs`, defaulting to JSON, with the JSON panel kept mounted while hidden so the
+editor's undo history survives.
 The page's `detail` query is disabled while the pinned status is `draft` or still unknown behind a
 loading versions list, so an invalid draft is never compiled for the page. `DraftEditor` reads
-`workflowQueries.document` and handles pending, error with Retry, 404 ("This draft no longer
-exists.") and 409 `WORKFLOW_VERSION_NOT_DRAFT`. The text is edited in `JsonEditor`, CodeMirror 6
+`workflowQueries.document` and handles pending, error with Retry and 404 ("This draft no longer
+exists."). A document whose `status` is no longer `draft` (published or retired after the versions
+list was read) opens no editor: it says so and invalidates `workflowQueries.versions`, and the
+refetched list moves the page to the read-only tabs. The text is edited in `JsonEditor`, CodeMirror 6
 (`codemirror` `basicSetup`, `@codemirror/lang-json` with `jsonParseLinter`, `@codemirror/lint`),
 themed from `@theme` variables. The header's `actions` slot holds, for a draft:
 
 - **Discard** resets the text to the last fetched document; it and Save are disabled while clean.
+- **Publish**, after Save draft, is `variant="primary"` and disabled while a request is pending,
+  and while the buffer is dirty. The engine publishes the stored
+  row, so only a saved buffer can be published; while dirty, the header note reads "Unsaved changes ·
+  save to publish". Click compiles `draft.document` through `compileWorkflowDocument`, with no JSON
+  parse step: a failure shows in `ValidationResult` and opens no dialog, and the button stays
+  enabled, since every click compiles again. A valid result opens `PublishDraftDialog`, titled
+  `Publish {name ?? workflowId} v{version}`, warning "Publishing is permanent: a published version
+  cannot be edited or deleted." and "New onboardings will start on this version.", then one
+  informational note per primary connector whose other published versions run a selected connector
+  that differs from the draft's authored one ("Step `submit_kyc` runs sumsub_kyc on v1, v2
+  (selected). v3 will run its authored veriff_kyc."), with Cancel and Publish ("Publishing…" while
+  pending). `DraftEditor` reads the draft's own definition (`workflowQueries.detail(id, version)`,
+  enabled while the dialog is open) and `describePublishConnectorNotes` builds the notes; while that
+  read loads or fails the dialog shows none, and a note never disables Publish. Success toasts "Version N published." and navigates with
+  `replace` to `/workflows/<id>?version=<N>`, where the page, with `versions(id)` awaited by the
+  factory, shows the published version read-only. `usePublishDraft` removes the draft's
+  pinned `detail(id, N)` read, exact so `document` stays, once the editor unmounts after that
+  navigation, so the published version's graph does not reuse it. Failure shows an error toast and closes the
+  dialog, leaving the draft as it was.
 - **Validate** runs `JSON.parse` (a syntax error shows without calling the engine), then
   `compileWorkflowDocument`. The result renders inline under the editor in `ValidationResult`,
   not as a toast: "Valid · N steps", or the code, reason, path and message. The next edit clears it.
@@ -3312,6 +3559,18 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
   both versions lists, navigates with `replace` to the new `?version=`, and removes what no longer
   exists: the old `detail(id, v)`, or the whole old family when the rename emptied it (the engine
   deleted it).
+- **Graph tab** (`DraftGraph`) draws the compiled `workflow` of the shared compile result, with
+  `?step` selecting a step as on a published version. Its inspector is wholly read-only:
+  `StepConnectors` gets `readOnly`, so no connector `<select>` or Restore button is
+  offered, since a selection binds published versions, never the draft's text; the
+  header reads "Read-only here — edit the draft, connectors included, on the JSON tab". It never compiles while typing: when the tab
+  opens with no result held it runs the same compile as Validate, and shows "Compiling…" meanwhile;
+  a syntax error or an engine refusal shows "This draft does not compile. Fix it on the JSON tab."
+  with a Show JSON button, while a failed request (auth, network, 5xx) shows "Unable to compile
+  this draft" with a Retry that drops the held failure and compiles again. The result is shared with Validate, Publish and `ValidationResult`, kept
+  only while the text is unchanged, so an edit or Discard clears it and drops a compile still in
+  flight. The graph is never stored
+  ([0041](decisions/0041-admin-workflow-documents-for-every-status.md)).
 - **Delete draft** (`DeleteDraftAction`) is the two-click inline confirm of `ReencryptAction`
   ("Delete draft" then "Confirm delete"). It navigates to `/workflows/<id>` when the family has
   other versions, and to `/workflows` otherwise, then removes the deleted `detail(id, v)` — or the
@@ -3319,7 +3578,7 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
   remains.
 
 Each write is its own hook — `hooks/useValidateDraft.ts`, `useSaveDraft.ts`, `useDeleteDraft.ts`,
-and `useCreateWorkflowDraft.ts` on the list — that spreads a `workflowMutations` factory
+`usePublishDraft.ts` and `useCreateWorkflowDraft.ts` on the list — that spreads a `workflowMutations` factory
 (`src/api/workflows/workflow-mutations.ts`) into `useMutation`, adds the follow-up every caller owes
 (toasts, navigation, the cache steps below), and returns React Query's own `UseMutationResult`. A
 caller's own follow-up rides on `mutate(…, { onSuccess })`: the editor settles only the text it sent,
@@ -3330,6 +3589,8 @@ invalidations that `(data, variables)` and the factory's `(id, v)` decide, carri
 `MutationCache` handler of `createQueryClient()` on success:
 
 - **Create** invalidates `lists()`, `versions(id)` and `detail(id, v)` of the new draft.
+  A fork creates through the same factory; its reads (`list`, `versions`, `document`) are plain
+  queries and add no invalidation.
 - **Save** invalidates `lists()`. A draft that stayed put awaits its own `detail(id, v)` and
   `versions(id)`, so the editor's `onSuccess` runs against the refetched document. A moved draft
   invalidates the new location's `versions(id)` and `detail(id, v)` instead.
@@ -3751,7 +4012,7 @@ test would be reminded to evaluate the skill it is being measured on, and a `Sto
 it from finishing. `--validate` checks every golden set and
 compiles every golden workflow without a model, runs in lint-staged for staged files under
 `evals/`, and is also a unit test of the package, so `pnpm test` fails on a golden set the runner
-would refuse. Seven cases ship: four for `creating-workflows` (a new fixture pair graded against a
+would refuse. Seven cases ship: four for `creating-workflows` (a new fixture graded against a
 golden graph, a new built-in revision, a users-scope document with an unwired port to fix, and a
 question neither skill should fire on) and three for `creating-engine-bffs` (the double-upload
 `409`, the submit timeout, the error-code mapping), each judged against a golden answer.
@@ -3814,11 +4075,11 @@ than always the current one; `scripts/prepare-api-versions.mjs`
 registers the versions before any `docusaurus` command, because Docusaurus refuses to load with a
 listed version whose folder is missing, and the site is plainly unversioned while no minor has been
 archived) and **Fixtures** (`docs/fixtures`, written by `scripts/generate-fixtures.mjs`, which
-compiles every workflow file the way the engine does: one page per example in `workflows/fixtures`,
-`/fixtures/<name>`, showing the specialized form and its compiled step map first and then the same
-flow as `custom` steps with the `workflow:compile` commands that produce it and, where the two forms
-compile differently, the steps that differ; one page per built-in revision, each naming the other;
-plus a gallery with connector-type filters). Generated pages are
+compiles every workflow file the way the engine does: one page per file in `workflows/fixtures` and
+`workflows/built-in`, at `/fixtures/<file stem>` and titled by the document's `id`, showing an
+at-a-glance table, the authored steps with what each compiles to when the file uses specialized
+types, the compiled step map and the file itself; a built-in page also links the revision written
+in the other form, revision 1 and its `-v2`; plus a gallery with connector-type filters). Generated pages are
 never committed: `start`, `build` and `typecheck` regenerate them first — clearing the previous
 output before generating, because the OpenAPI plugin never overwrites a file that exists — and
 `.gitignore` excludes them (the versioning files `api_versions.json`, `api_versioned_docs/` and

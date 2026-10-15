@@ -25,6 +25,7 @@ import {
   applyConnectorSelections,
   ConnectorSelectionRules,
   findSelectableConnector,
+  type ConnectorVersionEntry,
   type WorkflowConnectorSelection,
 } from './connector-selection';
 import { Scoring } from './scoring';
@@ -197,10 +198,12 @@ export class Workflow {
    * A step's single primary connector also reports what the document authored, whether a
    * selection replaced it, and which ids `rules` would let a save bind in its place — judged
    * against the step as authored, so the list is exactly what the write accepts for this version.
+   * `connectorVersions` lists, per step name, the versions a selection reaches.
    */
   describeDefinition(
     sourceSteps?: readonly StepReport[],
     rules: ConnectorSelectionRules = new ConnectorSelectionRules(undefined, []),
+    connectorVersions: ReadonlyMap<string, readonly ConnectorVersionEntry[]> = new Map(),
   ): WorkflowDefinitionResponseDto {
     const sourcesByCompiledName = new Map(
       (sourceSteps ?? []).flatMap((entry) =>
@@ -244,6 +247,10 @@ export class Workflow {
             authoredId,
             selected: this.selectedStepNames.has(step.name),
             selectableIds: rules.listSelectableIds(authoredStep, authoredId, connector.id),
+            versions:
+              findSelectableConnector(authoredStep) === undefined
+                ? []
+                : [...(connectorVersions.get(step.name) ?? [])],
             fallbacks: connector.fallbacks.map(projectConnector),
           };
         }),

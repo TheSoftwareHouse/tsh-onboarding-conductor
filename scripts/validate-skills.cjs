@@ -359,7 +359,7 @@ function looksLikePath(span) {
 
 /**
  * Resolves a cited path against the tracked tree. A skill cites both ways — `workflows/fixtures/`
- * from the repository root in one paragraph and `fixtures/base-typed.workflow.json` from inside
+ * from the repository root in one paragraph and `fixtures/base.workflow.json` from inside
  * that directory in the next — so a suffix match counts. What matters is that the citation
  * identifies something real, not that it was written from the root.
  */

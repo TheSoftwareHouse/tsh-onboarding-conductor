@@ -118,7 +118,11 @@ export class WorkflowFieldResponseDto {
 
 /** A connector declaration's identity and field mapping. Its `config`, `retry` and `errorHandler` are never exposed. */
 export class WorkflowStepConnectorResponseDto {
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      'The connector id. On a primary connector, the one the viewed version runs: its selection ' +
+      'when it has one, else the authored id.',
+  })
   id!: string;
 
   @ApiProperty()
@@ -151,19 +155,42 @@ export class WorkflowStepConnectorResponseDto {
   optionalFieldMapping!: Readonly<Record<string, string>>;
 }
 
+export class WorkflowConnectorVersionResponseDto {
+  @ApiProperty({ type: 'integer', description: 'The workflow version this entry describes.' })
+  version!: number;
+
+  @ApiProperty({
+    description:
+      'The connector id this version runs: the selection when `selected`, else the authored one.',
+    example: 'veriff_kyc',
+  })
+  id!: string;
+
+  @ApiProperty({
+    description: 'The connector id this version authored.',
+    example: 'sumsub_kyc',
+  })
+  authoredId!: string;
+
+  @ApiProperty({
+    description: 'True when an operator selection replaces the authored connector on this version.',
+  })
+  selected!: boolean;
+}
+
 export class WorkflowStepConnectorWithFallbacksResponseDto extends WorkflowStepConnectorResponseDto {
   @ApiProperty({
     description:
-      'The connector id the workflow document authored. Differs from `id` while an operator ' +
-      'selection is in force.',
+      'The connector id the viewed version authored. Differs from `id` while an operator ' +
+      'selection is in force on it.',
     example: 'sumsub_kyc',
   })
   authoredId!: string;
 
   @ApiProperty({
     description:
-      'True when an operator selection replaces the authored connector on this step, in every ' +
-      'stored version of the workflow that has the step.',
+      'True when an operator selection replaces the authored connector on this step in the ' +
+      'viewed version. Always false for a draft.',
   })
   selected!: boolean;
 
@@ -180,6 +207,16 @@ export class WorkflowStepConnectorWithFallbacksResponseDto extends WorkflowStepC
     example: ['sumsub_kyc', 'veriff_kyc'],
   })
   selectableIds!: string[];
+
+  @ApiProperty({
+    type: () => WorkflowConnectorVersionResponseDto,
+    isArray: true,
+    description:
+      'The versions a selection on this step reaches, ascending: every non-retired published ' +
+      'version whose step has this single connector, plus the viewed version when it is a draft ' +
+      'or retired. Empty when the step is not selectable, and on a compile response.',
+  })
+  versions!: WorkflowConnectorVersionResponseDto[];
 
   @ApiProperty({
     type: () => WorkflowStepConnectorResponseDto,

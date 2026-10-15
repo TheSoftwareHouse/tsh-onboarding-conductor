@@ -65,19 +65,26 @@ export function readConnectorSelectionRefusal(
   };
 }
 
+/** What a selection write covers: one stored version, or every version the engine covers. */
+export type ConnectorSelectionTarget = { scope: 'version'; version: number } | { scope: 'all' };
+
 function selectionPath(workflowId: string, stepName: string): string {
   return `${ADMIN_WORKFLOWS_ENDPOINT}/${encodeURIComponent(workflowId)}/steps/${encodeURIComponent(stepName)}/connector`;
 }
 
-/** Serves a step's connector slot with another adapter of its type, for every version of the workflow. */
+/** Serves a step's connector slot with another adapter of its type, for the target version or for all of them. */
 export async function putWorkflowConnectorSelection(
   workflowId: string,
   stepName: string,
   connectorId: string,
+  target: ConnectorSelectionTarget,
 ): Promise<WorkflowStepConnectorWithFallbacks> {
   let response;
   try {
-    response = await httpClient.put<unknown>(selectionPath(workflowId, stepName), { connectorId });
+    response = await httpClient.put<unknown>(selectionPath(workflowId, stepName), {
+      connectorId,
+      ...target,
+    });
   } catch (cause) {
     throw toApiError(cause, RESOURCE_LABEL);
   }
@@ -94,9 +101,10 @@ export async function putWorkflowConnectorSelection(
 export async function deleteWorkflowConnectorSelection(
   workflowId: string,
   stepName: string,
+  target: ConnectorSelectionTarget,
 ): Promise<void> {
   try {
-    await httpClient.delete(selectionPath(workflowId, stepName));
+    await httpClient.delete(selectionPath(workflowId, stepName), { params: target });
   } catch (cause) {
     throw toApiError(cause, RESOURCE_LABEL);
   }

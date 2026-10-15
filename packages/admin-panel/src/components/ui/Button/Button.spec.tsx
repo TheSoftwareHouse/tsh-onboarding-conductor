@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter, Link } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Button } from './Button';
 
@@ -105,10 +106,10 @@ describe('Button', () => {
   });
 
   it.each([
-    ['primary', 'enabled:hover:bg-tsh-ink-1'],
-    ['secondary', 'enabled:hover:bg-tsh-black'],
-    ['outline', 'enabled:hover:bg-tsh-black'],
-    ['danger-outline', 'enabled:hover:bg-tsh-red'],
+    ['primary', 'hover:not-disabled:bg-tsh-ink-1'],
+    ['secondary', 'hover:not-disabled:bg-tsh-black'],
+    ['outline', 'hover:not-disabled:bg-tsh-black'],
+    ['danger-outline', 'hover:not-disabled:bg-tsh-red'],
   ] as const)('hovers %s the way the design system specifies', (variant, expected) => {
     render(<Button variant={variant}>Get in touch</Button>);
 
@@ -143,5 +144,20 @@ describe('Button', () => {
       'duration-base',
       'ease-default',
     );
+  });
+
+  it('renders a router link styled as a button, without a type', () => {
+    render(
+      <MemoryRouter>
+        <Button as={Link} to="/workflows/kyc?version=2" variant="primary">
+          Open draft v2
+        </Button>
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByRole('link', { name: 'Open draft v2' });
+    expect(link).toHaveAttribute('href', '/workflows/kyc?version=2');
+    expect(link).not.toHaveAttribute('type');
+    expect(link).toHaveClass('bg-tsh-black', 'h-10');
   });
 });

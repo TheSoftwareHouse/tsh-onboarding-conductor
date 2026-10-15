@@ -35,7 +35,7 @@ Both `workflows/` and `email-templates/` are split into three scopes:
 ```
 workflows/                       email-templates/
 ├── built-in/   shipped with the application, not configurable
-├── fixtures/   examples backing local development and CI (workflows only: skipped when NODE_ENV=production)
+├── fixtures/   flows the e2e suites run against (workflows only: skipped when NODE_ENV=production)
 └── users/      yours — relocatable with WORKFLOWS_USERS_DIR / EMAIL_TEMPLATES_USERS_DIR
 ```
 
@@ -85,14 +85,11 @@ and whatever the adapter's `validateDeclaration` asserts — so a clean run stil
 by a booting engine.
 
 A file is a list of typed steps — see the next section for the vocabulary — and the
-quickest start is to copy the closest example from [workflows/fixtures/](../workflows/fixtures/),
-each of which ships twice: `<name>.workflow.json` written as `custom` steps, one hand-written
-compiled step each, and `<name>-typed.workflow.json` written through the specialized types. The examples are
-`base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`, `http-request`,
-`twilio-verify`, `sendgrid-email`, `manual-smtp`, `connector-fallback`, `sumsub-kyc`, `veriff-kyc` and
-`scoring` — `sumsub-kyc` and `veriff-kyc` are the ones to copy for a provider that answers on a
-callback rather than in the same request (`veriff-kyc` for one that needs no provider-side level or
-questionnaire), `scoring` for named scores and score-conditioned transitions. The production reference
+quickest start is to copy the closest workflow from [workflows/fixtures/](../workflows/fixtures/),
+which holds the flows the e2e suites run against, each written as `custom` steps, one hand-written
+compiled step each (a new fixture is written in specialized step types): `base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`,
+`twilio-verify`, `sendgrid-email` and `scoring` — `scoring` is the one to copy for named scores and
+score-conditioned transitions. The production reference
 flow is [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), shipped built-in in both forms —
 revision 1 as `custom` steps, revision 2 (`-v2`) through the specialized types: EU B2C individual
 KYC across all 30 EEA states, where the applicant chooses between a passport and a national ID card.
@@ -193,8 +190,8 @@ An arm without `reason` is still required and must still end on a terminal `reje
 genuine refusal is never routed back into the flow by accident. Written as `custom` steps, the
 built-in `eu-b2c-individual-kyc-eea` carries those arms by hand on `verify_phone_code`. Through the
 specialized `otp-verify` type they are generated: the type emits the re-send step itself and routes
-`CHALLENGE_EXPIRED` and `CHALLENGE_NOT_FOUND` to it, so revision 2 and
-`workflows/fixtures/twilio-verify-typed.workflow.json` wire only `verified` and `refused`.
+`CHALLENGE_EXPIRED` and `CHALLENGE_NOT_FOUND` to it, so revision 2 wires only `verified` and
+`refused`.
 
 A workflow may also declare named numeric scores — `scoring: { <name>: { min, max } }` at the root,
 integer bounds, `min < max` — and adjust them from a step's own `scoring: [{ score, when?, add }]`
@@ -204,9 +201,7 @@ transition's `when` may then route on the result with `{ score, gte | gt | lte |
 inside `all` / `any` / `not` like any other condition — but a field's `when` and a scoring rule's
 own `when` may not name a score, since the score leaf only resolves server-side and `/state`
 publishes a field's `when` to the client as-is. `workflows/fixtures/scoring.workflow.json` is the
-worked example as `custom` steps; `scoring-typed.workflow.json` says the same with step-level
-`scoring` on `identity-profile`, `otp-verify` and `kyc-identity-verification`, and score leaves on
-conditional edges.
+worked example, as `custom` steps.
 
 A connector declaration may also name `errorHandler` — the `id` of a registered
 `ConnectorErrorHandler`, defaulting to `fallback_on_error` when omitted — and `fallback`, an
@@ -250,6 +245,14 @@ than editing a stored one. Starting an onboarding without naming a version picks
 **published** revision — a revision in `draft` or `retired` status is skipped even when its number is
 higher — and pins the onboarding to it for its whole lifetime, so nothing in flight changes shape
 under a customer.
+
+**Publish a draft from the panel.** An operator can also publish a stored `draft` from its editor
+in the admin panel, or with `POST /v1/admin/workflows/{workflowId}/versions/{version}/publish`. The
+engine compiles the stored document first, and refuses a draft that does not compile or whose
+version is not above every published one of the family (`409 WORKFLOW_VERSION_NOT_LATEST`), and
+one whose `id` and `version` a workflow file also declares (`409 WORKFLOW_VERSION_EXISTS`). A
+published version is immutable, is served to unpinned starts at once, and leaves other versions'
+status unchanged.
 
 Field types, the `persist` flag, `connectorData` vs `acceptedData` and the available validation
 formats are covered in
@@ -324,9 +327,8 @@ sends each an `onboarding.agreement_pending` webhook, so
 examples: `base-terms` on `accept_terms` in [`workflows/fixtures/base.workflow.json`](../workflows/fixtures/base.workflow.json),
 and `eu-b2c-terms` plus `eu-b2c-privacy-notice` on `collect_contact` in
 [`eu-b2c-individual-kyc-eea`](../workflows/built-in/). The root is the only place the array is
-accepted, whatever the steps are written as: `base.workflow.json` and `base-typed.workflow.json`
-declare the same family identically, and both revisions of `eu-b2c-individual-kyc-eea` do too —
-revision 1 as `custom` steps, revision 2 as specialized ones whose `consents` member generates the
+accepted, whatever the steps are written as: both revisions of `eu-b2c-individual-kyc-eea` declare
+the same family identically — revision 1 as `custom` steps, revision 2 as specialized ones whose `consents` member generates the
 field `acceptedWhen` names.
 
 **Adding a new agreement type** is one array entry. `AGREEMENT_TYPES` in
@@ -467,8 +469,7 @@ the slot allows, a `connector` block may name `errorHandler`, `retry` and up to 
 entries — each an `id` of the same capability, with its own `retry` and, where the slot allows,
 `fieldMapping` and `config` additions laid under the keys the type derives (an entry declaring none
 inherits the primary's). `otp-verify` entries may carry their own `startConfig` and `checkConfig`.
-`workflows/fixtures/connector-fallback-typed.workflow.json` is the worked example;
-`connector-fallback.workflow.json` is the same chain declared in full on a `custom` step's connector.
+`packages/engine/test/connector-fallback-chain.e2e-spec.ts` writes and runs a worked example.
 
 Reach for `connector-call` when the connector you need has no specialized type — a mock adapter in
 a fixture, a provider integrated by declaration alone. It collects `fields` (and takes `include`
@@ -642,7 +643,7 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
    write an adapter from scratch — [add a KYC provider](#add-a-kyc-provider) below.**
 
 5. **Make it selectable (optional, nothing to register).** An operator can switch a workflow step's
-   connector from the workflow details page
+   connector on one published version or on all of them from the workflow details page
    ([decision 0038](decisions/0038-runtime-connector-selection.md)). One set of rules
    (`ConnectorSelectionRules`, `packages/engine/src/workflows/domain/connector-selection.ts`) decides
    both what the page offers for a step and what a save accepts, so your adapter is offered exactly
@@ -714,10 +715,10 @@ actionable, hint?}`; set `actionable: false` for a webhook that decides nothing;
    the connector in `BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS` (or `USER_CONNECTOR_ADAPTER_PROVIDERS` for a fork's own provider), and the provider and its client in the module's
    providers. If the provider needs a base URL or timeout, add them to `AppConfig` and `.env.dist`
    beside `SUMSUB_*` / `VERIFF_*`.
-4. **Add a fixture workflow pair**, `<name>-kyc` and `<name>-kyc-typed`, copied from `veriff-kyc`
-   (the `custom` form declares `kycAttemptCount` if your provider does not count attempts), and let
-   `checked-in-workflows.spec.ts` guard the pairing. A built-in family is a copy of an existing one
-   with the connector binding changed.
+4. **Add a workflow family** that binds it: a built-in family is a copy of an existing one, as
+   `eu-b2c-individual-kyc-eea-veriff` is, with the connector binding changed (the `custom` form
+   declares `kycAttemptCount` if your provider does not count attempts).
+   `checked-in-workflows.spec.ts` runs the adapter's load-time config check over it.
 5. **Let it be selected**: nothing to add. A `kyc` connector the kernel builds declares its
    `callbackFields` itself (the `kyc*` fields, plus `kycAttemptCount` when `countsAttempts` is
    `false`), so a typed KYC step can be switched to it from the workflow details page, and a
@@ -799,8 +800,8 @@ What a new type or format must respect is described in
 Put an HTML file in `email-templates/users/` and reference it from a connector by its scope-prefixed
 path — `"templatePath": "users/welcome.html"`. Template variables are supplied through the step's
 `fieldMapping`. A path that omits a known scope prefix, is absolute, or resolves outside its scope
-directory is rejected and the connector step fails. `email-templates/fixtures/manual-smtp.html`,
-together with the `manual-smtp` workflow, is a working example against the local MailHog sink.
+directory is rejected and the connector step fails. `email-templates/fixtures/manual-smtp.html` is a
+working example, referenced as `"templatePath": "fixtures/manual-smtp.html"`.
 
 ## Add an SSO provider
 

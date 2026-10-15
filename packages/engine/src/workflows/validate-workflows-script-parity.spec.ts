@@ -94,7 +94,7 @@ describe('validate-workflows.cjs parity with WorkflowFileLoaderService', () => {
       const loader = await createLoader(undefined);
 
       expect(script.collectFiles('workflows/fixtures', true)).toEqual(
-        loader.load(['fixtures']).map((file) => file.filePath),
+        (await loader.load(['fixtures'])).map((file) => file.filePath),
       );
     });
 
@@ -106,7 +106,7 @@ describe('validate-workflows.cjs parity with WorkflowFileLoaderService', () => {
       const usersTarget = script.defaultTargets()[WORKFLOW_SCOPES.indexOf('users')];
 
       expect(script.collectFiles(usersTarget, true)).toEqual(
-        loader.load(['users']).map((file) => file.filePath),
+        (await loader.load(['users'])).map((file) => file.filePath),
       );
     });
 

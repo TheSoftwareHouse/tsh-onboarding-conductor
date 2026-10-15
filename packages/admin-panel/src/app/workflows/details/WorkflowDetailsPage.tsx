@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import { useEffect, type ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ReactFlowProvider } from '@xyflow/react';
 import { HttpStatusCode } from 'axios';
@@ -11,12 +11,15 @@ import type { WorkflowDefinition } from '@/api/workflows/workflow-definitions';
 import type { ApiError } from '@/services/api/api-error';
 import {
   WORKFLOW_VERSION_STATUS,
+  type WorkflowVersion,
   type WorkflowVersionStatus,
 } from '@/api/workflows/workflow-versions';
 import { ADMIN_ROUTES } from '@/constants/routes';
-import { WorkflowGraph } from './components/WorkflowGraph/WorkflowGraph';
+import { NewDraftDialog } from '../components/NewDraftDialog/NewDraftDialog';
 import { DraftEditor, type DraftHeaderSlots } from './components/DraftEditor/DraftEditor';
-import { StepInspector } from './components/StepInspector/StepInspector';
+import { VersionDocument } from './components/VersionDocument/VersionDocument';
+import { VersionGraph } from './components/VersionGraph';
+import { VersionTabs } from './components/VersionTabs/VersionTabs';
 import { WorkflowDetailsHeader } from './components/WorkflowDetailsHeader';
 import { WorkflowStats } from './components/WorkflowStats';
 import { useWorkflowDetailsSearchParams } from './hooks/useWorkflowDetailsSearchParams';
@@ -71,6 +74,25 @@ function VersionsFailure({
   );
 }
 
+/** Why the versions list leaves nothing to show for this URL, or null when it holds a version to open. */
+function findMissingVersionMessage(
+  versions: WorkflowVersion[],
+  pinnedVersion: number | null,
+): string | null {
+  if (pinnedVersion !== null) {
+    return versions.some((entry) => entry.version === pinnedVersion)
+      ? null
+      : `Version ${pinnedVersion} does not exist.`;
+  }
+  // Unpinned, the page opens the highest published version, or else the draft.
+  const hasOpenable = versions.some(
+    (entry) =>
+      entry.status === WORKFLOW_VERSION_STATUS.published ||
+      entry.status === WORKFLOW_VERSION_STATUS.draft,
+  );
+  return hasOpenable ? null : 'This workflow has no published version.';
+}
+
 interface VersionContentProps {
   workflowId: string;
   details: WorkflowDefinition | null;
@@ -109,25 +131,18 @@ function VersionContent({
     return <Failure message={`Unable to load this version: ${error.message}`} onRetry={onRetry} />;
   }
 
-  const selectedStep =
-    details?.steps.find((step) => step.name === requestedStep) ??
-    details?.steps.find((step) => step.name === details.initialStep);
-
-  if (details === null || selectedStep === undefined) {
+  if (details === null) {
     return <StatusRegion className="px-8 py-6">Loading version…</StatusRegion>;
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-hidden">
-      <div className="flex min-h-110 min-w-0 shrink-0 border-b border-border-rule bg-bg-subtle xl:min-h-0 xl:shrink xl:grow xl:basis-160 xl:border-r xl:border-b-0 [&_.react-flow]:bg-transparent">
-        <WorkflowGraph
-          definition={details}
-          selectedStep={selectedStep.name}
-          onSelectStep={onSelectStep}
-        />
-      </div>
-      <StepInspector workflowId={workflowId} step={selectedStep} versionStatus={versionStatus} />
-    </div>
+    <VersionGraph
+      workflowId={workflowId}
+      definition={details}
+      requestedStep={requestedStep}
+      versionStatus={versionStatus}
+      onSelectStep={onSelectStep}
+    />
   );
 }
 
@@ -142,9 +157,22 @@ export function WorkflowDetailsPage(): ReactElement {
     isError: isVersionsError,
     isSuccess: isVersionsSuccess,
     isFetching: isVersionsFetching,
+    isFetchedAfterMount: isVersionsFetchedAfterMount,
     error: versionsError,
     refetch: refetchVersions,
   } = useQuery(workflowQueries.versions(workflowId));
+  // A cached list predates any version published elsewhere since, so it is re-read before a pinned version is called missing.
+  const isVersionsStale =
+    params.version !== null &&
+    isVersionsSuccess &&
+    !isVersionsFetchedAfterMount &&
+    !versions.some((entry) => entry.version === params.version);
+
+  useEffect(() => {
+    if (isVersionsStale) {
+      void refetchVersions({ cancelRefetch: false });
+    }
+  }, [isVersionsStale, refetchVersions]);
   // The unpinned read serves only published versions, so a family without one opens its draft.
   const fallbackDraft =
     params.version === null &&
@@ -158,18 +186,31 @@ export function WorkflowDetailsPage(): ReactElement {
     requestedVersion !== null &&
     (requestedStatus === WORKFLOW_VERSION_STATUS.draft ||
       (requestedStatus === undefined && isVersionsFetching));
+  // Judged on a settled list only, so a refetch after a write never flashes it.
+  const missingVersionMessage =
+    isVersionsSuccess && !isVersionsFetching && !isVersionsStale
+      ? findMissingVersionMessage(versions, params.version)
+      : null;
   const {
     data: details = null,
     error: detailsError,
     refetch: refetchDetails,
   } = useQuery({
     ...workflowQueries.detail(workflowId, requestedVersion ?? undefined),
-    enabled: !holdDetails,
+    enabled: !holdDetails && !isVersionsStale && missingVersionMessage === null,
   });
   const version = requestedVersion ?? details?.workflowVersion ?? null;
   const versionStatus = versions.find((entry) => entry.version === version)?.status ?? null;
   const isDraft = requestedVersion !== null && requestedStatus === WORKFLOW_VERSION_STATUS.draft;
   const backSearch = stripDetailsParams(search);
+
+  const isReadOnlyVersion =
+    versionStatus === WORKFLOW_VERSION_STATUS.published ||
+    versionStatus === WORKFLOW_VERSION_STATUS.retired;
+  const newVersionAction =
+    isReadOnlyVersion && version !== null ? (
+      <NewDraftDialog initialFork={{ workflowId, version }} />
+    ) : undefined;
 
   const renderHeader = (slots: DraftHeaderSlots = {}): ReactElement => (
     <WorkflowDetailsHeader
@@ -179,7 +220,7 @@ export function WorkflowDetailsPage(): ReactElement {
       version={version}
       backSearch={backSearch}
       onVersionChange={params.setVersion}
-      actions={slots.actions}
+      actions={slots.actions ?? newVersionAction}
       note={slots.note}
     />
   );
@@ -200,7 +241,9 @@ export function WorkflowDetailsPage(): ReactElement {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {renderHeader()}
-      {isVersionsPending && <StatusRegion className="px-8 py-6">Loading workflow…</StatusRegion>}
+      {(isVersionsPending || isVersionsStale) && (
+        <StatusRegion className="px-8 py-6">Loading workflow…</StatusRegion>
+      )}
       {isVersionsError && (
         <VersionsFailure
           workflowId={workflowId}
@@ -209,20 +252,48 @@ export function WorkflowDetailsPage(): ReactElement {
           onRetry={() => void refetchVersions()}
         />
       )}
-      {isVersionsSuccess && (
-        <ReactFlowProvider>
-          <WorkflowStats definition={details} />
-          <VersionContent
-            workflowId={workflowId}
-            details={details}
-            error={detailsError}
-            requestedVersion={requestedVersion}
-            requestedStep={params.step}
-            versionStatus={versionStatus}
-            onSelectStep={params.setStep}
-            onRetry={() => void refetchDetails()}
-          />
-        </ReactFlowProvider>
+      {isVersionsSuccess && missingVersionMessage !== null && (
+        <StatusRegion className="px-8 py-6">
+          {missingVersionMessage} Choose one from the version list.
+        </StatusRegion>
+      )}
+      {isVersionsSuccess && !isVersionsStale && missingVersionMessage === null && (
+        <VersionTabs
+          key={version}
+          value={params.view ?? 'graph'}
+          onValueChange={params.setView}
+          graph={
+            <ReactFlowProvider>
+              <WorkflowStats definition={details} />
+              <VersionContent
+                workflowId={workflowId}
+                details={details}
+                error={detailsError}
+                requestedVersion={requestedVersion}
+                requestedStep={params.step}
+                versionStatus={versionStatus}
+                onSelectStep={params.setStep}
+                onRetry={() => void refetchDetails()}
+              />
+            </ReactFlowProvider>
+          }
+          json={
+            version === null ? (
+              <VersionContent
+                workflowId={workflowId}
+                details={null}
+                error={detailsError}
+                requestedVersion={requestedVersion}
+                requestedStep={null}
+                versionStatus={null}
+                onSelectStep={params.setStep}
+                onRetry={() => void refetchDetails()}
+              />
+            ) : (
+              <VersionDocument workflowId={workflowId} version={version} />
+            )
+          }
+        />
       )}
     </div>
   );

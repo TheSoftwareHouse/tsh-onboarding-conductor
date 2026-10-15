@@ -1,4 +1,4 @@
-import { queryOptions } from '@tanstack/react-query';
+import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 import { fetchAdminWorkflows, type AdminWorkflowQueryFilters } from './admin-workflows';
 import { fetchWorkflowDefinition } from './workflow-definitions';
 import { fetchWorkflowDocument } from './workflow-drafts';
@@ -12,6 +12,15 @@ export const workflowQueries = {
     queryOptions({
       queryKey: [...workflowQueries.lists(), filters],
       queryFn: () => fetchAdminWorkflows(filters),
+    }),
+  /** The list read page after page, for a picker that loads more as it scrolls. */
+  listPages: (filters: Omit<AdminWorkflowQueryFilters, 'page'>) =>
+    infiniteQueryOptions({
+      queryKey: [...workflowQueries.lists(), filters],
+      queryFn: ({ pageParam }) => fetchAdminWorkflows({ ...filters, page: pageParam }),
+      initialPageParam: 1,
+      getNextPageParam: ({ pagination }) =>
+        pagination.page < pagination.totalPages ? pagination.page + 1 : undefined,
     }),
   details: () => [...workflowQueries.all(), 'details'] as const,
   /** One workflow's reads — every version's definition and document and the versions list — so one invalidation covers them all. */

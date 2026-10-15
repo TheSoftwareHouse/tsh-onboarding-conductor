@@ -1527,58 +1527,6 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
     });
   });
 
-  it('accepts the representative manual smtp workflow fixture', () => {
-    const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
-    const workflowPath = [
-      process.cwd(),
-      '..',
-      '..',
-      '..',
-      'workflows',
-      'fixtures',
-      'manual-smtp.workflow.json',
-    ].join('/');
-    const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
-    const normalized = validateAndNormalizeUntypedSteps(input);
-
-    expect(normalized.id).toBe('manual-smtp');
-    expect(normalized.stepsByName.collect_message.connectors[0]).toMatchObject({
-      id: 'smtp',
-      type: 'email_delivery',
-      fieldMapping: {
-        recipient: 'recipient',
-        subject: 'subject',
-        firstName: 'firstName',
-      },
-      optionalFieldMapping: {},
-      config: {
-        templatePath: 'fixtures/manual-smtp.html',
-      },
-    });
-    expect(normalized.stepsByName.collect_message.data.recipient).toMatchObject({
-      type: 'text',
-      required: true,
-      validation: {
-        format: 'email',
-      },
-    });
-    expect(normalized.stepsByName.collect_message.data.subject).toMatchObject({
-      type: 'text',
-      required: true,
-      validation: {
-        maxLength: 998,
-      },
-    });
-    expect(normalized.stepsByName.collect_message.data.firstName).toMatchObject({
-      type: 'text',
-      required: true,
-      validation: {
-        maxLength: 200,
-      },
-    });
-    expect(normalized.stepsByName.approved.terminal).toBe(true);
-  });
-
   it('normalizes the legacy string alias to text', () => {
     const input = workflow();
     const email = ((input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>)

@@ -108,23 +108,30 @@ const CASES = [
     },
   },
   {
-    name: 'fixture-pair',
+    name: 'fixture-single-file',
     skill: 'creating-workflows',
     prompt:
       'Add a fixture workflow under workflows/fixtures that demonstrates a risk-score step routing to ' +
-      'three different outcomes. Call it mock-risk-routing.',
-    rule: 'A fixture ships as a pair: <id>.workflow.json in custom steps and <id>-typed.workflow.json with none.',
-    grade: ({ changedFiles }) => {
+      'three different outcomes, for a new e2e suite to start onboardings on. Call it mock-risk-routing.',
+    rule: 'A new fixture is one <id>.workflow.json in specialized step types, with no custom step.',
+    grade: ({ changedFiles, sandbox }) => {
       const added = changedFiles
         .filter((file) => file.status === '??' && file.path.startsWith('workflows/fixtures/'))
         .map((file) => file.path);
 
-      const untyped = added.filter((path) => !path.endsWith('-typed.workflow.json'));
-      const typed = added.filter((path) => path.endsWith('-typed.workflow.json'));
+      if (added.length !== 1) {
+        return {
+          passed: false,
+          detail: added.length === 0 ? 'added nothing' : `added ${added.join(', ')}`,
+        };
+      }
+
+      const steps = readJson(sandbox, added[0])?.steps ?? [];
+      const customSteps = steps.filter((step) => step.type === 'custom').length;
 
       return {
-        passed: untyped.length === 1 && typed.length === 1,
-        detail: added.length === 0 ? 'added nothing' : `added ${added.join(', ')}`,
+        passed: steps.length > 0 && customSteps === 0,
+        detail: `${added[0]}: ${steps.length} steps, ${customSteps} custom`,
       };
     },
   },
@@ -137,10 +144,7 @@ const CASES = [
     rule: 'retry without errorHandler is a silent no-op; a binding that retries names retry_then_fallback.',
     grade: ({ changedFiles, sandbox }) => {
       const added = changedFiles.filter(
-        (file) =>
-          file.status === '??' &&
-          file.path.startsWith('workflows/fixtures/') &&
-          !file.path.endsWith('-typed.workflow.json'),
+        (file) => file.status === '??' && file.path.startsWith('workflows/fixtures/'),
       );
 
       if (added.length === 0) {
@@ -166,10 +170,7 @@ const CASES = [
     rule: 'Every non-optional port of every step is wired, and the document compiles and validates.',
     grade: ({ changedFiles, sandbox }) => {
       const added = changedFiles.filter(
-        (file) =>
-          file.status === '??' &&
-          file.path.startsWith('workflows/fixtures/') &&
-          !file.path.endsWith('-typed.workflow.json'),
+        (file) => file.status === '??' && file.path.startsWith('workflows/fixtures/'),
       );
 
       if (added.length === 0) {

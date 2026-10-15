@@ -9,12 +9,13 @@ import type {
 import { parseHttpConnectorConfig } from '../connectors/adapters/built-in/http-request/http-request-config';
 import { parseKycConfig } from '../connectors/adapters/built-in/kyc/kyc-config';
 import type { KycDocumentMapping } from '../connectors/adapters/built-in/kyc/kyc-config';
-import { KYC_RETRY_TARGETS } from '../connectors/adapters/built-in/kyc/kyc-contract';
+import { KYC_OUTCOMES, KYC_RETRY_TARGETS } from '../connectors/adapters/built-in/kyc/kyc-contract';
 import type { KycCallbackSubmission } from '../connectors/adapters/built-in/kyc/kyc-contract';
 import { toAlpha3 } from '../connectors/adapters/built-in/kyc/kyc-country';
 import { parseSumsubConfig } from '../connectors/adapters/built-in/sumsub-kyc/sumsub-config';
 import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';
 import { Step } from './domain/step';
+import { Workflow } from './domain/workflow';
 import { BUILT_IN_WORKFLOWS_DIR } from './workflow-roots';
 
 const SUMSUB_CONNECTOR_ID = 'sumsub_kyc';
@@ -410,6 +411,40 @@ describe('built-in workflows', () => {
             expect(validate(body)).toBe(true);
           },
         );
+
+        const evaluateCallback = (submittedData: Record<string, unknown>) =>
+          new Workflow(definition).evaluate({
+            currentStep: parkedStep(definition)[0].name,
+            submittedData,
+            onboardingContext: {},
+            onboardingId: 'onboarding-kyc-callback-test',
+            onboardingScores: {},
+          });
+
+        it('routes each kycOutcome value to a distinct target', async () => {
+          const targets = new Set<string>();
+
+          for (const kycOutcome of KYC_OUTCOMES) {
+            const result = await evaluateCallback(
+              kycOutcome === 'retry'
+                ? { kycOutcome, kycRetryStep: KYC_RETRY_TARGETS[0] }
+                : { kycOutcome },
+            );
+
+            expect(result.isAccepted()).toBe(true);
+            const nextState = result.getNextState();
+            targets.add(`${nextState?.status}:${nextState?.currentStep}`);
+          }
+
+          expect(targets.size).toBe(KYC_OUTCOMES.length);
+        });
+
+        it('refuses an undeclared kycOutcome value at the compiled schema', async () => {
+          const result = await evaluateCallback({ kycOutcome: 'escalated' });
+
+          expect(result.isRetryableInvalidData()).toBe(true);
+          expect(Object.keys(result.getErrors())).toContain('kycOutcome');
+        });
 
         it('routes every retry back to a step that owns the data the docSet reset', () => {
           const [step] = parkedStep(definition);

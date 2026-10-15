@@ -29,7 +29,13 @@ const OPERATOR_OBJECT_ID = '9f3c0000-0000-0000-0000-0000000000ee';
 const SYNC_WORKFLOW_ID = 'connector-selection-e2e-sync';
 const REFUSALS_WORKFLOW_ID = 'connector-selection-e2e-refusals';
 const ASYNC_WORKFLOW_ID = 'connector-selection-e2e-async';
-const WORKFLOW_IDS = [SYNC_WORKFLOW_ID, REFUSALS_WORKFLOW_ID, ASYNC_WORKFLOW_ID];
+const VERSIONED_WORKFLOW_ID = 'connector-selection-e2e-versioned';
+const WORKFLOW_IDS = [
+  SYNC_WORKFLOW_ID,
+  REFUSALS_WORKFLOW_ID,
+  ASYNC_WORKFLOW_ID,
+  VERSIONED_WORKFLOW_ID,
+];
 const UNKNOWN_WORKFLOW_ID = 'connector-selection-e2e-unknown';
 
 const ASYNC_PROVIDER_ID = 'mock_async_callback';
@@ -132,8 +138,15 @@ const asyncWorkflow = {
   steps: [customStep('await_provider', 'done', asyncCallbackFields, [asyncSlot()]), doneStep],
 };
 
+const versionedWorkflow = (version: number) => ({
+  id: VERSIONED_WORKFLOW_ID,
+  version,
+  initial: 'verify',
+  steps: [customStep('verify', 'done', emailField, [mockKycSlot()]), doneStep],
+});
+
 const writeWorkflows = (directory: string) => {
-  for (const document of [syncWorkflow, refusalsWorkflow, asyncWorkflow]) {
+  for (const document of [syncWorkflow, refusalsWorkflow, asyncWorkflow, versionedWorkflow(1)]) {
     writeFileSync(path.join(directory, `${document.id}.workflow.json`), JSON.stringify(document));
   }
 };
@@ -143,6 +156,7 @@ type ProjectedConnector = {
   authoredId: string;
   selected: boolean;
   selectableIds: string[];
+  versions: Array<{ version: number; id: string; authoredId: string; selected: boolean }>;
 };
 
 type AuditRow = {
@@ -173,16 +187,28 @@ describe('Admin workflow connector selection (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send(body);
 
-  const clearConnector = (workflowId: string, stepName: string) =>
+  const clearConnector = (
+    workflowId: string,
+    stepName: string,
+    query = 'scope=version&version=1',
+  ) =>
     http()
-      .delete(`/v1/admin/workflows/${workflowId}/steps/${stepName}/connector`)
+      .delete(`/v1/admin/workflows/${workflowId}/steps/${stepName}/connector?${query}`)
       .set('Authorization', `Bearer ${token}`);
 
-  const getDefinition = (workflowId: string) =>
-    http().get(`/v1/admin/workflows/${workflowId}`).set('Authorization', `Bearer ${token}`);
+  const getDefinition = (workflowId: string, version?: number) =>
+    http()
+      .get(
+        `/v1/admin/workflows/${workflowId}${version === undefined ? '' : `/versions/${version}`}`,
+      )
+      .set('Authorization', `Bearer ${token}`);
 
-  const readSlot = async (workflowId: string, stepName: string): Promise<ProjectedConnector> => {
-    const response = await getDefinition(workflowId).expect(200);
+  const readSlot = async (
+    workflowId: string,
+    stepName: string,
+    version?: number,
+  ): Promise<ProjectedConnector> => {
+    const response = await getDefinition(workflowId, version).expect(200);
     const step = (
       response.body.steps as Array<{ name: string; connectors: ProjectedConnector[] }>
     ).find((candidate) => candidate.name === stepName);
@@ -202,6 +228,33 @@ describe('Admin workflow connector selection (e2e)', () => {
 
     return onboardingId;
   };
+
+  const createDraft = (document: object) =>
+    http()
+      .post('/v1/admin/workflows')
+      .set('Authorization', `Bearer ${token}`)
+      .send(document)
+      .expect(201);
+
+  const publishVersion = (workflowId: string, version: number) =>
+    http()
+      .post(`/v1/admin/workflows/${workflowId}/versions/${version}/publish`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+  const readSelectionRows = (workflowId: string, stepName: string) =>
+    dataSource.query<Array<{ version: number; connector_id: string }>>(
+      `SELECT s.version, s.connector_id FROM workflow_connector_selections s
+         JOIN workflows w ON w.workflow_id = s.workflow_id
+        WHERE w.key = $1 AND s.step_name = $2 ORDER BY s.version`,
+      [workflowId, stepName],
+    );
+
+  const submitEmail = (onboardingId: string) =>
+    http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect(201);
 
   const readAuditRows = (workflowId: string): Promise<AuditRow[]> =>
     dataSource.query(
@@ -343,6 +396,8 @@ describe('Admin workflow connector selection (e2e)', () => {
 
       const selected = await selectConnector(SYNC_WORKFLOW_ID, 'verify', {
         connectorId: 'mock_kyc_2',
+        scope: 'version',
+        version: 1,
       }).expect(200);
 
       expect(selected.body).toMatchObject({
@@ -384,8 +439,9 @@ describe('Admin workflow connector selection (e2e)', () => {
           metadata: {
             workflowId: SYNC_WORKFLOW_ID,
             stepName: 'verify',
-            previousConnectorId: null,
             connectorId: 'mock_kyc_2',
+            scope: 'version',
+            versions: [{ version: 1, previousConnectorId: null }],
           },
         },
       ]);
@@ -408,8 +464,9 @@ describe('Admin workflow connector selection (e2e)', () => {
         metadata: {
           workflowId: SYNC_WORKFLOW_ID,
           stepName: 'verify',
-          previousConnectorId: 'mock_kyc_2',
           connectorId: null,
+          scope: 'version',
+          versions: [{ version: 1, previousConnectorId: 'mock_kyc_2' }],
         },
       });
     });
@@ -419,18 +476,24 @@ describe('Admin workflow connector selection (e2e)', () => {
     it('answers 404 for an unknown family and for a step no version declares', async () => {
       const unknownFamily = await selectConnector(UNKNOWN_WORKFLOW_ID, 'verify', {
         connectorId: 'mock_kyc_2',
+        scope: 'all',
       }).expect(404);
       expect(unknownFamily.body).toMatchObject({ code: 'WORKFLOW_NOT_FOUND' });
 
       const unknownStep = await selectConnector(SYNC_WORKFLOW_ID, 'no_such_step', {
         connectorId: 'mock_kyc_2',
+        scope: 'all',
       }).expect(404);
       expect(unknownStep.body).toMatchObject({
         code: 'WORKFLOW_STEP_NOT_FOUND',
         stepName: 'no_such_step',
       });
 
-      const clearUnknownFamily = await clearConnector(UNKNOWN_WORKFLOW_ID, 'verify').expect(404);
+      const clearUnknownFamily = await clearConnector(
+        UNKNOWN_WORKFLOW_ID,
+        'verify',
+        'scope=all',
+      ).expect(404);
       expect(clearUnknownFamily.body).toMatchObject({ code: 'WORKFLOW_NOT_FOUND' });
     });
 
@@ -443,7 +506,11 @@ describe('Admin workflow connector selection (e2e)', () => {
       ['callback_fields_missing', REFUSALS_WORKFLOW_ID, 'kyc_step', 'veriff_kyc'],
       ['declaration_invalid', REFUSALS_WORKFLOW_ID, 'sumsub_step', 'sumsub_kyc'],
     ])('answers 400 %s', async (reason, workflowId, stepName, connectorId) => {
-      const response = await selectConnector(workflowId, stepName, { connectorId }).expect(400);
+      const response = await selectConnector(workflowId, stepName, {
+        connectorId,
+        scope: 'version',
+        version: 1,
+      }).expect(400);
 
       expect(response.body).toMatchObject({
         code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID',
@@ -473,10 +540,26 @@ describe('Admin workflow connector selection (e2e)', () => {
     it('answers 400 for a body that is not a connector id', async () => {
       const response = await selectConnector(SYNC_WORKFLOW_ID, 'verify', {
         connectorId: 'Not A Connector Id',
+        scope: 'all',
       }).expect(400);
 
       expect(response.body.message).toEqual(expect.arrayContaining([expect.any(String)]));
-      await selectConnector(SYNC_WORKFLOW_ID, 'verify', {}).expect(400);
+      await selectConnector(SYNC_WORKFLOW_ID, 'verify', { scope: 'all' }).expect(400);
+    });
+
+    it('answers 400 when the scope is missing, on both verbs', async () => {
+      const put = await selectConnector(SYNC_WORKFLOW_ID, 'verify', {
+        connectorId: 'mock_kyc_2',
+      }).expect(400);
+      expect(put.body.message).toEqual(expect.arrayContaining([expect.stringContaining('scope')]));
+
+      const remove = await clearConnector(SYNC_WORKFLOW_ID, 'verify', '').expect(400);
+      expect(remove.body.message).toEqual(
+        expect.arrayContaining([expect.stringContaining('scope')]),
+      );
+      await expect(readSlot(SYNC_WORKFLOW_ID, 'verify')).resolves.toMatchObject({
+        selected: false,
+      });
     });
   });
 
@@ -499,6 +582,8 @@ describe('Admin workflow connector selection (e2e)', () => {
 
       await selectConnector(ASYNC_WORKFLOW_ID, 'await_provider', {
         connectorId: ASYNC_PROVIDER_2_ID,
+        scope: 'version',
+        version: 1,
       }).expect(200);
 
       const onboardingB = await startOnboarding(ASYNC_WORKFLOW_ID);
@@ -547,9 +632,110 @@ describe('Admin workflow connector selection (e2e)', () => {
     });
   });
 
+  describe('selections per version', () => {
+    let onboardingOnV1: string;
+    let onboardingOnV2: string;
+
+    const spyKyc = () => ({
+      kyc1: jest
+        .spyOn(app.get(MockKyc1Connector), 'execute')
+        .mockResolvedValue(ConnectorExecutionResult.accepted()),
+      kyc2: jest
+        .spyOn(app.get(MockKyc2Connector), 'execute')
+        .mockResolvedValue(ConnectorExecutionResult.accepted()),
+    });
+
+    it('binds one version only: a run on the other version uses the authored adapter', async () => {
+      onboardingOnV1 = await startOnboarding(VERSIONED_WORKFLOW_ID);
+      await createDraft(versionedWorkflow(2));
+      await publishVersion(VERSIONED_WORKFLOW_ID, 2);
+      await createDraft(versionedWorkflow(3));
+      onboardingOnV2 = await startOnboarding(VERSIONED_WORKFLOW_ID);
+
+      await selectConnector(VERSIONED_WORKFLOW_ID, 'verify', {
+        connectorId: 'mock_kyc_2',
+        scope: 'version',
+        version: 1,
+      }).expect(200);
+
+      await expect(readSelectionRows(VERSIONED_WORKFLOW_ID, 'verify')).resolves.toEqual([
+        { version: 1, connector_id: 'mock_kyc_2' },
+      ]);
+      await expect(readSlot(VERSIONED_WORKFLOW_ID, 'verify', 1)).resolves.toMatchObject({
+        id: 'mock_kyc_2',
+        selected: true,
+      });
+      await expect(readSlot(VERSIONED_WORKFLOW_ID, 'verify', 2)).resolves.toMatchObject({
+        id: 'mock_kyc_1',
+        selected: false,
+      });
+
+      const { kyc1, kyc2 } = spyKyc();
+      await submitEmail(onboardingOnV2);
+      expect(kyc1).toHaveBeenCalledTimes(1);
+      expect(kyc2).not.toHaveBeenCalled();
+    });
+
+    it('binds the covered set and not the draft, and the draft shows what each version runs', async () => {
+      await selectConnector(VERSIONED_WORKFLOW_ID, 'verify', {
+        connectorId: 'mock_kyc_2',
+        scope: 'all',
+      }).expect(200);
+
+      await expect(readSelectionRows(VERSIONED_WORKFLOW_ID, 'verify')).resolves.toEqual([
+        { version: 1, connector_id: 'mock_kyc_2' },
+        { version: 2, connector_id: 'mock_kyc_2' },
+      ]);
+      const draft = await readSlot(VERSIONED_WORKFLOW_ID, 'verify', 3);
+      expect(draft).toMatchObject({ id: 'mock_kyc_1', authoredId: 'mock_kyc_1', selected: false });
+      expect(draft.versions).toEqual([
+        { version: 1, id: 'mock_kyc_2', authoredId: 'mock_kyc_1', selected: true },
+        { version: 2, id: 'mock_kyc_2', authoredId: 'mock_kyc_1', selected: true },
+        { version: 3, id: 'mock_kyc_1', authoredId: 'mock_kyc_1', selected: false },
+      ]);
+
+      const { kyc1, kyc2 } = spyKyc();
+      await submitEmail(onboardingOnV1);
+      expect(kyc2).toHaveBeenCalledTimes(1);
+      expect(kyc1).not.toHaveBeenCalled();
+    });
+
+    it('clears one version and keeps the other versions row', async () => {
+      await clearConnector(VERSIONED_WORKFLOW_ID, 'verify', 'scope=version&version=1').expect(204);
+
+      await expect(readSelectionRows(VERSIONED_WORKFLOW_ID, 'verify')).resolves.toEqual([
+        { version: 2, connector_id: 'mock_kyc_2' },
+      ]);
+    });
+
+    it('runs the authored adapter on a published draft, while a pinned onboarding keeps the selection', async () => {
+      const pinnedToV2 = await startOnboarding(VERSIONED_WORKFLOW_ID);
+      await publishVersion(VERSIONED_WORKFLOW_ID, 3);
+      const unpinned = await startOnboarding(VERSIONED_WORKFLOW_ID);
+
+      const { kyc1, kyc2 } = spyKyc();
+      await submitEmail(unpinned);
+      expect(kyc1).toHaveBeenCalledTimes(1);
+      expect(kyc2).not.toHaveBeenCalled();
+      await submitEmail(pinnedToV2);
+      expect(kyc2).toHaveBeenCalledTimes(1);
+      await expect(readSelectionRows(VERSIONED_WORKFLOW_ID, 'verify')).resolves.toEqual([
+        { version: 2, connector_id: 'mock_kyc_2' },
+      ]);
+      await expect(readSlot(VERSIONED_WORKFLOW_ID, 'verify', 3)).resolves.toMatchObject({
+        id: 'mock_kyc_1',
+        selected: false,
+      });
+    });
+  });
+
   describe('the compile dry run', () => {
     it('reports the authored connector while a selection is stored', async () => {
-      await selectConnector(SYNC_WORKFLOW_ID, 'verify', { connectorId: 'mock_kyc_2' }).expect(200);
+      await selectConnector(SYNC_WORKFLOW_ID, 'verify', {
+        connectorId: 'mock_kyc_2',
+        scope: 'version',
+        version: 1,
+      }).expect(200);
 
       try {
         const response = await http()

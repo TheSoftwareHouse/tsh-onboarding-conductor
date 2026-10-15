@@ -1,4 +1,4 @@
-import { EntityManager } from 'typeorm';
+import { EntityManager, In } from 'typeorm';
 import { WorkflowConnectorSelectionEntity } from './entity/workflow-connector-selection.entity';
 
 /** Moves the operator's per-step connector choices in and out of Postgres. */
@@ -23,15 +23,27 @@ export class WorkflowConnectorSelectionsRepository {
     return manager.getRepository(WorkflowConnectorSelectionEntity).find({ where: { workflowId } });
   }
 
-  /** The stored selection of one step, or `null` when the step runs its authored connector. */
-  async find(
+  /** Every selection of one published version — what a resolution applies to its definition. */
+  async findByVersion(
+    manager: EntityManager,
+    workflowId: string,
+    version: number,
+  ): Promise<WorkflowConnectorSelectionEntity[]> {
+    return manager
+      .getRepository(WorkflowConnectorSelectionEntity)
+      .find({ where: { workflowId, version } });
+  }
+
+  /** The stored selections of one step on the given versions; a version with none is absent. */
+  async findForStep(
     manager: EntityManager,
     workflowId: string,
     stepName: string,
-  ): Promise<WorkflowConnectorSelectionEntity | null> {
+    versions: number[],
+  ): Promise<WorkflowConnectorSelectionEntity[]> {
     return manager
       .getRepository(WorkflowConnectorSelectionEntity)
-      .findOne({ where: { workflowId, stepName } });
+      .find({ where: { workflowId, stepName, version: In(versions) } });
   }
 
   /** Every selection of every family, with the family loaded, for the boot sweep. */
@@ -41,31 +53,37 @@ export class WorkflowConnectorSelectionsRepository {
       .find({ relations: { workflow: true } });
   }
 
-  /** Stores the choice for a step: inserts it the first time, replaces the connector after. */
+  /** Stores the choice for a step on one version: inserts it the first time, replaces it after. */
   async upsert(
     manager: EntityManager,
     workflowId: string,
+    version: number,
     stepName: string,
     connectorId: string,
     updatedBy: string | null,
   ): Promise<void> {
     await manager.query(
-      `INSERT INTO workflow_connector_selections (workflow_id, step_name, connector_id, updated_at, updated_by)
-       VALUES ($1, $2, $3, now(), $4)
+      `INSERT INTO workflow_connector_selections (workflow_id, version, step_name, connector_id, updated_at, updated_by)
+       VALUES ($1, $2, $3, $4, now(), $5)
        ON CONFLICT ON CONSTRAINT pk_workflow_connector_selections DO UPDATE
          SET connector_id = EXCLUDED.connector_id,
              updated_at = now(),
              updated_by = EXCLUDED.updated_by`,
-      [workflowId, stepName, connectorId, updatedBy],
+      [workflowId, version, stepName, connectorId, updatedBy],
     );
   }
 
-  /** Drops the choice, returning the step to its authored connector; whether a row existed. */
-  async delete(manager: EntityManager, workflowId: string, stepName: string): Promise<boolean> {
+  /** Drops the choice on the given versions, returning them to the authored connector; rows removed. */
+  async delete(
+    manager: EntityManager,
+    workflowId: string,
+    stepName: string,
+    versions: number[],
+  ): Promise<number> {
     const result = await manager
       .getRepository(WorkflowConnectorSelectionEntity)
-      .delete({ workflowId, stepName });
+      .delete({ workflowId, stepName, version: In(versions) });
 
-    return (result.affected ?? 0) > 0;
+    return result.affected ?? 0;
   }
 }

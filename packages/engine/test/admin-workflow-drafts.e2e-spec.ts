@@ -427,13 +427,48 @@ describe('Admin workflow drafts (e2e)', () => {
         status: 'published',
       };
 
-      const document = await getDocument(PUBLISHED_ID, 1).expect(409);
-      expect(document.body).toEqual(expected);
       await put(PUBLISHED_ID, 1, invalidDraft(PUBLISHED_ID, 1)).expect(409).expect(expected);
       await del(PUBLISHED_ID, 1).expect(409).expect(expected);
 
       expect(await findRows(PUBLISHED_ID)).toEqual(before);
       await getVersion(PUBLISHED_ID, 1).expect(200);
+    });
+
+    it('serves the stored document of a published version', async () => {
+      const [row] = await findRows(PUBLISHED_ID);
+
+      const response = await getDocument(PUBLISHED_ID, 1).expect(200);
+
+      expect(response.body).toMatchObject({
+        workflowId: PUBLISHED_ID,
+        version: 1,
+        status: 'published',
+      });
+      expect(response.body.document).toEqual(row.definition);
+    });
+
+    it('serves the stored document of a retired version', async () => {
+      const [row] = await findRows(PUBLISHED_ID);
+      await dataSource.query(
+        `UPDATE workflow_versions SET status = 'retired' WHERE workflow_version_id = $1`,
+        [row.workflow_version_id],
+      );
+
+      try {
+        const response = await getDocument(PUBLISHED_ID, 1).expect(200);
+
+        expect(response.body).toMatchObject({ version: 1, status: 'retired' });
+        expect(response.body.document).toEqual(row.definition);
+      } finally {
+        await dataSource.query(
+          `UPDATE workflow_versions SET status = $2 WHERE workflow_version_id = $1`,
+          [row.workflow_version_id, row.status],
+        );
+      }
+    });
+
+    it('answers 404 for a version of a published family that was never stored', async () => {
+      await getDocument(PUBLISHED_ID, 7).expect(404).expect(NOT_FOUND);
     });
 
     it('refuses a second draft inserted by SQL at the partial index', async () => {

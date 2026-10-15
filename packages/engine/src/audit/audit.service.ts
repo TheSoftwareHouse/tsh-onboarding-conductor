@@ -21,6 +21,8 @@ import {
   getAuditEntryType,
   isAuditAction,
   ONBOARDING_AUDIT_RESOURCE_TYPE,
+  ONBOARDINGS_EXPORT_ACTIONS,
+  ONBOARDINGS_EXPORT_RESOURCE_TYPE,
   ONBOARDING_REJECTED_ATTEMPT_ACTION,
   PENDING_CONNECTOR_ACTIONS,
   WEBHOOK_ACTIONS,
@@ -69,6 +71,8 @@ import {
   type WorkflowDraftAuditInput,
   type WorkflowDraftAuditMetadata,
   type OnboardingTransitionAction,
+  type OnboardingsExportAuditInput,
+  type OnboardingsExportAuditMetadata,
   type WebhookResourceType,
 } from './audit.types';
 import { toPaginatedMeta } from '../pagination';
@@ -349,6 +353,33 @@ export class AuditService {
   }
 
   /**
+   * Records one CSV export of the filtered onboardings, written before the first byte streams.
+   *
+   * Writes in its own transaction like `logConnectorSettingsChange`. Metadata is limited to the
+   * filter criteria actually supplied and re-filtered on the way in, so no row data can reach it.
+   */
+  async logOnboardingsExport(
+    dataSource: DataSource,
+    input: OnboardingsExportAuditInput,
+  ): Promise<unknown> {
+    return dataSource.transaction((manager) =>
+      this.repository.insert(manager, {
+        actorType: 'operator',
+        actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
+        action: 'onboardings.exported',
+        entryType: getAuditEntryType('onboardings.exported'),
+        resourceType: ONBOARDINGS_EXPORT_RESOURCE_TYPE,
+        resourceId: 'onboardings',
+        metadata: this.filterOnboardingsExportMetadata(input.filters),
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      }),
+    );
+  }
+
+  /**
    * Records one step of the encryption story: an operator turning encryption on or off, adding a
    * key, the key that add supersedes, or a step of the background sweep.
    *
@@ -507,7 +538,7 @@ export class AuditService {
   }
 
   /**
-   * Records one workflow draft write: created, updated or deleted.
+   * Records one workflow draft write: created, updated, deleted or published.
    *
    * Writes on the caller's manager, so the row stands or falls with the draft write it describes.
    * The actor is always the operator behind the request.
@@ -666,6 +697,10 @@ export class AuditService {
       return this.filterWorkflowMetadata(metadata as WorkflowConnectorSelectionAuditMetadata);
     }
 
+    if (action !== undefined && this.isOnboardingsExportAction(action)) {
+      return this.filterOnboardingsExportMetadata(metadata as OnboardingsExportAuditMetadata);
+    }
+
     if (action !== undefined && this.isConnectorFailureAction(action)) {
       return this.filterConnectorFailureMetadata(metadata as ConnectorFailureAuditMetadata);
     }
@@ -760,6 +795,38 @@ export class AuditService {
     return safeMetadata;
   }
 
+  /** Allowlists export metadata to the filter criteria actually supplied, on the way in and out. */
+  private filterOnboardingsExportMetadata(
+    metadata: OnboardingsExportAuditMetadata,
+  ): OnboardingsExportAuditMetadata {
+    const {
+      status,
+      workflowId,
+      workflowVersion,
+      currentStep,
+      onboardingId,
+      agreementStatus,
+      parked,
+      pendingConnectorId,
+      parkedBefore,
+    } = metadata;
+    const allowed = {
+      status,
+      workflowId,
+      workflowVersion,
+      currentStep,
+      onboardingId,
+      agreementStatus,
+      parked,
+      pendingConnectorId,
+      parkedBefore,
+    };
+
+    return Object.fromEntries(
+      Object.entries(allowed).filter(([, value]) => value !== undefined && value !== null),
+    );
+  }
+
   /**
    * Allowlists connector-settings metadata down to key names, both on the way in and
    * again on the way out through the admin list endpoint — the same shape either way,
@@ -779,8 +846,19 @@ export class AuditService {
     return {
       workflowId: metadata.workflowId,
       stepName: metadata.stepName,
-      previousConnectorId: metadata.previousConnectorId,
       connectorId: metadata.connectorId,
+      ...(metadata.scope === undefined ? {} : { scope: metadata.scope }),
+      ...(metadata.versions === undefined
+        ? {}
+        : {
+            versions: metadata.versions.map(({ version, previousConnectorId }) => ({
+              version,
+              previousConnectorId,
+            })),
+          }),
+      ...(metadata.previousConnectorId === undefined
+        ? {}
+        : { previousConnectorId: metadata.previousConnectorId }),
     };
   }
 
@@ -1086,6 +1164,10 @@ export class AuditService {
 
   private isWorkflowAction(action: string): action is WorkflowAuditAction {
     return isAuditAction(WORKFLOW_ACTIONS, action);
+  }
+
+  private isOnboardingsExportAction(action: string): action is 'onboardings.exported' {
+    return isAuditAction(ONBOARDINGS_EXPORT_ACTIONS, action);
   }
 
   private isConnectorFailureAction(action: string): action is ConnectorFailureAuditAction {

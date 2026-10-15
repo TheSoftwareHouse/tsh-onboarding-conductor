@@ -1,6 +1,7 @@
 import type { ConnectorRejectionReason } from '@tsh/ddl-schema';
 import type { AgreementType } from '../agreements/agreement.types';
 import type { EncryptionKeyRotationInterval } from '../encryption/encryption-key-rotation';
+import type { ConnectorSelectionScope } from '../workflows/domain/connector-selection';
 import { generateUuidV7 } from '../utils/uuid.util';
 
 /**
@@ -126,6 +127,10 @@ export const WORKFLOW_ACTIONS = [
 ] as const;
 
 export type WorkflowAuditAction = (typeof WORKFLOW_ACTIONS)[number];
+/** An operator pulling the filtered onboardings out of the system as a CSV file. */
+export const ONBOARDINGS_EXPORT_ACTIONS = ['onboardings.exported'] as const;
+
+export type OnboardingsExportAuditAction = (typeof ONBOARDINGS_EXPORT_ACTIONS)[number];
 
 /**
  * One decision a connector's error handler returned: a retry, a fallback taking over, a
@@ -179,11 +184,12 @@ export const AGREEMENT_AUDIT_ACTIONS = [
 
 export type AgreementAuditAction = (typeof AGREEMENT_AUDIT_ACTIONS)[number];
 
-/** An operator creating, replacing or deleting a workflow draft through the admin API (ADR 0034). */
+/** An operator creating, replacing, deleting or publishing a workflow draft through the admin API (ADR 0034). */
 export const WORKFLOW_DRAFT_AUDIT_ACTIONS = [
   'workflow_draft.created',
   'workflow_draft.updated',
   'workflow_draft.deleted',
+  'workflow_draft.published',
 ] as const;
 
 export type WorkflowDraftAuditAction = (typeof WORKFLOW_DRAFT_AUDIT_ACTIONS)[number];
@@ -240,6 +246,7 @@ export type AuditAction =
   | AdminAccessAction
   | ConnectorSettingsAuditAction
   | WorkflowAuditAction
+  | OnboardingsExportAuditAction
   | ConnectorFailureAuditAction
   | ConnectorOutcomeAuditAction
   | ApiFailureAuditAction
@@ -312,6 +319,9 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   'workflow.connector_selected': 'success',
   'workflow.connector_selection_cleared': 'success',
 
+  // Collected data handed out of the system through the CSV export.
+  'onboardings.exported': 'success',
+
   // Connector error-handler decisions: recovered or not, the call decided about failed.
   'connector.failure_retried': 'failed',
   'connector.failure_fell_back': 'failed',
@@ -337,6 +347,7 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   'workflow_draft.created': 'success',
   'workflow_draft.updated': 'success',
   'workflow_draft.deleted': 'success',
+  'workflow_draft.published': 'success',
   // An operator's reconcile: the verdict it applied, or the ask that found nothing to apply.
   'onboarding.pending_connector_reconciled': 'success',
   'onboarding.pending_connector_reconcile_noop': 'observed',
@@ -519,8 +530,11 @@ export const WORKFLOW_RESOURCE_TYPE = 'workflow';
 export type WorkflowConnectorSelectionAuditMetadata = {
   workflowId: string;
   stepName: string;
-  previousConnectorId: string | null;
   connectorId: string | null;
+  scope?: ConnectorSelectionScope;
+  versions?: { version: number; previousConnectorId: string | null }[];
+  /** Rows written before selections were per version carry this instead of `scope` and `versions`. */
+  previousConnectorId?: string | null;
 };
 
 export type WorkflowAuditInput = {
@@ -529,6 +543,27 @@ export type WorkflowAuditInput = {
   actorId: string;
   resourceId: string;
   metadata: WorkflowConnectorSelectionAuditMetadata;
+};
+
+export const ONBOARDINGS_EXPORT_RESOURCE_TYPE = 'onboardings_export';
+
+/** Only the filter criteria actually supplied; never a row of exported data. */
+export type OnboardingsExportAuditMetadata = {
+  status?: string;
+  workflowId?: string;
+  workflowVersion?: number;
+  currentStep?: string;
+  onboardingId?: string;
+  agreementStatus?: string;
+  parked?: boolean;
+  pendingConnectorId?: string;
+  parkedBefore?: string;
+};
+
+export type OnboardingsExportAuditInput = {
+  /** The operator who exported, or the unknown-actor constant. */
+  actorId: string;
+  filters: OnboardingsExportAuditMetadata;
 };
 
 /** These rows are filed against the onboarding they happened to, reusing the same resource type. */

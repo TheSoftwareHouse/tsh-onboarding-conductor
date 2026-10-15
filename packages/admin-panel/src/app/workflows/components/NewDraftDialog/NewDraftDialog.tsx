@@ -5,10 +5,16 @@ import { Button } from '@/components/ui/Button/Button';
 import { Add, Close } from '@/components/ui/icons';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { useCreateWorkflowDraft } from '../../hooks/useCreateWorkflowDraft';
+import type { InitialFork } from './ForkSourceFields';
 import { NewDraftForm } from './NewDraftForm';
 
+export interface NewDraftDialogProps {
+  /** Opens the dialog on Fork with this version chosen. */
+  initialFork?: InitialFork;
+}
+
 /** The "New draft" button and the dialog it opens: pick a start, create the draft, land in its editor. */
-export function NewDraftDialog(): ReactElement {
+export function NewDraftDialog({ initialFork }: NewDraftDialogProps): ReactElement {
   const [open, setOpen] = useState(false);
   const createMutation = useCreateWorkflowDraft();
 
@@ -34,6 +40,7 @@ export function NewDraftDialog(): ReactElement {
               </Dialog.Close>
             </header>
             <NewDraftForm
+              initialFork={initialFork}
               isSubmitting={createMutation.isPending}
               onSubmit={(document) =>
                 createMutation.mutate(document, { onSuccess: () => setOpen(false) })

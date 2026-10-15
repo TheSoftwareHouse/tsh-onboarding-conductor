@@ -3,7 +3,7 @@ import type { WorkflowConnectorSelectionInvalidReason } from '../domain/connecto
 
 export class WorkflowConnectorSelectionInvalidException extends BadRequestException {
   static readonly apiDescription =
-    'The connector cannot serve the step in at least one non-retired version; carries `stepName`, ' +
+    'The connector cannot serve the step in at least one version the write targets; carries `stepName`, ' +
     '`connectorId`, the `workflowVersion` that refused it, a `reason` of `no_connector`, ' +
     '`multiple_connectors`, `in_fallback_chain`, `adapter_not_registered`, `fixture_not_allowed`, ' +
     '`type_mismatch`, `async_unsupported`, `callback_fields_missing` or `declaration_invalid`, ' +

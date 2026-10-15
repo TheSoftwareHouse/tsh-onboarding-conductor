@@ -1,9 +1,11 @@
-import { EntityManager, SelectQueryBuilder } from 'typeorm';
+import { EntityManager, In, SelectQueryBuilder } from 'typeorm';
 import { NOT_ACCEPTED_AGREEMENT_STATUS } from '../agreements/agreement.types';
 import { paginateQueryBuilder, resolvePaginationWindow, type PaginatedResult } from '../pagination';
 import { OnboardingAgreementStatusView } from './entity/onboarding-agreement-status.view';
 import { OnboardingEntity } from './entity/onboarding.entity';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
+
+export type AdminOnboardingFilters = Omit<ListAdminOnboardingsQueryDto, 'page' | 'limit'>;
 
 export interface InitialOnboardingData {
   id: string;
@@ -75,6 +77,87 @@ export class OnboardingsRepository {
   ): Promise<PaginatedResult<OnboardingEntity>> {
     const queryBuilder = this.createReadQueryBuilder(manager);
 
+    this.applyAdminFilters(queryBuilder, filters);
+
+    queryBuilder.orderBy('onboarding.createdAt', 'DESC').addOrderBy('onboarding.id', 'DESC');
+
+    return paginateQueryBuilder(queryBuilder, resolvePaginationWindow(filters));
+  }
+
+  async findAdminExportBatch(
+    manager: EntityManager,
+    filters: AdminOnboardingFilters,
+    afterId: string | null,
+    batchSize: number,
+  ): Promise<OnboardingEntity[]> {
+    const queryBuilder = this.createExportQueryBuilder(manager, filters);
+
+    // A row deleted mid-export would leave the subquery empty and end the export early; onboardings are never deleted today.
+    if (afterId !== null) {
+      queryBuilder.andWhere(
+        '(onboarding.createdAt, onboarding.id) < (SELECT o.created_at, o.id FROM onboardings o WHERE o.id = :lastId)',
+        { lastId: afterId },
+      );
+    }
+
+    const onboardings = await queryBuilder
+      .orderBy('onboarding.createdAt', 'DESC')
+      .addOrderBy('onboarding.id', 'DESC')
+      // Every join is to-one, so `limit` is exact; `take` would add a DISTINCT query and an id reload.
+      .limit(batchSize)
+      .getMany();
+
+    if (filters.agreementStatus !== undefined || onboardings.length === 0) {
+      return onboardings;
+    }
+
+    // Restricted by the view's grouping column, so Postgres reads only this batch's agreement rows.
+    const statuses = await manager.getRepository(OnboardingAgreementStatusView).find({
+      where: { onboardingId: In(onboardings.map((onboarding) => onboarding.id)) },
+    });
+    const statusesById = new Map(statuses.map((status) => [status.onboardingId, status]));
+
+    for (const onboarding of onboardings) {
+      onboarding.agreementStatusView = statusesById.get(onboarding.id);
+    }
+
+    return onboardings;
+  }
+
+  async findWorkflowVersionsForAdmin(
+    manager: EntityManager,
+    filters: AdminOnboardingFilters,
+  ): Promise<Array<{ workflowKey: string; version: number }>> {
+    const rows = await this.createExportQueryBuilder(manager, filters)
+      .select('workflow.key', 'workflowKey')
+      .addSelect('workflowVersion.version', 'version')
+      .distinct(true)
+      .orderBy('workflow.key', 'ASC')
+      .addOrderBy('workflowVersion.version', 'ASC')
+      .getRawMany<{ workflowKey: string; version: number | string }>();
+
+    return rows.map((row) => ({ workflowKey: row.workflowKey, version: Number(row.version) }));
+  }
+
+  /** The export's filtered read; joined, the view aggregates every agreement row, so only its filter joins it. */
+  private createExportQueryBuilder(
+    manager: EntityManager,
+    filters: AdminOnboardingFilters,
+  ): SelectQueryBuilder<OnboardingEntity> {
+    const queryBuilder =
+      filters.agreementStatus !== undefined
+        ? this.createReadQueryBuilder(manager)
+        : this.createWorkflowQueryBuilder(manager);
+
+    this.applyAdminFilters(queryBuilder, filters);
+
+    return queryBuilder;
+  }
+
+  private applyAdminFilters(
+    queryBuilder: SelectQueryBuilder<OnboardingEntity>,
+    filters: AdminOnboardingFilters,
+  ): void {
     if (filters.status !== undefined) {
       queryBuilder.andWhere('onboarding.status = :status', { status: filters.status });
     }
@@ -141,10 +224,6 @@ export class OnboardingsRepository {
         { parkedBefore: filters.parkedBefore },
       );
     }
-
-    queryBuilder.orderBy('onboarding.createdAt', 'DESC').addOrderBy('onboarding.id', 'DESC');
-
-    return paginateQueryBuilder(queryBuilder, resolvePaginationWindow(filters));
   }
 
   /**
@@ -163,6 +242,16 @@ export class OnboardingsRepository {
    * objects from.
    */
   private createReadQueryBuilder(manager: EntityManager): SelectQueryBuilder<OnboardingEntity> {
+    return this.createWorkflowQueryBuilder(manager).leftJoinAndMapOne(
+      'onboarding.agreementStatusView',
+      OnboardingAgreementStatusView,
+      'agreementStatusView',
+      'agreementStatusView.onboardingId = onboarding.id',
+    );
+  }
+
+  /** The read query with its two workflow joins but without the agreement-status view. */
+  private createWorkflowQueryBuilder(manager: EntityManager): SelectQueryBuilder<OnboardingEntity> {
     return manager
       .getRepository(OnboardingEntity)
       .createQueryBuilder('onboarding')
@@ -173,12 +262,6 @@ export class OnboardingsRepository {
         'workflowVersion.version',
         'workflow.workflowId',
         'workflow.key',
-      ])
-      .leftJoinAndMapOne(
-        'onboarding.agreementStatusView',
-        OnboardingAgreementStatusView,
-        'agreementStatusView',
-        'agreementStatusView.onboardingId = onboarding.id',
-      );
+      ]);
   }
 }

@@ -1,6 +1,10 @@
 import type { ChangeEvent, ReactElement, ReactNode } from 'react';
 import { Link } from 'react-router';
-import type { WorkflowVersion, WorkflowVersionStatus } from '@/api/workflows/workflow-versions';
+import {
+  WORKFLOW_VERSION_STATUS,
+  type WorkflowVersion,
+  type WorkflowVersionStatus,
+} from '@/api/workflows/workflow-versions';
 import { Chip, type ChipTone } from '@/components/ui/Chip/Chip';
 import { TextLink } from '@/components/ui/TextLink/TextLink';
 import { Typography } from '@/components/ui/Typography/Typography';
@@ -30,7 +34,7 @@ export interface WorkflowDetailsHeaderProps {
   note?: ReactNode;
 }
 
-/** The header band: breadcrumb, title with the shown version's chip, the onboardings link, and the version picker. */
+/** The header band: breadcrumb, title with the shown version's chip, the onboardings link (not on a draft), and the version picker. */
 export function WorkflowDetailsHeader({
   workflowId,
   name,
@@ -42,6 +46,9 @@ export function WorkflowDetailsHeader({
   note,
 }: WorkflowDetailsHeaderProps): ReactElement {
   const shown = versions.find((entry) => entry.version === version);
+  // A draft cannot start an onboarding, so it has none to link to.
+  const showOnboardingsLink =
+    versions.length > 0 && shown?.status !== WORKFLOW_VERSION_STATUS.draft;
   // Every version's onboardings, not just the shown one's.
   const onboardingsHref = `${ADMIN_ROUTES.onboardings.root}${serializeOnboardingWorkflowSearch({ workflowId })}`;
 
@@ -92,7 +99,7 @@ export function WorkflowDetailsHeader({
             </Typography>
           )}
         </div>
-        {versions.length > 0 && (
+        {showOnboardingsLink && (
           <TextLink to={onboardingsHref} className="self-start">
             View onboardings →
           </TextLink>
