@@ -1823,8 +1823,8 @@
     },
     "/v1/admin/workflows/{workflowId}/versions/{version}/document": {
       "get": {
-        "description": "The stored document of a draft, verbatim. Published and retired revisions answer `409 WORKFLOW_VERSION_NOT_DRAFT` without any document: only drafts, which an admin typed through this API, are served raw.",
-        "operationId": "getWorkflowDraftDocument",
+        "description": "The stored document of a version, verbatim, whatever its status: draft, published or retired. It includes connector `config` as written, so the route is admin-only.",
+        "operationId": "getWorkflowVersionDocument",
         "parameters": [
           {
             "name": "workflowId",
@@ -1851,11 +1851,11 @@
         ],
         "responses": {
           "200": {
-            "description": "The draft and its document.",
+            "description": "The version and its document.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminWorkflowDraftDocumentResponseDto"
+                  "$ref": "#/components/schemas/AdminWorkflowVersionDocumentResponseDto"
                 }
               }
             }
@@ -1915,31 +1915,6 @@
               }
             }
           },
-          "409": {
-            "description": "`WORKFLOW_VERSION_NOT_DRAFT`: The revision is not a draft; carries `workflowId`, `version` and `status`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "WORKFLOW_VERSION_NOT_DRAFT"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
           "503": {
             "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
             "content": {
@@ -1956,7 +1931,7 @@
             "entraBearer": []
           }
         ],
-        "summary": "Read a draft's document",
+        "summary": "Read a version's document",
         "tags": [
           "Admin: workflows"
         ]
@@ -2131,7 +2106,7 @@
     },
     "/v1/admin/workflows/{workflowId}/steps/{stepName}/connector": {
       "put": {
-        "description": "Replaces the authored primary connector's id on every stored version of the family that declares the step; config, field mapping, retry and fallbacks are untouched. The adapter is validated against each non-retired version, and the first to refuse it names itself in `workflowVersion`. Onboardings already parked on the step finish with the provider they started on. The response projects the slot from the highest published version. The write is audited under the operator the token identifies.",
+        "description": "Replaces the authored primary connector's id on one published version (`scope: version`) or on every non-retired published version that declares the step with a single connector (`scope: all`); config, field mapping, retry and fallbacks are untouched. Drafts and later published versions run their authored connector. The adapter is validated against each targeted version only, nothing is written unless all accept it, and the first to refuse it names itself in `workflowVersion`. Onboardings already parked on the step finish with the provider they started on. The response projects the slot from the target version, or the highest covered one for `all`. The write is audited under the operator the token identifies.",
         "operationId": "selectWorkflowStepConnector",
         "parameters": [
           {
@@ -2177,7 +2152,7 @@
             }
           },
           "400": {
-            "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`WORKFLOW_CONNECTOR_SELECTION_INVALID`: The connector cannot serve the step in at least one non-retired version; carries `stepName`, `connectorId`, the `workflowVersion` that refused it, a `reason` of `no_connector`, `multiple_connectors`, `in_fallback_chain`, `adapter_not_registered`, `fixture_not_allowed`, `type_mismatch`, `async_unsupported`, `callback_fields_missing` or `declaration_invalid`, and a `detail` when the refusal has more to say.",
+            "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`WORKFLOW_CONNECTOR_SELECTION_INVALID`: The connector cannot serve the step in at least one version the write targets; carries `stepName`, `connectorId`, the `workflowVersion` that refused it, a `reason` of `no_connector`, `multiple_connectors`, `in_fallback_chain`, `adapter_not_registered`, `fixture_not_allowed`, `type_mismatch`, `async_unsupported`, `callback_fields_missing` or `declaration_invalid`, and a `detail` when the refusal has more to say.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2229,7 +2204,7 @@
             }
           },
           "404": {
-            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.\n\n`WORKFLOW_STEP_NOT_FOUND`: No non-retired version of the workflow declares a step with this name; carries `stepName`.",
+            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.\n\n`WORKFLOW_STEP_NOT_FOUND`: No version the write targets declares a step with this name; carries `stepName`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2245,6 +2220,56 @@
                           "enum": [
                             "WORKFLOW_NOT_FOUND",
                             "WORKFLOW_STEP_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`WORKFLOW_VERSION_NOT_PUBLISHED`: The pinned revision is a draft and cannot be started; carries `workflowId` and `version`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_VERSION_NOT_PUBLISHED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_RETIRED"
                           ]
                         }
                       }
@@ -2276,7 +2301,7 @@
         ]
       },
       "delete": {
-        "description": "Drops the stored binding, so every version of the family runs the connector its document authored. Clearing a step with no binding succeeds. The write is audited under the operator the token identifies.",
+        "description": "Drops the stored binding on one published version (`scope: version`) or on every non-retired published version that declares the step (`scope: all`), so they run the connector their document authored. Bindings on retired versions are kept. Clearing a step with no binding succeeds. The write is audited under the operator the token identifies.",
         "operationId": "clearWorkflowStepConnector",
         "parameters": [
           {
@@ -2298,11 +2323,47 @@
               "example": "submit_kyc",
               "type": "string"
             }
+          },
+          {
+            "name": "scope",
+            "required": true,
+            "in": "query",
+            "description": "`version` clears the binding on the one published version named by `version`; `all` clears it on every non-retired published version that declares the step.",
+            "schema": {
+              "example": "version",
+              "type": "string",
+              "enum": [
+                "version",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "version",
+            "required": false,
+            "in": "query",
+            "description": "The published version to clear. Required when `scope` is `version`, rejected otherwise.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 2147483647,
+              "example": 1,
+              "type": "integer"
+            }
           }
         ],
         "responses": {
           "204": {
-            "description": "The step runs its authored connector."
+            "description": "The targeted versions run their authored connector."
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
           },
           "401": {
             "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
@@ -2325,7 +2386,7 @@
             }
           },
           "404": {
-            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.\n\n`WORKFLOW_STEP_NOT_FOUND`: No version the write targets declares a step with this name; carries `stepName`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2339,7 +2400,58 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "WORKFLOW_NOT_FOUND"
+                            "WORKFLOW_NOT_FOUND",
+                            "WORKFLOW_STEP_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`WORKFLOW_VERSION_NOT_PUBLISHED`: The pinned revision is a draft and cannot be started; carries `workflowId` and `version`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_VERSION_NOT_PUBLISHED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_RETIRED"
                           ]
                         }
                       }
@@ -5770,11 +5882,41 @@
         ],
         "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on."
       },
+      "WorkflowConnectorVersionResponseDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "description": "The workflow version this entry describes."
+          },
+          "id": {
+            "type": "string",
+            "description": "The connector id this version runs: the selection when `selected`, else the authored one.",
+            "example": "veriff_kyc"
+          },
+          "authoredId": {
+            "type": "string",
+            "description": "The connector id this version authored.",
+            "example": "sumsub_kyc"
+          },
+          "selected": {
+            "type": "boolean",
+            "description": "True when an operator selection replaces the authored connector on this version."
+          }
+        },
+        "required": [
+          "version",
+          "id",
+          "authoredId",
+          "selected"
+        ]
+      },
       "WorkflowStepConnectorResponseDto": {
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "description": "The connector id. On a primary connector, the one the viewed version runs: its selection when it has one, else the authored id."
           },
           "name": {
             "type": "string"
@@ -5829,7 +5971,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "description": "The connector id. On a primary connector, the one the viewed version runs: its selection when it has one, else the authored id."
           },
           "name": {
             "type": "string"
@@ -5870,12 +6013,12 @@
           },
           "authoredId": {
             "type": "string",
-            "description": "The connector id the workflow document authored. Differs from `id` while an operator selection is in force.",
+            "description": "The connector id the viewed version authored. Differs from `id` while an operator selection is in force on it.",
             "example": "sumsub_kyc"
           },
           "selected": {
             "type": "boolean",
-            "description": "True when an operator selection replaces the authored connector on this step, in every stored version of the workflow that has the step."
+            "description": "True when an operator selection replaces the authored connector on this step in the viewed version. Always false for a draft."
           },
           "selectableIds": {
             "description": "The connector ids a selection on this step would be accepted with, for this version, sorted: the authored and effective ids, plus every registered connector that passes the same rules the write applies — same `type`, callback-capable for an asynchronous step, every one of its callback fields declared by the step, its own declaration rules satisfied, and not already a fallback here. Empty when the step declares no connector or more than one, since no selection can address it.",
@@ -5886,6 +6029,13 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "versions": {
+            "description": "The versions a selection on this step reaches, ascending: every non-retired published version whose step has this single connector, plus the viewed version when it is a draft or retired. Empty when the step is not selectable, and on a compile response.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowConnectorVersionResponseDto"
             }
           },
           "fallbacks": {
@@ -5908,6 +6058,7 @@
           "authoredId",
           "selected",
           "selectableIds",
+          "versions",
           "fallbacks"
         ]
       },
@@ -6099,13 +6250,13 @@
         "properties": {
           "workflowId": {
             "type": "string",
-            "description": "The workflow id the draft belongs to.",
+            "description": "The workflow id the revision belongs to.",
             "example": "my-onboarding"
           },
           "version": {
             "type": "integer",
             "minimum": 1,
-            "description": "The revision number of the draft."
+            "description": "The revision number."
           },
           "status": {
             "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run.",
@@ -6280,22 +6431,21 @@
           "items"
         ]
       },
-      "AdminWorkflowDraftDocumentResponseDto": {
+      "AdminWorkflowVersionDocumentResponseDto": {
         "type": "object",
         "properties": {
           "workflowId": {
             "type": "string",
-            "description": "The workflow id the draft belongs to.",
+            "description": "The workflow id the revision belongs to.",
             "example": "my-onboarding"
           },
           "version": {
             "type": "integer",
             "minimum": 1,
-            "description": "The revision number of the draft."
+            "description": "The revision number."
           },
           "status": {
             "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run.",
-            "example": "draft",
             "allOf": [
               {
                 "$ref": "#/components/schemas/WorkflowVersionStatus"
@@ -6320,7 +6470,7 @@
           "document": {
             "type": "object",
             "additionalProperties": true,
-            "description": "The authored document as stored, verbatim. It may not compile: a draft is saved unchecked."
+            "description": "The authored document as stored, verbatim, including connector `config`. A draft may not compile: it is saved unchecked."
           }
         },
         "required": [
@@ -6338,13 +6488,13 @@
         "properties": {
           "workflowId": {
             "type": "string",
-            "description": "The workflow id the version belongs to.",
+            "description": "The workflow id the revision belongs to.",
             "example": "my-onboarding"
           },
           "version": {
             "type": "integer",
             "minimum": 1,
-            "description": "The revision number that was published."
+            "description": "The revision number."
           },
           "status": {
             "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run.",
@@ -6388,10 +6538,27 @@
             "description": "The id of a registered connector adapter that can serve the step's connector slot.",
             "example": "veriff_kyc",
             "maxLength": 64
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "version",
+              "all"
+            ],
+            "description": "`version` binds the one published version named by `version`; `all` binds every non-retired published version that declares the step with a single connector.",
+            "example": "version"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "description": "The published version to bind. Required when `scope` is `version`, rejected otherwise.",
+            "example": 1
           }
         },
         "required": [
-          "connectorId"
+          "connectorId",
+          "scope"
         ]
       },
       "StepTypeResponseDto": {

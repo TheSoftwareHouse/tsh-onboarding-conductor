@@ -15,6 +15,22 @@ export type WorkflowConnectorSelection = Readonly<{
   connectorId: string;
 }>;
 
+/** How far a selection write reaches: one published version, or every non-retired published one. */
+export const VERSION_SELECTION_SCOPE = 'version';
+export const ALL_SELECTION_SCOPE = 'all';
+
+export const CONNECTOR_SELECTION_SCOPES = [VERSION_SELECTION_SCOPE, ALL_SELECTION_SCOPE] as const;
+
+export type ConnectorSelectionScope = (typeof CONNECTOR_SELECTION_SCOPES)[number];
+
+/** One version's view of a step's primary connector: what it authored and what it runs. */
+export type ConnectorVersionEntry = Readonly<{
+  version: number;
+  id: string;
+  authoredId: string;
+  selected: boolean;
+}>;
+
 /**
  * The slot a selection can name: the step's only connector declaration. A step with none has
  * nothing to bind, and one with several (only a `custom` step can) cannot be addressed by a step

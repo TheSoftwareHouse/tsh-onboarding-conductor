@@ -43,6 +43,7 @@ const VALID_DEFINITION: WorkflowDefinition = {
           authoredId: 'kyc',
           selected: false,
           selectableIds: [],
+          versions: [],
           name: 'KYC',
           type: 'kyc',
           order: 1,
@@ -114,6 +115,10 @@ describe('fetchWorkflowDefinition', () => {
                 authoredId: 'sumsub_kyc',
                 selected: true,
                 selectableIds: ['sumsub_kyc', 'veriff_kyc'],
+                versions: [
+                  { version: 2, id: 'veriff_kyc', authoredId: 'sumsub_kyc', selected: true },
+                  { version: 3, id: 'sumsub_kyc', authoredId: 'sumsub_kyc', selected: false },
+                ],
               },
             ],
           },
@@ -128,6 +133,10 @@ describe('fetchWorkflowDefinition', () => {
       authoredId: 'sumsub_kyc',
       selected: true,
       selectableIds: ['sumsub_kyc', 'veriff_kyc'],
+      versions: [
+        { version: 2, id: 'veriff_kyc', authoredId: 'sumsub_kyc', selected: true },
+        { version: 3, id: 'sumsub_kyc', authoredId: 'sumsub_kyc', selected: false },
+      ],
     });
   });
 
@@ -136,6 +145,7 @@ describe('fetchWorkflowDefinition', () => {
     delete legacy.authoredId;
     delete legacy.selected;
     delete legacy.selectableIds;
+    delete legacy.versions;
     mockedGet.mockResolvedValueOnce({
       data: {
         ...VALID_DEFINITION,
@@ -149,6 +159,7 @@ describe('fetchWorkflowDefinition', () => {
       authoredId: 'kyc',
       selected: false,
       selectableIds: [],
+      versions: [],
     });
   });
 

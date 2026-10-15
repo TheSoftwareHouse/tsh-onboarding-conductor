@@ -1,11 +1,14 @@
 import { useEffect, useRef, type ReactElement } from 'react';
 import { json, jsonParseLinter } from '@codemirror/lang-json';
 import { linter, lintGutter } from '@codemirror/lint';
+import { EditorState } from '@codemirror/state';
 import { basicSetup, EditorView } from 'codemirror';
 
 export interface JsonEditorProps {
   value: string;
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
+  /** Shows the text selectable and focusable but not editable. */
+  readOnly?: boolean;
   /** Names the editable region for assistive tech. */
   label: string;
 }
@@ -40,7 +43,12 @@ const editorTheme = EditorView.theme({
 });
 
 /** A CodeMirror 6 JSON editor, controlled by `value`; a change from outside replaces the document. */
-export function JsonEditor({ value, onChange, label }: JsonEditorProps): ReactElement {
+export function JsonEditor({
+  value,
+  onChange,
+  readOnly = false,
+  label,
+}: JsonEditorProps): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
@@ -61,10 +69,14 @@ export function JsonEditor({ value, onChange, label }: JsonEditorProps): ReactEl
         linter(jsonParseLinter()),
         lintGutter(),
         editorTheme,
-        EditorView.contentAttributes.of({ 'aria-label': label }),
+        EditorState.readOnly.of(readOnly),
+        EditorView.contentAttributes.of({
+          'aria-label': label,
+          ...(readOnly ? { 'aria-readonly': 'true', tabindex: '0' } : {}),
+        }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
-            onChangeRef.current(update.state.doc.toString());
+            onChangeRef.current?.(update.state.doc.toString());
           }
         }),
       ],

@@ -23,9 +23,11 @@ import { AdminRoute } from '../auth/admin-route.decorator';
 import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
 import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-responses.decorator';
 import { API_TAGS, WORKFLOW_DOCUMENT_SCHEMA, schemaRef } from '../openapi/openapi.constants';
-import { AdminWorkflowDraftDocumentResponseDto } from './dto/admin-workflow-draft-document.response.dto';
+import { ALL_SELECTION_SCOPE, VERSION_SELECTION_SCOPE } from './domain/connector-selection';
 import { AdminWorkflowDraftResponseDto } from './dto/admin-workflow-draft.response.dto';
 import { AdminWorkflowPublicationResponseDto } from './dto/admin-workflow-publication.response.dto';
+import { AdminWorkflowVersionDocumentResponseDto } from './dto/admin-workflow-version-document.response.dto';
+import { ClearWorkflowConnectorQueryDto } from './dto/clear-workflow-connector.query.dto';
 import { ListAdminWorkflowVersionsResponseDto } from './dto/list-admin-workflow-versions.response.dto';
 import { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import { ListAdminWorkflowsResponseDto } from './dto/list-admin-workflows.response.dto';
@@ -42,6 +44,7 @@ import { WorkflowDraftExistsException } from './errors/workflow-draft-exists.exc
 import { WorkflowDraftInUseException } from './errors/workflow-draft-in-use.exception';
 import { WorkflowInvalidException } from './errors/workflow-invalid.exception';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
+import { WorkflowRetiredException } from './errors/workflow-retired.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
 import { WorkflowScopeConflictException } from './errors/workflow-scope-conflict.exception';
 import { WorkflowSourceKeyConflictException } from './errors/workflow-source-key-conflict.exception';
@@ -49,9 +52,13 @@ import { WorkflowStepNotFoundException } from './errors/workflow-step-not-found.
 import { WorkflowVersionExistsException } from './errors/workflow-version-exists.exception';
 import { WorkflowVersionNotDraftException } from './errors/workflow-version-not-draft.exception';
 import { WorkflowVersionNotLatestException } from './errors/workflow-version-not-latest.exception';
+import { WorkflowVersionNotPublishedException } from './errors/workflow-version-not-published.exception';
 import { RawWorkflowDocumentPipe } from './transport/raw-workflow-document.pipe';
 import { WorkflowCompilationService } from './workflow-compilation.service';
-import { WorkflowConnectorSelectionService } from './workflow-connector-selection.service';
+import {
+  WorkflowConnectorSelectionService,
+  type ConnectorSelectionTarget,
+} from './workflow-connector-selection.service';
 import { WorkflowDraftsService } from './workflow-drafts.service';
 import { WorkflowRegistryService } from './workflow-registry.service';
 
@@ -74,6 +81,12 @@ const VERSION_PARAM = {
   description: 'The revision number, a positive integer.',
   example: 1,
 };
+
+/** The DTO validators guarantee `version` is set exactly when `scope` is `version`. */
+const toSelectionTarget = (dto: { scope: string; version?: number }): ConnectorSelectionTarget =>
+  dto.scope === ALL_SELECTION_SCOPE
+    ? { scope: ALL_SELECTION_SCOPE }
+    : { scope: VERSION_SELECTION_SCOPE, version: dto.version as number };
 
 /**
  * Admin surface for the workflow catalogue: the reads, the compile dry run and the draft writes
@@ -268,23 +281,22 @@ export class WorkflowsController {
   @Get(':workflowId/versions/:version/document')
   @AdminRoute()
   @ApiOperation({
-    operationId: 'getWorkflowDraftDocument',
-    summary: "Read a draft's document",
+    operationId: 'getWorkflowVersionDocument',
+    summary: "Read a version's document",
     description:
-      'The stored document of a draft, verbatim. Published and retired revisions answer ' +
-      '`409 WORKFLOW_VERSION_NOT_DRAFT` without any document: only drafts, which an admin typed ' +
-      'through this API, are served raw.',
+      'The stored document of a version, verbatim, whatever its status: draft, published or ' +
+      'retired. It includes connector `config` as written, so the route is admin-only.',
   })
   @ApiParam(WORKFLOW_ID_PARAM)
   @ApiParam(VERSION_PARAM)
   @ApiOkResponse({
-    type: AdminWorkflowDraftDocumentResponseDto,
-    description: 'The draft and its document.',
+    type: AdminWorkflowVersionDocumentResponseDto,
+    description: 'The version and its document.',
   })
-  @ApiErrorResponses(VALIDATION_ERROR, WorkflowNotFoundException, WorkflowVersionNotDraftException)
-  getDocument(
+  @ApiErrorResponses(VALIDATION_ERROR, WorkflowNotFoundException)
+  getVersionDocument(
     @Param() { workflowId, version }: WorkflowVersionParamsDto,
-  ): Promise<AdminWorkflowDraftDocumentResponseDto> {
+  ): Promise<AdminWorkflowVersionDocumentResponseDto> {
     return this.workflowDraftsService.getDocument(workflowId, version);
   }
 
@@ -408,12 +420,15 @@ export class WorkflowsController {
     operationId: 'selectWorkflowStepConnector',
     summary: "Bind a step's connector slot to another adapter",
     description:
-      "Replaces the authored primary connector's id on every stored version of the family that " +
-      'declares the step; config, field mapping, retry and fallbacks are untouched. The adapter ' +
-      'is validated against each non-retired version, and the first to refuse it names itself in ' +
-      '`workflowVersion`. Onboardings already parked on the step finish with the provider they ' +
-      'started on. The response projects the slot from the highest published version. The write ' +
-      'is audited under the operator the token identifies.',
+      "Replaces the authored primary connector's id on one published version (`scope: version`) " +
+      'or on every non-retired published version that declares the step with a single connector ' +
+      '(`scope: all`); config, field mapping, retry and fallbacks are untouched. Drafts and later ' +
+      'published versions run their authored connector. The adapter is validated against each ' +
+      'targeted version only, nothing is written unless all accept it, and the first to refuse it ' +
+      'names itself in `workflowVersion`. Onboardings already parked on the step finish with the ' +
+      'provider they started on. The response projects the slot from the target version, or the ' +
+      'highest covered one for `all`. The write is audited under the operator the token ' +
+      'identifies.',
   })
   @ApiParam({
     name: 'workflowId',
@@ -432,6 +447,8 @@ export class WorkflowsController {
   @ApiErrorResponses(
     VALIDATION_ERROR,
     WorkflowNotFoundException,
+    WorkflowVersionNotPublishedException,
+    WorkflowRetiredException,
     WorkflowStepNotFoundException,
     WorkflowConnectorSelectionInvalidException,
   )
@@ -445,6 +462,7 @@ export class WorkflowsController {
       workflowId,
       stepName,
       dto.connectorId,
+      toSelectionTarget(dto),
       resolveOperatorId(request.adminTokenClaims),
     );
   }
@@ -456,9 +474,10 @@ export class WorkflowsController {
     operationId: 'clearWorkflowStepConnector',
     summary: "Return a step's connector slot to its authored adapter",
     description:
-      'Drops the stored binding, so every version of the family runs the connector its document ' +
-      'authored. Clearing a step with no binding succeeds. The write is audited under the ' +
-      'operator the token identifies.',
+      'Drops the stored binding on one published version (`scope: version`) or on every ' +
+      'non-retired published version that declares the step (`scope: all`), so they run the ' +
+      'connector their document authored. Bindings on retired versions are kept. Clearing a step ' +
+      'with no binding succeeds. The write is audited under the operator the token identifies.',
   })
   @ApiParam({
     name: 'workflowId',
@@ -470,16 +489,24 @@ export class WorkflowsController {
     description: 'The step whose binding is cleared.',
     example: 'submit_kyc',
   })
-  @ApiNoContentResponse({ description: 'The step runs its authored connector.' })
-  @ApiErrorResponses(WorkflowNotFoundException)
+  @ApiNoContentResponse({ description: 'The targeted versions run their authored connector.' })
+  @ApiErrorResponses(
+    VALIDATION_ERROR,
+    WorkflowNotFoundException,
+    WorkflowVersionNotPublishedException,
+    WorkflowRetiredException,
+    WorkflowStepNotFoundException,
+  )
   async clearStepConnector(
     @Param('workflowId') workflowId: string,
     @Param('stepName') stepName: string,
+    @Query() query: ClearWorkflowConnectorQueryDto,
     @Req() request: AdminAuthenticatedRequest,
   ): Promise<void> {
     await this.workflowConnectorSelectionService.clear(
       workflowId,
       stepName,
+      toSelectionTarget(query),
       resolveOperatorId(request.adminTokenClaims),
     );
   }

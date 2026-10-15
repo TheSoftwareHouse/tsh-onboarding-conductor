@@ -2,9 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { isUniqueViolation } from '../database/unique-violation';
-import type { AdminWorkflowDraftDocumentResponseDto } from './dto/admin-workflow-draft-document.response.dto';
 import type { AdminWorkflowDraftResponseDto } from './dto/admin-workflow-draft.response.dto';
 import type { AdminWorkflowPublicationResponseDto } from './dto/admin-workflow-publication.response.dto';
+import type { AdminWorkflowVersionDocumentResponseDto } from './dto/admin-workflow-version-document.response.dto';
 import { MAX_WORKFLOW_VERSION } from './dto/workflow-version.params.dto';
 import type { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { WorkflowDraftExistsException } from './errors/workflow-draft-exists.exception';
@@ -85,10 +85,19 @@ export class WorkflowDraftsService {
   async getDocument(
     workflowId: string,
     version: number,
-  ): Promise<AdminWorkflowDraftDocumentResponseDto> {
-    const draft = await this.getDraft(this.dataSource.manager, workflowId, version);
+  ): Promise<AdminWorkflowVersionDocumentResponseDto> {
+    const revision = await this.workflowsRepository.findRevision(
+      this.dataSource.manager,
+      this.workflowRegistryService.getActiveScopes(),
+      workflowId,
+      version,
+    );
 
-    return { ...this.toResponse(draft), document: draft.definition };
+    if (revision === null) {
+      throw new WorkflowNotFoundException();
+    }
+
+    return { ...this.toResponse(revision), document: revision.definition };
   }
 
   async update(
@@ -178,9 +187,11 @@ export class WorkflowDraftsService {
       }
 
       // Boot skips a file shadowing a draft, but would refuse it against a published row.
-      const isShadowed = this.workflowFileLoaderService
-        .load(this.workflowRegistryService.getActiveScopes())
-        .some((file) => file.workflowId === workflowId && file.version === version);
+      const isShadowed = await this.workflowFileLoaderService.hasRevision(
+        this.workflowRegistryService.getActiveScopes(),
+        workflowId,
+        version,
+      );
 
       if (isShadowed) {
         throw new WorkflowVersionExistsException(workflowId, version);

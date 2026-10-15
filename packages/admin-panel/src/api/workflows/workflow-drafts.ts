@@ -2,7 +2,11 @@ import type { AxiosResponse } from 'axios';
 import { z } from 'zod';
 import { invalidPayloadError, toApiError, type ApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
-import { ADMIN_WORKFLOWS_ENDPOINT } from './workflow-definitions';
+import {
+  ADMIN_WORKFLOWS_ENDPOINT,
+  workflowDefinitionSchema,
+  type WorkflowDefinition,
+} from './workflow-definitions';
 import { WORKFLOW_VERSION_STATUS } from './workflow-versions';
 
 const COMPILE_ENDPOINT = `${ADMIN_WORKFLOWS_ENDPOINT}/compile`;
@@ -62,13 +66,15 @@ const workflowPublicationSchema = workflowDraftSchema.extend({
   status: z.literal(WORKFLOW_VERSION_STATUS.published),
 });
 
-const workflowDraftDocumentSchema = workflowDraftSchema.extend({
+const workflowVersionDocumentSchema = workflowDraftSchema.extend({
+  status: z.nativeEnum(WORKFLOW_VERSION_STATUS),
   document: z.record(z.string(), z.unknown()),
 });
 
-// Only the authored step report is read; the compiled definition is large and the panel never renders it.
+// The authored step report gives the count; the compiled `workflow` is the graph's definition.
 const workflowCompilationSchema = z.object({
   steps: z.array(z.unknown()),
+  workflow: workflowDefinitionSchema,
 });
 
 export type WorkflowDraft = z.infer<typeof workflowDraftSchema>;
@@ -76,12 +82,14 @@ export type WorkflowDraft = z.infer<typeof workflowDraftSchema>;
 /** A draft after publishing: the same summary, now `published`. */
 export type WorkflowPublication = z.infer<typeof workflowPublicationSchema>;
 
-/** A draft with its authored document, verbatim; it may not compile. */
-export type WorkflowDraftDocument = z.infer<typeof workflowDraftDocumentSchema>;
+/** A version of any status with its stored document, verbatim; a draft's may not compile. */
+export type WorkflowVersionDocument = z.infer<typeof workflowVersionDocumentSchema>;
 
 export interface WorkflowCompilation {
   /** How many authored steps the document declares. */
   stepCount: number;
+  /** The compiled definition, as the graph renders it. */
+  workflow: WorkflowDefinition;
 }
 
 /** A workflow document as the editor holds it: any JSON object, valid as a workflow or not. */
@@ -116,15 +124,15 @@ export async function createWorkflowDraft(document: WorkflowDocumentInput): Prom
   return parseOrThrow(workflowDraftSchema, payload);
 }
 
-/** Reads a draft's stored document verbatim; a published or retired version answers 409. */
+/** Reads a version's stored document verbatim, whatever its status. */
 export async function fetchWorkflowDocument(
   workflowId: string,
   version: number,
-): Promise<WorkflowDraftDocument> {
+): Promise<WorkflowVersionDocument> {
   const payload = await requestPayload(() =>
     httpClient.get<unknown>(`${draftPath(workflowId, version)}/document`),
   );
-  return parseOrThrow(workflowDraftDocumentSchema, payload);
+  return parseOrThrow(workflowVersionDocumentSchema, payload);
 }
 
 /** Replaces a draft's document; a changed `id` or `version` in it moves the draft. */
@@ -160,5 +168,5 @@ export async function compileWorkflowDocument(
 ): Promise<WorkflowCompilation> {
   const payload = await requestPayload(() => httpClient.post<unknown>(COMPILE_ENDPOINT, document));
   const compilation = parseOrThrow(workflowCompilationSchema, payload);
-  return { stepCount: compilation.steps.length };
+  return { stepCount: compilation.steps.length, workflow: compilation.workflow };
 }

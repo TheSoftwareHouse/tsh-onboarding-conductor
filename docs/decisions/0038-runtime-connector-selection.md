@@ -4,7 +4,7 @@
 - **Date:** 2026-10-05
 - **Tags:** workflows, connectors, admin-panel, persistence, api
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [0042](0042-connector-selection-per-version.md) (selection scope)
 
 ## Decision
 
@@ -130,3 +130,9 @@ document is changed by it.
 > **Amended 2026-10-08 by [0039](./0039-parked-onboarding-lifecycle.md):** the persisted park is the
 > only correlation source for a callback — the flattened-chain match for a `NULL` park is gone — the
 > park records `parkedAt`, and the admin summary exposes it.
+>
+> **Amended 2026-10-13 by [0042](./0042-connector-selection-per-version.md):** a selection is a row
+> per version and step, covers published versions only (never a draft) and is written with a required
+> `scope`; saving validates the targeted versions only. The key, the application "in every stored
+> version", the validation across every non-retired version and the family-wide pin above no longer
+> hold.

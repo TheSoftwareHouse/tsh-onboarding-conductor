@@ -42,6 +42,14 @@ describe('PublishDraftDialog', () => {
     expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled();
   });
 
+  it('renders the connector notes and keeps Publish enabled', () => {
+    renderDialog({
+      connectorNotes: ['Step `a` runs x on v1 (selected). v3 will run its authored y.'],
+    });
+    expect(screen.getByRole('dialog')).toHaveTextContent('Step `a` runs x on v1 (selected).');
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled();
+  });
+
   it('confirms through onConfirm', async () => {
     const { onConfirm } = renderDialog();
     await userEvent.click(screen.getByRole('button', { name: 'Publish' }));

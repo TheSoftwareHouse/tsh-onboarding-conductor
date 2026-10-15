@@ -1,6 +1,7 @@
 import type { ConnectorRejectionReason } from '@tsh/ddl-schema';
 import type { AgreementType } from '../agreements/agreement.types';
 import type { EncryptionKeyRotationInterval } from '../encryption/encryption-key-rotation';
+import type { ConnectorSelectionScope } from '../workflows/domain/connector-selection';
 import { generateUuidV7 } from '../utils/uuid.util';
 
 /**
@@ -521,8 +522,11 @@ export const WORKFLOW_RESOURCE_TYPE = 'workflow';
 export type WorkflowConnectorSelectionAuditMetadata = {
   workflowId: string;
   stepName: string;
-  previousConnectorId: string | null;
   connectorId: string | null;
+  scope?: ConnectorSelectionScope;
+  versions?: { version: number; previousConnectorId: string | null }[];
+  /** Rows written before selections were per version carry this instead of `scope` and `versions`. */
+  previousConnectorId?: string | null;
 };
 
 export type WorkflowAuditInput = {

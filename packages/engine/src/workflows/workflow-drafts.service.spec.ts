@@ -82,7 +82,7 @@ const createService = () => {
     compile: jest.fn().mockResolvedValue({}),
   } as unknown as jest.Mocked<WorkflowCompilationService>;
   const fileLoader = {
-    load: jest.fn().mockReturnValue([]),
+    hasRevision: jest.fn().mockResolvedValue(false),
   } as unknown as jest.Mocked<WorkflowFileLoaderService>;
   const audit = {
     logWorkflowDraft: jest.fn().mockResolvedValue(undefined),
@@ -270,20 +270,22 @@ describe('WorkflowDraftsService', () => {
       await expect(service.getDocument('flow', 1)).rejects.toThrow(WorkflowNotFoundException);
     });
 
-    it('answers 409 for a published revision and names its status', async () => {
-      const { service, repository } = createService();
+    it.each(['published', 'retired'] as const)(
+      'serves the stored document of a %s revision without locking',
+      async (status) => {
+        const { service, repository } = createService();
+        const definition = { id: 'flow', version: 1, anything: 'goes' };
 
-      repository.findRevision.mockResolvedValue(createRow({ status: 'published' }));
+        repository.findRevision.mockResolvedValue(createRow({ status, definition }));
 
-      const failure = await service.getDocument('flow', 1).catch((error: unknown) => error);
-
-      expect(failure).toBeInstanceOf(WorkflowVersionNotDraftException);
-      expect((failure as WorkflowVersionNotDraftException).getResponse()).toMatchObject({
-        workflowId: 'flow',
-        version: 1,
-        status: 'published',
-      });
-    });
+        await expect(service.getDocument('flow', 1)).resolves.toMatchObject({
+          workflowId: 'flow',
+          status,
+          document: definition,
+        });
+        expect(repository.lockRevision).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('update', () => {
@@ -648,21 +650,13 @@ describe('WorkflowDraftsService', () => {
     it('answers 409 VERSION_EXISTS when a workflow file declares the same id and version', async () => {
       const context = setup();
 
-      context.fileLoader.load.mockReturnValue([
-        {
-          scope: 'users',
-          filePath: '/workflows/users/flow.json',
-          workflowId: 'flow',
-          version: 3,
-          definition: { id: 'flow', version: 3, steps: [] },
-        },
-      ]);
+      context.fileLoader.hasRevision.mockResolvedValue(true);
 
       const failure = await context.service
         .publish('flow', 3, OPERATOR)
         .catch((error: unknown) => error);
 
-      expect(context.fileLoader.load).toHaveBeenCalledWith(ACTIVE_SCOPES);
+      expect(context.fileLoader.hasRevision).toHaveBeenCalledWith(ACTIVE_SCOPES, 'flow', 3);
       expect(failure).toBeInstanceOf(WorkflowVersionExistsException);
       expect((failure as WorkflowVersionExistsException).getResponse()).toEqual({
         code: 'WORKFLOW_VERSION_EXISTS',
@@ -672,22 +666,6 @@ describe('WorkflowDraftsService', () => {
       });
       expect(context.compilation.compile).not.toHaveBeenCalled();
       expectNothingWritten(context);
-    });
-
-    it('publishes when workflow files declare only other versions of the family', async () => {
-      const { service, fileLoader } = setup();
-
-      fileLoader.load.mockReturnValue([
-        {
-          scope: 'users',
-          filePath: '/workflows/users/flow.json',
-          workflowId: 'flow',
-          version: 2,
-          definition: { id: 'flow', version: 2, steps: [] },
-        },
-      ]);
-
-      await expect(service.publish('flow', 3, OPERATOR)).resolves.toMatchObject({ version: 3 });
     });
 
     it('publishes over a lower published version', async () => {

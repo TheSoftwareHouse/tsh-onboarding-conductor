@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ConfigService } from '@nestjs/config';
@@ -65,7 +73,7 @@ describe('WorkflowFileLoaderService', () => {
   it('loads the committed fixture workflows and tags them with their scope', async () => {
     const loader = await createLoader(usersDir);
 
-    const files = loader.load(['fixtures']);
+    const files = await loader.load(['fixtures']);
 
     expect(files.length).toBeGreaterThan(0);
     expect(files.every((file) => file.scope === 'fixtures')).toBe(true);
@@ -75,7 +83,7 @@ describe('WorkflowFileLoaderService', () => {
   it('loads the committed built-in workflows and tags them with their scope', async () => {
     const loader = await createLoader(usersDir);
 
-    const files = loader.load(['built-in']);
+    const files = await loader.load(['built-in']);
 
     expect(files.length).toBeGreaterThan(0);
     expect(files.every((file) => file.scope === 'built-in')).toBe(true);
@@ -86,7 +94,7 @@ describe('WorkflowFileLoaderService', () => {
     writeWorkflowFixture(usersDir, 'custom.workflow.json', { id: 'custom' });
     const loader = await createLoader(usersDir);
 
-    expect(loader.load(['users'])).toEqual([
+    expect(await loader.load(['users'])).toEqual([
       expect.objectContaining({
         scope: 'users',
         filePath: join(usersDir, 'custom.workflow.json'),
@@ -100,14 +108,16 @@ describe('WorkflowFileLoaderService', () => {
     writeWorkflowFixture(usersDir, 'custom.workflow.json', { id: 'custom', name: 'Custom' });
     const loader = await createLoader(usersDir);
 
-    expect(loader.load(['users'])[0].name).toBe('Custom');
+    expect((await loader.load(['users']))[0].name).toBe('Custom');
   });
 
   it('keeps the source definition untouched so it can be stored verbatim', async () => {
     writeWorkflowFixture(usersDir, 'custom.workflow.json', { id: 'custom' });
     const loader = await createLoader(usersDir);
 
-    expect(loader.load(['users'])[0].definition).toEqual(createWorkflowFixture({ id: 'custom' }));
+    expect((await loader.load(['users']))[0].definition).toEqual(
+      createWorkflowFixture({ id: 'custom' }),
+    );
   });
 
   it('ignores non-JSON files and nested directories', async () => {
@@ -119,19 +129,29 @@ describe('WorkflowFileLoaderService', () => {
 
     const loader = await createLoader(usersDir);
 
-    expect(loader.load(['users']).map((file) => file.workflowId)).toEqual(['custom']);
+    expect((await loader.load(['users'])).map((file) => file.workflowId)).toEqual(['custom']);
+  });
+
+  it('reads a symlinked workflow file like any other', async () => {
+    const targetDir = join(usersDir, 'target');
+    mkdirSync(targetDir);
+    writeWorkflowFixture(targetDir, 'linked.workflow.json', { id: 'linked' });
+    symlinkSync(join(targetDir, 'linked.workflow.json'), join(usersDir, 'linked.workflow.json'));
+    const loader = await createLoader(usersDir);
+
+    expect((await loader.load(['users'])).map((file) => file.workflowId)).toEqual(['linked']);
   });
 
   it('treats a missing scope directory as contributing no workflows', async () => {
     const loader = await createLoader(join(usersDir, 'missing'));
 
-    expect(loader.load(['users'])).toEqual([]);
+    expect(await loader.load(['users'])).toEqual([]);
   });
 
   it('treats an empty scope directory as contributing no workflows', async () => {
     const loader = await createLoader(usersDir);
 
-    expect(loader.load(['users'])).toEqual([]);
+    expect(await loader.load(['users'])).toEqual([]);
   });
 
   it('fails eagerly for an inaccessible scope directory', async () => {
@@ -141,8 +161,8 @@ describe('WorkflowFileLoaderService', () => {
     const loader = await createLoader(inaccessibleDir);
 
     try {
-      expect(() => loader.load(['users'])).toThrow(WorkflowsDirectoryReadError);
-      expect(() => loader.load(['users'])).toThrow(
+      await expect(loader.load(['users'])).rejects.toThrow(WorkflowsDirectoryReadError);
+      await expect(loader.load(['users'])).rejects.toThrow(
         `Cannot read workflows directory: ${inaccessibleDir}`,
       );
     } finally {
@@ -155,22 +175,22 @@ describe('WorkflowFileLoaderService', () => {
     writeFileSync(filePath, 'not a directory');
     const loader = await createLoader(filePath);
 
-    expect(() => loader.load(['users'])).toThrow(WorkflowsDirectoryReadError);
+    await expect(loader.load(['users'])).rejects.toThrow(WorkflowsDirectoryReadError);
   });
 
   it('fails eagerly on malformed JSON', async () => {
     writeFileSync(join(usersDir, 'broken.workflow.json'), '{"id":');
     const loader = await createLoader(usersDir);
 
-    expect(() => loader.load(['users'])).toThrow(WorkflowInvalidError);
-    expect(() => loader.load(['users'])).toThrow('WORKFLOW_INVALID');
+    await expect(loader.load(['users'])).rejects.toThrow(WorkflowInvalidError);
+    await expect(loader.load(['users'])).rejects.toThrow('WORKFLOW_INVALID');
   });
 
   it('fails eagerly on a schema-invalid definition', async () => {
     writeWorkflowFixture(usersDir, 'invalid.workflow.json', { id: 'invalid', steps: undefined });
     const loader = await createLoader(usersDir);
 
-    expect(() => loader.load(['users'])).toThrow(WorkflowInvalidError);
+    await expect(loader.load(['users'])).rejects.toThrow(WorkflowInvalidError);
   });
 
   it('fails eagerly on a targetless manual transition', async () => {
@@ -190,7 +210,7 @@ describe('WorkflowFileLoaderService', () => {
     });
     const loader = await createLoader(usersDir);
 
-    expect(() => loader.load(['users'])).toThrow(
+    await expect(loader.load(['users'])).rejects.toThrow(
       expect.objectContaining({ code: 'WORKFLOW_INVALID', reason: 'INVALID_SHAPE' }),
     );
   });
@@ -200,14 +220,14 @@ describe('WorkflowFileLoaderService', () => {
     writeWorkflowFixture(usersDir, 'custom.duplicate.workflow.json', { id: 'custom', version: 1 });
     const loader = await createLoader(usersDir);
 
-    expect(() => loader.load(['users'])).toThrow(WorkflowInvalidError);
+    await expect(loader.load(['users'])).rejects.toThrow(WorkflowInvalidError);
   });
 
   it('refuses a users file that claims an id fixtures already declares, at the same version', async () => {
     writeWorkflowFixture(usersDir, 'base.workflow.json');
     const loader = await createLoader(usersDir);
 
-    expect(() => loader.load(['fixtures', 'users'])).toThrow(
+    await expect(loader.load(['fixtures', 'users'])).rejects.toThrow(
       expect.objectContaining({
         name: 'WorkflowScopeConflictError',
         workflowId: 'base',
@@ -223,11 +243,11 @@ describe('WorkflowFileLoaderService', () => {
     writeWorkflowFixture(usersDir, 'base-v2.workflow.json', { version: 2 });
     const loader = await createLoader(usersDir);
 
-    expect(() => loader.load(['fixtures', 'users'])).toThrow(WorkflowScopeConflictError);
-    expect(() => loader.load(['fixtures', 'users'])).toThrow(
+    await expect(loader.load(['fixtures', 'users'])).rejects.toThrow(WorkflowScopeConflictError);
+    await expect(loader.load(['fixtures', 'users'])).rejects.toThrow(
       `Workflow "base" is declared under the "fixtures" scope by ${join(FIXTURE_WORKFLOWS_DIR, 'base.workflow.json')}, but ${join(usersDir, 'base-v2.workflow.json')} declares it under the "users" scope`,
     );
-    expect(() => loader.load(['fixtures', 'users'])).toThrow(
+    await expect(loader.load(['fixtures', 'users'])).rejects.toThrow(
       'workflows/users/eu-b2c-individual-kyc-eea-local.workflow.json',
     );
   });
@@ -238,7 +258,9 @@ describe('WorkflowFileLoaderService', () => {
     const loader = await createLoader(usersDir);
 
     expect(
-      loader.load(['built-in', 'fixtures', 'users']).filter((file) => file.workflowId === 'custom'),
+      (await loader.load(['built-in', 'fixtures', 'users'])).filter(
+        (file) => file.workflowId === 'custom',
+      ),
     ).toHaveLength(2);
   });
 
@@ -247,11 +269,53 @@ describe('WorkflowFileLoaderService', () => {
     writeWorkflowFixture(usersDir, 'custom.v2.workflow.json', { id: 'custom', version: 2 });
     const loader = await createLoader(usersDir);
 
-    expect(
-      loader
-        .load(['users'])
-        .map((file) => file.version)
-        .sort(),
-    ).toEqual([1, 2]);
+    expect((await loader.load(['users'])).map((file) => file.version).sort()).toEqual([1, 2]);
+  });
+
+  describe('hasRevision', () => {
+    it('finds a file declaring the id at the version', async () => {
+      writeWorkflowFixture(usersDir, 'custom.workflow.json', { id: 'custom', version: 3 });
+      const loader = await createLoader(usersDir);
+
+      await expect(loader.hasRevision(['users'], 'custom', 3)).resolves.toBe(true);
+    });
+
+    it('finds nothing when files declare only other versions of the id', async () => {
+      writeWorkflowFixture(usersDir, 'custom.workflow.json', { id: 'custom', version: 2 });
+      const loader = await createLoader(usersDir);
+
+      await expect(loader.hasRevision(['users'], 'custom', 3)).resolves.toBe(false);
+    });
+
+    it('skips malformed and schema-invalid files instead of failing', async () => {
+      writeFileSync(join(usersDir, 'broken.workflow.json'), '{"id":');
+      writeWorkflowFixture(usersDir, 'invalid.workflow.json', { id: 'invalid', steps: undefined });
+      writeWorkflowFixture(usersDir, 'custom.workflow.json', { id: 'custom', version: 3 });
+      const loader = await createLoader(usersDir);
+
+      await expect(loader.hasRevision(['users'], 'custom', 3)).resolves.toBe(true);
+      await expect(loader.hasRevision(['users'], 'invalid', 1)).resolves.toBe(true);
+    });
+
+    it('fails for a file it cannot read instead of skipping it', async () => {
+      const unreadablePath = join(usersDir, 'custom.workflow.json');
+      writeWorkflowFixture(usersDir, 'custom.workflow.json', { id: 'custom', version: 3 });
+      chmodSync(unreadablePath, 0o000);
+      const loader = await createLoader(usersDir);
+
+      try {
+        await expect(loader.hasRevision(['users'], 'custom', 3)).rejects.toMatchObject({
+          code: 'EACCES',
+        });
+      } finally {
+        chmodSync(unreadablePath, 0o600);
+      }
+    });
+
+    it('finds nothing in a missing scope directory', async () => {
+      const loader = await createLoader(join(usersDir, 'missing'));
+
+      await expect(loader.hasRevision(['users'], 'custom', 1)).resolves.toBe(false);
+    });
   });
 });

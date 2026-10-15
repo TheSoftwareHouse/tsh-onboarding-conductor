@@ -174,14 +174,22 @@ describe('workflowMutations', () => {
 
   describe('selectConnector', () => {
     it('puts the connector on the step of the factory workflow', async () => {
-      await workflowMutations
-        .selectConnector('kyc')
-        .mutationFn?.({ stepName: 'verify', connectorId: 'veriff_kyc' }, {} as never);
+      await workflowMutations.selectConnector('kyc').mutationFn?.(
+        {
+          stepName: 'verify',
+          connectorId: 'veriff_kyc',
+          target: { scope: 'version', version: 2 },
+        },
+        {} as never,
+      );
 
-      expect(putWorkflowConnectorSelection).toHaveBeenCalledWith('kyc', 'verify', 'veriff_kyc');
+      expect(putWorkflowConnectorSelection).toHaveBeenCalledWith('kyc', 'verify', 'veriff_kyc', {
+        scope: 'version',
+        version: 2,
+      });
     });
 
-    it('awaits every read of the family, since the selection binds every version', () => {
+    it('awaits every read of the family, since a selection can change any version', () => {
       expect(workflowMutations.selectConnector('kyc').meta).toEqual({
         awaits: [workflowQueries.detailsFor('kyc')],
       });
@@ -190,9 +198,13 @@ describe('workflowMutations', () => {
 
   describe('clearConnector', () => {
     it('deletes the selection on the step of the factory workflow', async () => {
-      await workflowMutations.clearConnector('kyc').mutationFn?.('verify', {} as never);
+      await workflowMutations
+        .clearConnector('kyc')
+        .mutationFn?.({ stepName: 'verify', target: { scope: 'all' } }, {} as never);
 
-      expect(deleteWorkflowConnectorSelection).toHaveBeenCalledWith('kyc', 'verify');
+      expect(deleteWorkflowConnectorSelection).toHaveBeenCalledWith('kyc', 'verify', {
+        scope: 'all',
+      });
     });
 
     it('awaits every read of the family', () => {

@@ -1216,6 +1216,30 @@ describe('AuditService', () => {
       );
     });
 
+    it('keeps the scope and per-version previous connectors of a per-version selection', async () => {
+      const { sut, repository, dataSource } = createSut();
+      const metadata = {
+        workflowId: 'eu-b2c',
+        stepName: 'submit_kyc',
+        connectorId: 'veriff_kyc',
+        scope: 'all' as const,
+        versions: [
+          { version: 1, previousConnectorId: null },
+          { version: 2, previousConnectorId: 'sumsub_kyc' },
+        ],
+      };
+
+      await sut.logWorkflowChange(dataSource, {
+        action: 'workflow.connector_selected',
+        actorId: 'operator-oid',
+        resourceId: 'eu-b2c',
+        metadata: { ...metadata, smuggled: 'x' } as never,
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual(metadata);
+    });
+
     it('drops anything but the allowlisted metadata', async () => {
       const { sut, repository, dataSource } = createSut();
 
