@@ -22,6 +22,7 @@ This document assumes you have the local stack running; see the [README](../READ
 - [Integrate a provider without writing code](#integrate-a-provider-without-writing-code)
 - [Add a connector adapter](#add-a-connector-adapter)
   - [Add a KYC provider](#add-a-kyc-provider)
+  - [Add a credit provider](#add-a-credit-provider)
 - [Add a connector error handler](#add-a-connector-error-handler)
 - [Add a field type or text format](#add-a-field-type-or-text-format)
 - [Add an email template](#add-an-email-template)
@@ -571,6 +572,10 @@ What each member owes the compiler:
   compiler substitutes the destination — or fans the transition out into one arm per condition,
   for a conditional edge — after you return. Writing a target for a port you were not given, or
   ignoring one that was wired, fails the document as a type defect.
+- **`clientVisible`** is an optional boolean on a field `buildFields` or `compile` declares (root
+  fields only; default false). When `true`, the field's value is returned in `/state`'s `data` once
+  its step has passed. Leave it off for anything the client should not see; see _Client-visible data_
+  in [IMPLEMENTATION.md](IMPLEMENTATION.md).
 - **`publish`** is optional, and is how a downstream step finds what you collect. Claim a canonical
   role only when your field genuinely means that attribute — two steps claiming one role fails the
   document.
@@ -640,7 +645,8 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
    a provider verdict to a domain outcome carried in `submittedData` rather than to an engine
    transition — see [decision 0005](decisions/0005-kyc-connector-outcome-contract.md) for why. It is
    a thin subclass of the shared KYC kernel; **if your provider does identity verification, do not
-   write an adapter from scratch — [add a KYC provider](#add-a-kyc-provider) below.**
+   write an adapter from scratch — [add a KYC provider](#add-a-kyc-provider) below.** The same goes
+   for a credit score: [add a credit provider](#add-a-credit-provider).
 
 5. **Make it selectable (optional, nothing to register).** An operator can switch a workflow step's
    connector on one published version or on all of them from the workflow details page
@@ -668,7 +674,7 @@ passes through — except for an optional mapping, which is exempt from that sec
 because it declares a source that may be absent. Nothing else in the engine changes.
 
 Adapters shipped today: `http_request`, `twilio_verify`, `sendgrid_email`, `smtp`, `sumsub_kyc`,
-`veriff_kyc`, and the `mock_*` fixtures used by the example workflows.
+`veriff_kyc`, and the `mock_*` fixtures (`mock_credit` among them) used by the example workflows.
 
 ### Add a KYC provider
 
@@ -737,6 +743,73 @@ approval and the attempt cap on a resubmission); the closed `submittedData` shap
 A provider that re-derives any of these will drift from the other providers on what `human_review`
 or `retry` means, which is the problem the kernel exists to prevent.
 
+### Add a credit provider
+
+Credit assessment follows the KYC split: `CreditConnector`, the kernel in
+`connectors/adapters/built-in/credit/`, owns the engine-facing half, and a provider is its wire half
+([decision 0045](decisions/0045-credit-assessment-kernel-algoan-first-provider.md), status Proposed).
+The one provider built so far is the fixture `mock_credit`; the `credit-assessment` step type
+([decision 0047](decisions/0047-credit-assessment-step-bank-data-document-and-bands.md)) binds any
+adapter of type `credit`, so a third provider needs no step-type or DDL change.
+
+1. **Implement `CreditProvider`** ([credit-provider.port.ts](../packages/engine/src/connectors/adapters/built-in/credit/credit-provider.port.ts))
+   in `<name>-credit/<name>-credit.provider.ts` beside the others (`built-in/` in the repository,
+   `users/` in a fork), with its HTTP client beside it (plain `fetch` under `AbortSignal.timeout`, one
+   method per endpoint, every failure a feature-local `<NAME>_UNAVAILABLE` exception, as
+   [veriff-client.ts](../packages/engine/src/connectors/adapters/built-in/veriff-kyc/veriff-client.ts) does).
+   [mock-credit.connector.ts](../packages/engine/src/connectors/adapters/fixtures/mock-credit.connector.ts)
+   is the smallest complete example. The provider declares:
+   - `id` and `name`, and a `settingsSchema`, which puts a card on the admin panel's Connectors page;
+   - `callbackAuth`, the recipe for the provider's webhook (a provider with no signature declares
+     `{ kind: 'none' }` with a justification, and production ingress refuses it unless the type is
+     named in `CONNECTOR_CALLBACK_UNSIGNED_TYPES`);
+   - `validateConfig(providerConfig, config)`, the startup check of the keys no kernel rule consumed;
+   - `validateBankData(bankData)`, which throws `CreditBankDataInvalidError` for a document the
+     provider cannot take, before any provider call; the kernel answers it as a retryable
+     `INVALID_BANK_DATA` error on the `bankData` field, so the applicant uploads again;
+   - `startAssessment(settings, submission) → {providerReference}` — the applicant roles the workflow
+     bound, the document bytes (`bankData.document`, format `json`) and the 1-based `attempt` arrive
+     built. Start one provider analysis per attempt and return the reference to park on;
+   - `parseCallback(input, settings)`, reducing the webhook to `{onboardingId, providerReference?,
+actionable, hint?}`; `actionable: false` re-parks without reading a result;
+   - `buildReconcileEvent({onboardingId, providerReference})`, the event the operator reconcile reads
+     with, no webhook involved;
+   - `fetchResult(settings, event, context) → CreditResult`, which **reads the result back from the
+     provider** rather than trusting the webhook body: `pending` while the provider is still
+     computing, `failed` with codes, or `scored` with a `CreditScore` (`value` and `scale`,
+     optional `indicators`, `secondary` scores and `version`) and the provider-shaped report. A state
+     you cannot map is thrown, never defaulted, so the callback answers 5xx and the provider
+     redelivers. Keep the report to what a client may see: it is `clientVisible` on the step.
+2. **Subclass `CreditConnector`** in `<name>-credit.connector.ts`: an `@Injectable()` class whose
+   constructor takes the provider and the kernel's dependencies (`ConnectorSettingsService`,
+   `CompletedOnboardingDocumentResolver`, `OBJECT_STORAGE_PORT`, `AwaitingCallbackConnectorResolver`)
+   and calls `super`, as `MockCreditConnector` does.
+3. **Register both** in [connectors.module.ts](../packages/engine/src/connectors/connectors.module.ts):
+   the connector in `BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS` (`USER_CONNECTOR_ADAPTER_PROVIDERS` for a
+   fork, `FIXTURE_CONNECTOR_ADAPTER_PROVIDERS` for a fake), and the provider and its client in the
+   module's providers. A base URL or timeout goes into `AppConfig` and `.env.dist` beside
+   `SUMSUB_*` / `VERIFF_*`.
+4. **Add a workflow** that binds it: a `credit-assessment` step with `connector.id` set to yours
+   (the step type has no provider-specific keys, see §2.1 of `IMPLEMENTATION.md`).
+   `pnpm workflow:validate <path>` checks the document; the adapter's `validateDeclaration` runs at
+   engine startup over every loaded and stored revision.
+5. **Let it be selected**: nothing to add. The kernel declares the nine `credit*` `callbackFields`
+   itself, so a `credit-assessment` step can be switched to the provider from the workflow details
+   page. Return `providerReference` from `startAssessment`: the kernel drops a callback carrying a
+   different reference as a superseded attempt.
+6. **Document it**: the adapter table and "The credit connector" in `docs/IMPLEMENTATION.md`, the
+   fixtures table in `packages/engine/src/connectors/adapters/README.md` for a fake, the error code
+   in the error table if you added one, and the documentation site's configuration page.
+
+What the kernel already does, and a provider must **not** repeat: parse and validate the common
+`config` (`bands`, `maxAttempts`, `applicant`, `products`, `report`); resolve the `bankData` document
+and read it from object storage, refusing a content type other than `application/json`; resolve
+credentials; the UUID, redelivery and superseded-attempt guards; the outcome rules in
+`credit-outcome.ts` (banding the score, the retry cap on a failure); shaping and size-capping the
+report (`CREDIT_REPORT_MAX_BYTES`, 262144 bytes of compact JSON); the closed `submittedData` shape;
+the audit redaction of `creditReport` (`auditRedactedFields`); and the log lines. A provider that
+re-derives any of these will drift from the others on what `review` or `retry` means.
+
 ## Add a connector error handler
 
 A connector error handler is a policy for what happens when a connector's adapter throws: retry,
@@ -791,6 +864,10 @@ schema — see [fields/](../packages/shared/ddl-schema/src/fields/) and
 [formats/](../packages/shared/ddl-schema/src/formats/). A new one is an entry plus its guard, with no
 engine change, and because the package is framework-free the admin panel and any future authoring
 tool pick it up from the same contract.
+
+The built-in root types are `boolean`, `number`, `text`, `date`, `file`, `object`, `array` and `json`;
+`json` is an open object for values the engine only carries (a provider's report), and is the
+smallest definition to copy ([json.field-type.ts](../packages/shared/ddl-schema/src/fields/json.field-type.ts)).
 
 What a new type or format must respect is described in
 [extending-field-types.md](../packages/shared/ddl-schema/docs/extending-field-types.md).

@@ -4,6 +4,7 @@ import { addressStepTypeDefinition } from './types/address.step-type';
 import { connectorCallStepTypeDefinition } from './types/connector-call.step-type';
 import { consentsStepTypeDefinition } from './types/consents.step-type';
 import { contactDetailsStepTypeDefinition } from './types/contact-details.step-type';
+import { creditAssessmentStepTypeDefinition } from './types/credit-assessment.step-type';
 import { customStepTypeDefinition } from './types/custom.step-type';
 import { decisionStepTypeDefinition } from './types/decision.step-type';
 import { documentCaptureStepTypeDefinition } from './types/document-capture.step-type';
@@ -41,6 +42,7 @@ export const BUILT_IN_STEP_TYPES = [
   // Verify.
   otpVerifyStepTypeDefinition,
   kycIdentityVerificationStepTypeDefinition,
+  creditAssessmentStepTypeDefinition,
   // Decide.
   decisionStepTypeDefinition,
   riskScoreStepTypeDefinition,

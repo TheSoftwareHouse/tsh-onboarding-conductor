@@ -117,7 +117,9 @@ export class S3ObjectStorageService implements ObjectStoragePort {
       throw new Error('storage object body size exceeded the inspection byte budget');
     }
 
-    const fileType = await this.detectFileTypeFromBuffer(data);
+    const fileType =
+      (await this.detectFileTypeFromBuffer(data)) ??
+      this.detectJsonText(data, data.length === expectedSize);
     if (!fileType?.mime) {
       throw new Error('storage object content type could not be detected');
     }
@@ -168,6 +170,35 @@ export class S3ObjectStorageService implements ObjectStoragePort {
     }
 
     return data;
+  }
+
+  /**
+   * `file-type` knows binary signatures only, so a JSON document (the credit step's `bankData`)
+   * never detects. Text that decodes as UTF-8 and opens like a JSON value is reported as
+   * `application/json`; when the whole object fit into the inspection window it must also parse.
+   */
+  private detectJsonText(buffer: Buffer, complete: boolean): DetectedFileType | undefined {
+    let text: string;
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+    } catch {
+      return undefined;
+    }
+
+    const body = text.replace(/^\uFEFF/, '').trimStart();
+    if (!body.startsWith('{') && !body.startsWith('[')) {
+      return undefined;
+    }
+
+    if (complete) {
+      try {
+        JSON.parse(body);
+      } catch {
+        return undefined;
+      }
+    }
+
+    return { ext: 'json', mime: 'application/json' };
   }
 
   private async detectFileTypeFromBuffer(buffer: Buffer): Promise<DetectedFileType | undefined> {

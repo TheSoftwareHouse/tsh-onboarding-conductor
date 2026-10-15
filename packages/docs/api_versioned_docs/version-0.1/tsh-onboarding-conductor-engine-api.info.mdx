@@ -1,0 +1,109 @@
+---
+id: tsh-onboarding-conductor-engine-api
+title: 'TSH Onboarding Conductor Engine API'
+description: 'The HTTP surface of the onboarding engine: the service that loads workflow definitions, runs'
+sidebar_label: From the OpenAPI document
+sidebar_position: 0
+hide_title: true
+custom_edit_url: null
+---
+
+import ApiLogo from '@theme/ApiLogo';
+import Heading from '@theme/Heading';
+import SchemaTabs from '@theme/SchemaTabs';
+import TabItem from '@theme/TabItem';
+import Export from '@theme/ApiExplorer/Export';
+
+<span
+  className={'theme-doc-version-badge badge badge--secondary'}
+  children={'Version: 0.1.0'}
+></span>
+
+<Export url={'/openapi/0.1/engine.openapi.json'}></Export>
+
+<Heading
+  as={'h1'}
+  className={'openapi__heading'}
+  children={'TSH Onboarding Conductor Engine API'}
+></Heading>
+
+The HTTP surface of the onboarding engine: the service that loads workflow definitions, runs
+onboardings against them and drives connectors, provider callbacks and client webhooks.
+
+## Audiences
+
+- **Onboarding flow.** The end customer's own onboarding. Unauthenticated: the onboarding id is
+  the only handle, so treat it as a capability.
+- **Admin.** The operator surface the admin panel is built on. Every operation requires a bearer
+  access token (see _Authentication_).
+- **Provider callbacks.** Where a connector's provider posts an asynchronous result, authenticated
+  by the HMAC recipe the connector adapter declares.
+
+## Authentication
+
+Admin operations carry the `entraBearer` security requirement: a Microsoft Entra ID
+access token for the engine's API app registration whose `roles` claim holds at least one of the
+configured operator roles. A missing or unverifiable token is answered with `401`, a verified token
+without an operator role with `403`, and `503` says the token could not be judged because Entra's
+signing keys were unreachable. Every decision, granted or refused, is written to the audit log.
+
+## Errors
+
+The engine answers a refusal it owns with `{ "code", "message" }`: `code` is the stable
+identifier a client should branch on, and each operation lists the codes it can return. Some codes
+add detail properties; the operation's response description names them. Where the framework answers
+instead of the engine, the body is NestJS's own `{ "statusCode", "message", "error" }` envelope:
+request validation (`400`), the admin bearer guard (`401`, `403`, `503`), and a `500` on the
+submit and provider-callback routes, where a connector adapter can fail with a plain error and there
+is no `code` to branch on.
+
+## Bodies the workflow decides
+
+Two request bodies have no fixed shape. A submit body follows the current step: read
+`GET /v1/onboardings/{id}/state` and its `step.schema` says exactly what the engine will accept.
+A connector's settings body is a map whose keys the connector adapter declares; the read side lists
+them. The compile body is a workflow document, and its schema is embedded here in full.
+
+## About this document
+
+Generated from the engine's own route and DTO decorators, and committed beside the code; a test
+fails when the two disagree. A running engine serves it at `GET /v1/openapi.json`.
+
+<div style={{ marginBottom: '2rem' }}>
+  <Heading
+    id={'authentication'}
+    as={'h2'}
+    className={'openapi-tabs__heading'}
+    children={'Authentication'}
+  ></Heading>
+  <SchemaTabs className={'openapi-tabs__security-schemes'}>
+    <TabItem label={'HTTP: Bearer Auth'} value={'entraBearer'}>
+      A Microsoft Entra ID access token issued for the engine API app registration
+      (`AZURE_API_AUDIENCE`), carrying at least one of the roles in `ADMIN_REQUIRED_ROLES`. With
+      `ADMIN_AUTH_ENABLED=false`, a local-only setting the engine refuses in production, the guard
+      is skipped and no token is needed.
+      <div>
+        <table>
+          <tbody>
+            <tr>
+              <th>Security Scheme Type:</th>
+              <td>http</td>
+            </tr>
+            <tr>
+              <th>HTTP Authorization Scheme:</th>
+              <td>bearer</td>
+            </tr>
+            <tr>
+              <th>Bearer format:</th>
+              <td>JWT</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </TabItem>
+  </SchemaTabs>
+</div>
+<div style={{ marginBottom: 'var(--ifm-paragraph-margin-bottom)' }}>
+  <h3 style={{ marginBottom: '0.25rem' }}>License</h3>
+  <a href={'https://opensource.org/licenses/MIT'}>MIT</a>
+</div>

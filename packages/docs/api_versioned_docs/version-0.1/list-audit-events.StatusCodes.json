@@ -1,0 +1,165 @@
+{
+  "responses": {
+    "200": {
+      "description": "One page of audit events.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string", "format": "uuid" },
+                    "occurredAt": { "type": "string", "format": "date-time" },
+                    "actorType": {
+                      "type": "string",
+                      "description": "Who acted: `system`, an operator, a webhook, or the process itself.",
+                      "example": "system"
+                    },
+                    "actorId": {
+                      "type": "string",
+                      "description": "The actor within its type, such as an operator object id."
+                    },
+                    "action": {
+                      "type": "string",
+                      "description": "Dotted event name, such as `onboarding.step_submitted`.",
+                      "example": "onboarding.step_submitted"
+                    },
+                    "resourceType": { "type": "string", "example": "onboarding" },
+                    "resourceId": {
+                      "type": "string",
+                      "description": "The resource within its type, such as an onboarding id."
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "Event-specific detail; the audit log contract lists the keys per action."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "occurredAt",
+                    "actorType",
+                    "actorId",
+                    "action",
+                    "resourceType",
+                    "resourceId",
+                    "metadata"
+                  ],
+                  "title": "AuditEventResponseDto"
+                }
+              },
+              "meta": {
+                "type": "object",
+                "properties": {
+                  "pagination": {
+                    "type": "object",
+                    "properties": {
+                      "page": { "type": "integer", "minimum": 1 },
+                      "limit": { "type": "integer", "minimum": 1 },
+                      "total": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Rows matching the filters, across all pages."
+                      },
+                      "totalPages": { "type": "integer", "minimum": 0 }
+                    },
+                    "required": ["page", "limit", "total", "totalPages"],
+                    "title": "PaginationMetaResponseDto"
+                  }
+                },
+                "required": ["pagination"],
+                "title": "PaginatedMetaResponseDto"
+              }
+            },
+            "required": ["items", "meta"],
+            "title": "ListAuditResponseDto"
+          }
+        }
+      }
+    },
+    "400": {
+      "description": "The body or query violates its declared shape; `message` names each violated rule.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "403": {
+      "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+---
+id: clear-workflow-step-connector
+title: "Return a step's connector slot to its authored adapter"
+description: 'Drops the stored binding, so every version of the family runs the connector its document authored. Clearing a step with no binding succeeds. The write is audited under the operator the token identifies.'
+sidebar_label: "Return a step's connector slot to its authored adapter"
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: 'delete api-method'
+info_path: api/0.1/tsh-onboarding-conductor-engine-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from '@theme/ApiExplorer/MethodEndpoint';
+import ParamsDetails from '@theme/ParamsDetails';
+import RequestSchema from '@theme/RequestSchema';
+import StatusCodes from '@theme/StatusCodes';
+import OperationTabs from '@theme/OperationTabs';
+import TabItem from '@theme/TabItem';
+import Heading from '@theme/Heading';
+import Translate from '@docusaurus/Translate';
+
+<Heading
+  as={'h1'}
+  className={'openapi__heading'}
+  children={"Return a step's connector slot to its authored adapter"}
+></Heading>
+
+<MethodEndpoint
+  method={'delete'}
+  path={'/v1/admin/workflows/{workflowId}/steps/{stepName}/connector'}
+  context={'endpoint'}
+></MethodEndpoint>
+
+Drops the stored binding, so every version of the family runs the connector its document authored. Clearing a step with no binding succeeds. The write is audited under the operator the token identifies.
+
+<Heading id={'request'} as={'h2'} className={'openapi-tabs__heading'}>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails {...require('./clear-workflow-step-connector.ParamsDetails.json')}></ParamsDetails>
+
+<RequestSchema {...require('./clear-workflow-step-connector.RequestSchema.json')}></RequestSchema>
+
+<StatusCodes {...require('./clear-workflow-step-connector.StatusCodes.json')}></StatusCodes>

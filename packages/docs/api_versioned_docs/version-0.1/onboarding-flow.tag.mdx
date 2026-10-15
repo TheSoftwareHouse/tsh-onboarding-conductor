@@ -1,0 +1,15 @@
+---
+id: onboarding-flow
+title: 'Onboarding flow'
+description: 'Onboarding flow'
+custom_edit_url: null
+---
+
+The end customer's own onboarding: start it, read the step to render, submit that step's data, upload the documents a step asks for and accept an agreement version it owes. These routes carry no authentication because an end customer holds no operator identity; the onboarding id is the only handle, so treat it as a capability and never log or share it.
+
+```mdx-code-block
+import DocCardList from '@theme/DocCardList';
+import {useCurrentSidebarCategory} from '@docusaurus/theme-common';
+
+<DocCardList items={useCurrentSidebarCategory().items}/>
+```

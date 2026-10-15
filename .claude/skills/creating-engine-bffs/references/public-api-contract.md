@@ -81,6 +81,8 @@ Everything needed to render the current step without knowing the workflow.
   "currentStep": "collect_email", // null once terminal
   "terminal": false,
   "rejectionReason": null, // ATTEMPTS_EXHAUSTED | CHALLENGE_EXPIRED | CHALLENGE_NOT_FOUND | CONNECTOR_REJECTED
+  "pending": null, // { "connectorId": "…", "parkedAt": "…" | null } while parked on a provider callback
+  "data": {}, // client-visible field values of the steps already passed
   "step": {
     // null once terminal
     "name": "collect_email",
@@ -105,6 +107,14 @@ Each field:
 | `schema`    | per-field JSON Schema, from the same compiler `submit` enforces                                 |
 | `value`     | the persisted value for prefill, or `null`                                                      |
 | `upload`    | `file` fields only: `contentTypes`, `maxSizeBytes`, optional `maxImageWidth` / `maxImageHeight` |
+
+**`pending` and `data`.** `pending` is `{ connectorId, parkedAt }` while the onboarding is parked
+awaiting a provider callback, else `null`; `parkedAt` is null for an old row, and the provider's
+reference is never exposed. Show a processing state from it instead of guessing from a `409
+ONBOARDING_AWAITING_CONNECTOR`. `data` maps field name to value for the fields a workflow marked
+`clientVisible`, from every step except the current one (every step once terminal), and only where a
+value exists. The current step's values arrive in its own `fields[].value`; anything not marked
+client-visible never appears in `data`.
 
 `active` is server-resolved against persisted context, so it is stale the moment a user types. A
 client that hides fields must re-evaluate `when` locally against the form's current values; the

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BNPL credit check demo</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <!--
+      This classic script must run and complete before the module script below, so
+      window.__ENV__ is populated when the app reads it. A classic (non-module, non-async,
+      non-defer) script is parser-blocking, while a module script always runs after parsing.
+      It must never gain `defer`, `async` or `type="module"`, or readRuntimeEnv() would see an
+      empty window.__ENV__ and the container's BFF origin would be silently ignored.
+    -->
+    <script src="/config.js"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

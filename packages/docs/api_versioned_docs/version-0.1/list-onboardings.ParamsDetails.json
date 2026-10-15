@@ -1,0 +1,91 @@
+{
+  "parameters": [
+    {
+      "name": "page",
+      "required": false,
+      "in": "query",
+      "description": "The page to read, counted from 1.",
+      "schema": { "minimum": 1, "default": 1, "type": "integer" }
+    },
+    {
+      "name": "limit",
+      "required": false,
+      "in": "query",
+      "description": "Rows per page.",
+      "schema": { "minimum": 1, "maximum": 100, "default": 20, "type": "integer" }
+    },
+    {
+      "name": "status",
+      "required": false,
+      "in": "query",
+      "description": "Only onboardings currently in this status.",
+      "schema": {
+        "type": "string",
+        "enum": ["awaiting_user", "awaiting_manual_review", "approved", "rejected", "invalid"],
+        "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+        "title": "WorkflowStatus"
+      }
+    },
+    {
+      "name": "workflowId",
+      "required": false,
+      "in": "query",
+      "description": "Only onboardings of this workflow.",
+      "schema": { "maxLength": 100, "type": "string" }
+    },
+    {
+      "name": "workflowVersion",
+      "required": false,
+      "in": "query",
+      "description": "Only onboardings pinned to this workflow revision.",
+      "schema": { "minimum": 1, "type": "integer" }
+    },
+    {
+      "name": "currentStep",
+      "required": false,
+      "in": "query",
+      "description": "Only onboardings waiting on this step.",
+      "schema": { "maxLength": 100, "type": "string" }
+    },
+    {
+      "name": "onboardingId",
+      "required": false,
+      "in": "query",
+      "description": "Exactly one onboarding, by id.",
+      "schema": { "format": "uuid", "type": "string" }
+    },
+    {
+      "name": "agreementStatus",
+      "required": false,
+      "in": "query",
+      "description": "Only onboardings whose derived agreement status is this one.",
+      "schema": {
+        "type": "string",
+        "enum": ["current", "outdated", "not_accepted"],
+        "description": "Where an onboarding stands on an agreement family, or on every family it holds: `not_accepted` while there is no accepted version, `outdated` when there is one but a newer version has been published, `current` otherwise. Derived, never stored.",
+        "title": "OnboardingAgreementStatus"
+      }
+    },
+    {
+      "name": "parked",
+      "required": false,
+      "in": "query",
+      "description": "Only onboardings parked on an asynchronous connector (`true`), or only those not parked (`false`).",
+      "schema": { "type": "boolean" }
+    },
+    {
+      "name": "pendingConnectorId",
+      "required": false,
+      "in": "query",
+      "description": "Only onboardings parked on this connector id.",
+      "schema": { "maxLength": 100, "type": "string" }
+    },
+    {
+      "name": "parkedBefore",
+      "required": false,
+      "in": "query",
+      "description": "Only onboardings parked before this instant, by the park time the engine recorded. A row parked before that time was recorded never matches.",
+      "schema": { "format": "date-time", "type": "string" }
+    }
+  ]
+}

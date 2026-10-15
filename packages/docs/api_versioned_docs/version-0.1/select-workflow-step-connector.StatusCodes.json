@@ -1,0 +1,294 @@
+{
+  "responses": {
+    "200": {
+      "description": "The step connector slot after the write, with its authored and selectable ids.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "type": {
+                "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on.",
+                "allOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "kyc",
+                      "kyb",
+                      "aml",
+                      "credit",
+                      "phone_verification",
+                      "email_verification",
+                      "email_delivery",
+                      "sms_delivery",
+                      "bank_verification",
+                      "payment",
+                      "e_signature",
+                      "document_storage",
+                      "custom"
+                    ],
+                    "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on.",
+                    "title": "ConnectorType"
+                  }
+                ]
+              },
+              "order": { "type": "integer", "description": "Position among the step connectors." },
+              "canReject": {
+                "type": "boolean",
+                "description": "Whether the connector may refuse the step."
+              },
+              "async": {
+                "type": "boolean",
+                "description": "Whether the connector resolves asynchronously."
+              },
+              "fieldMapping": {
+                "type": "object",
+                "additionalProperties": { "type": "string" },
+                "description": "Required connector inputs, mapped to the context field that fills each."
+              },
+              "optionalFieldMapping": {
+                "type": "object",
+                "additionalProperties": { "type": "string" },
+                "description": "Optional connector inputs, mapped to the context field that fills each."
+              },
+              "authoredId": {
+                "type": "string",
+                "description": "The connector id the workflow document authored. Differs from `id` while an operator selection is in force.",
+                "example": "sumsub_kyc"
+              },
+              "selected": {
+                "type": "boolean",
+                "description": "True when an operator selection replaces the authored connector on this step, in every stored version of the workflow that has the step."
+              },
+              "selectableIds": {
+                "description": "The connector ids a selection on this step would be accepted with, for this version, sorted: the authored and effective ids, plus every registered connector that passes the same rules the write applies — same `type`, callback-capable for an asynchronous step, every one of its callback fields declared by the step, its own declaration rules satisfied, and not already a fallback here. Empty when the step declares no connector or more than one, since no selection can address it.",
+                "example": ["sumsub_kyc", "veriff_kyc"],
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "fallbacks": {
+                "description": "The chain behind this connector, in declared order.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "type": {
+                      "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on.",
+                      "allOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "kyc",
+                            "kyb",
+                            "aml",
+                            "credit",
+                            "phone_verification",
+                            "email_verification",
+                            "email_delivery",
+                            "sms_delivery",
+                            "bank_verification",
+                            "payment",
+                            "e_signature",
+                            "document_storage",
+                            "custom"
+                          ],
+                          "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on.",
+                          "title": "ConnectorType"
+                        }
+                      ]
+                    },
+                    "order": {
+                      "type": "integer",
+                      "description": "Position among the step connectors."
+                    },
+                    "canReject": {
+                      "type": "boolean",
+                      "description": "Whether the connector may refuse the step."
+                    },
+                    "async": {
+                      "type": "boolean",
+                      "description": "Whether the connector resolves asynchronously."
+                    },
+                    "fieldMapping": {
+                      "type": "object",
+                      "additionalProperties": { "type": "string" },
+                      "description": "Required connector inputs, mapped to the context field that fills each."
+                    },
+                    "optionalFieldMapping": {
+                      "type": "object",
+                      "additionalProperties": { "type": "string" },
+                      "description": "Optional connector inputs, mapped to the context field that fills each."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "type",
+                    "order",
+                    "canReject",
+                    "async",
+                    "fieldMapping",
+                    "optionalFieldMapping"
+                  ],
+                  "title": "WorkflowStepConnectorResponseDto"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "type",
+              "order",
+              "canReject",
+              "async",
+              "fieldMapping",
+              "optionalFieldMapping",
+              "authoredId",
+              "selected",
+              "selectableIds",
+              "fallbacks"
+            ],
+            "title": "WorkflowStepConnectorWithFallbacksResponseDto"
+          }
+        }
+      }
+    },
+    "400": {
+      "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`WORKFLOW_CONNECTOR_SELECTION_INVALID`: The connector cannot serve the step in at least one non-retired version; carries `stepName`, `connectorId`, the `workflowVersion` that refused it, a `reason` of `no_connector`, `multiple_connectors`, `in_fallback_chain`, `adapter_not_registered`, `fixture_not_allowed`, `type_mismatch`, `async_unsupported`, `callback_fields_missing` or `declaration_invalid`, and a `detail` when the refusal has more to say.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "oneOf": [
+              {
+                "type": "object",
+                "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+                "required": ["statusCode", "message"],
+                "properties": {
+                  "statusCode": { "type": "integer" },
+                  "message": {
+                    "oneOf": [
+                      { "type": "string" },
+                      { "type": "array", "items": { "type": "string" } }
+                    ]
+                  },
+                  "error": { "type": "string" }
+                },
+                "title": "NestHttpError"
+              },
+              {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                    "required": ["code", "message"],
+                    "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                    "additionalProperties": true,
+                    "title": "ApiError"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "code": { "type": "string", "enum": ["WORKFLOW_CONNECTOR_SELECTION_INVALID"] }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "403": {
+      "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "404": {
+      "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.\n\n`WORKFLOW_STEP_NOT_FOUND`: No non-retired version of the workflow declares a step with this name; carries `stepName`.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": ["WORKFLOW_NOT_FOUND", "WORKFLOW_STEP_NOT_FOUND"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    }
+  }
+}

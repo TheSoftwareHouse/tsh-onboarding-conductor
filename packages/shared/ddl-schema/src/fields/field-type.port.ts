@@ -16,6 +16,7 @@ export type AnyNormalizedField = {
   type: string;
   required?: boolean;
   persist?: boolean;
+  clientVisible?: true;
   when?: NormalizedWorkflowCondition;
 };
 
@@ -25,6 +26,7 @@ export type FieldNormalizationContext = {
   readonly validation: Record<string, unknown> | undefined;
   readonly required: boolean | undefined;
   readonly persist: boolean | undefined;
+  readonly clientVisible: boolean | undefined;
   readonly includeRequired: boolean;
   readonly includePersist: boolean;
   normalizeChild(child: unknown, level: WorkflowFieldLevel): AnyNormalizedField;

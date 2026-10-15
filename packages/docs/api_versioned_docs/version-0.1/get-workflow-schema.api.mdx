@@ -1,0 +1,46 @@
+---
+id: get-workflow-schema
+title: 'Read the workflow JSON Schema'
+description: 'The JSON Schema an authored workflow document must satisfy, exactly as the engine applies it. Derived in memory from the registered step types, field types and formats, so it reflects whatever this build has mounted.'
+sidebar_label: 'Read the workflow JSON Schema'
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: 'get api-method'
+info_path: api/0.1/tsh-onboarding-conductor-engine-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from '@theme/ApiExplorer/MethodEndpoint';
+import ParamsDetails from '@theme/ParamsDetails';
+import RequestSchema from '@theme/RequestSchema';
+import StatusCodes from '@theme/StatusCodes';
+import OperationTabs from '@theme/OperationTabs';
+import TabItem from '@theme/TabItem';
+import Heading from '@theme/Heading';
+import Translate from '@docusaurus/Translate';
+
+<Heading
+  as={'h1'}
+  className={'openapi__heading'}
+  children={'Read the workflow JSON Schema'}
+></Heading>
+
+<MethodEndpoint
+  method={'get'}
+  path={'/v1/admin/step-types/schema'}
+  context={'endpoint'}
+></MethodEndpoint>
+
+The JSON Schema an authored workflow document must satisfy, exactly as the engine applies it. Derived in memory from the registered step types, field types and formats, so it reflects whatever this build has mounted.
+
+<Heading id={'request'} as={'h2'} className={'openapi-tabs__heading'}>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails {...require('./get-workflow-schema.ParamsDetails.json')}></ParamsDetails>
+
+<RequestSchema {...require('./get-workflow-schema.RequestSchema.json')}></RequestSchema>
+
+<StatusCodes {...require('./get-workflow-schema.StatusCodes.json')}></StatusCodes>

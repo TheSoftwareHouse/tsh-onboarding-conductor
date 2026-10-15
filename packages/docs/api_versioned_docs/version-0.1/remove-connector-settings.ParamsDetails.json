@@ -1,0 +1,11 @@
+{
+  "parameters": [
+    {
+      "name": "connectorId",
+      "required": true,
+      "in": "path",
+      "description": "The connector's id, as the list reports it.",
+      "schema": { "example": "twilio_verify", "type": "string" }
+    }
+  ]
+}

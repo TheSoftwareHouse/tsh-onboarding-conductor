@@ -1,0 +1,90 @@
+{
+  "id": "uk-bnpl-credit-check-algoan-local",
+  "version": 1,
+  "name": "UK BNPL credit check (Algoan, local walkthrough copy)",
+  "initial": "applicant",
+  "webhook": {
+    "notify": {
+      "path": "notify"
+    }
+  },
+  "steps": [
+    {
+      "name": "applicant",
+      "type": "contact-details",
+      "config": {
+        "email": "required",
+        "phoneNumber": "omitted"
+      },
+      "include": [
+        {
+          "type": "form",
+          "config": {
+            "fields": {
+              "firstName": {
+                "type": "text",
+                "required": true,
+                "validation": { "minLength": 1, "maxLength": 100 }
+              },
+              "lastName": {
+                "type": "text",
+                "required": true,
+                "validation": { "minLength": 1, "maxLength": 100 }
+              }
+            },
+            "canonical": {
+              "firstName": "firstName",
+              "lastName": "lastName"
+            }
+          }
+        }
+      ],
+      "edges": {
+        "success": "credit_consent"
+      }
+    },
+    {
+      "name": "credit_consent",
+      "type": "consents",
+      "config": {
+        "consents": [
+          {
+            "key": "openBankingCreditCheck",
+            "version": "2026-10",
+            "acknowledgement": "consent"
+          }
+        ]
+      },
+      "edges": {
+        "success": "credit_check"
+      }
+    },
+    {
+      "name": "credit_check",
+      "type": "credit-assessment",
+      "config": {
+        "connector": { "id": "algoan_credit" },
+        "products": ["creditScore", "paymentScore", "insights"],
+        "bands": { "approveFrom": 700, "reviewFrom": 400 },
+        "maxAttempts": 3,
+        "report": "full"
+      },
+      "edges": {
+        "approved": "approved",
+        "review": "manual_review",
+        "declined": "declined",
+        "retry": "credit_consent"
+      }
+    },
+    {
+      "name": "manual_review",
+      "type": "manual-review",
+      "edges": {
+        "approve": "approved",
+        "reject": "declined"
+      }
+    },
+    { "name": "approved", "type": "terminal", "config": { "outcome": "approved" } },
+    { "name": "declined", "type": "terminal", "config": { "outcome": "rejected" } }
+  ]
+}

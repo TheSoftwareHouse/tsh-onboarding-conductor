@@ -1,0 +1,46 @@
+---
+id: link-onboarding-agreement
+title: 'Link a published agreement version to an onboarding'
+description: "Links one published version to the onboarding as pending, out of band of any step the customer is walking, and notifies the workflow's notify webhook with `onboarding.agreement_pending`. Idempotent: a pair already linked reports `created: false` and sends nothing, which is why the response is `200` rather than `201`."
+sidebar_label: 'Link a published agreement version to an onboarding'
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: 'post api-method'
+info_path: api/0.1/tsh-onboarding-conductor-engine-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from '@theme/ApiExplorer/MethodEndpoint';
+import ParamsDetails from '@theme/ParamsDetails';
+import RequestSchema from '@theme/RequestSchema';
+import StatusCodes from '@theme/StatusCodes';
+import OperationTabs from '@theme/OperationTabs';
+import TabItem from '@theme/TabItem';
+import Heading from '@theme/Heading';
+import Translate from '@docusaurus/Translate';
+
+<Heading
+  as={'h1'}
+  className={'openapi__heading'}
+  children={'Link a published agreement version to an onboarding'}
+></Heading>
+
+<MethodEndpoint
+  method={'post'}
+  path={'/v1/onboardings/{id}/agreements'}
+  context={'endpoint'}
+></MethodEndpoint>
+
+Links one published version to the onboarding as pending, out of band of any step the customer is walking, and notifies the workflow's notify webhook with `onboarding.agreement_pending`. Idempotent: a pair already linked reports `created: false` and sends nothing, which is why the response is `200` rather than `201`.
+
+<Heading id={'request'} as={'h2'} className={'openapi-tabs__heading'}>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails {...require('./link-onboarding-agreement.ParamsDetails.json')}></ParamsDetails>
+
+<RequestSchema {...require('./link-onboarding-agreement.RequestSchema.json')}></RequestSchema>
+
+<StatusCodes {...require('./link-onboarding-agreement.StatusCodes.json')}></StatusCodes>

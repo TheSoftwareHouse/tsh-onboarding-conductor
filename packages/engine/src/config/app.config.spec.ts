@@ -62,6 +62,35 @@ describe('validateConfig', () => {
     );
   });
 
+  it('defaults the Algoan base URL and timeout', () => {
+    const config = validateConfig(baseConfig);
+
+    expect(config.ALGOAN_API_BASE_URL).toBe('https://api.algoan.com');
+    expect(config.ALGOAN_TIMEOUT_MS).toBe(10000);
+  });
+
+  it('coerces ALGOAN_TIMEOUT_MS from a string and enforces its bounds', () => {
+    expect(validateConfig({ ...baseConfig, ALGOAN_TIMEOUT_MS: '1500' }).ALGOAN_TIMEOUT_MS).toBe(
+      1500,
+    );
+    expect(() => validateConfig({ ...baseConfig, ALGOAN_TIMEOUT_MS: '99' })).toThrow(
+      /ALGOAN_TIMEOUT_MS/,
+    );
+    expect(() => validateConfig({ ...baseConfig, ALGOAN_TIMEOUT_MS: '30001' })).toThrow(
+      /ALGOAN_TIMEOUT_MS/,
+    );
+  });
+
+  it('accepts an ALGOAN_API_BASE_URL override and rejects a value that is not a URL', () => {
+    expect(
+      validateConfig({ ...baseConfig, ALGOAN_API_BASE_URL: 'http://localhost:9999' })
+        .ALGOAN_API_BASE_URL,
+    ).toBe('http://localhost:9999');
+    expect(() => validateConfig({ ...baseConfig, ALGOAN_API_BASE_URL: 'not a url' })).toThrow(
+      /ALGOAN_API_BASE_URL/,
+    );
+  });
+
   it('defaults the Twilio verify timeout', () => {
     const config = validateConfig(baseConfig);
 

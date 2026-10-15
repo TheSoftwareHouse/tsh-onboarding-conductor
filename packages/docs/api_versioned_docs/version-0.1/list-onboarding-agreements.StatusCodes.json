@@ -1,0 +1,169 @@
+{
+  "responses": {
+    "200": {
+      "description": "Every family the onboarding holds.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "onboardingId": { "type": "string", "format": "uuid" },
+              "items": {
+                "description": "Every family the onboarding holds, ordered by key. One it was never linked to is absent, and an onboarding holding none reads as an empty list.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "maxLength": 100,
+                      "description": "The family.",
+                      "example": "eu-b2c-terms"
+                    },
+                    "type": {
+                      "description": "What an agreement family is: terms, or a privacy notice. A property of the family rather than of one version, so every version published under one `key` classifies the same way.",
+                      "allOf": [
+                        {
+                          "type": "string",
+                          "enum": ["terms_and_conditions", "privacy_notice"],
+                          "description": "What an agreement family is: terms, or a privacy notice. A property of the family rather than of one version, so every version published under one `key` classifies the same way.",
+                          "title": "AgreementType"
+                        }
+                      ]
+                    },
+                    "latestAgreementId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "The id of the highest published version of the family: what the accept route takes."
+                    },
+                    "latestVersion": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "The highest published version of the family."
+                    },
+                    "acceptedVersion": {
+                      "type": ["integer", "null"],
+                      "minimum": 1,
+                      "description": "The highest version this onboarding accepted; null while it has accepted none."
+                    },
+                    "acceptedAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time",
+                      "description": "When `acceptedVersion` was accepted; null while nothing is."
+                    },
+                    "status": {
+                      "description": "This family alone: `not_accepted` with no accepted version, `outdated` when the accepted one is behind the latest, `current` otherwise.",
+                      "allOf": [
+                        {
+                          "type": "string",
+                          "enum": ["current", "outdated", "not_accepted"],
+                          "description": "Where an onboarding stands on an agreement family, or on every family it holds: `not_accepted` while there is no accepted version, `outdated` when there is one but a newer version has been published, `current` otherwise. Derived, never stored.",
+                          "title": "OnboardingAgreementStatus"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "type",
+                    "latestAgreementId",
+                    "latestVersion",
+                    "acceptedVersion",
+                    "acceptedAt",
+                    "status"
+                  ],
+                  "title": "OnboardingAgreementResponseDto"
+                }
+              }
+            },
+            "required": ["onboardingId", "items"],
+            "title": "OnboardingAgreementsResponseDto"
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "403": {
+      "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "404": {
+      "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["ONBOARDING_NOT_FOUND"] } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    }
+  }
+}

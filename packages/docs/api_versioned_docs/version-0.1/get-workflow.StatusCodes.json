@@ -1,0 +1,714 @@
+{
+  "responses": {
+    "200": {
+      "description": "The workflow definition.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "workflowId": { "type": "string" },
+              "workflowVersion": { "type": "integer", "minimum": 1 },
+              "name": {
+                "type": ["string", "null"],
+                "description": "The display label the workflow is known by: for a stored workflow, the root `name` its highest stored version declares; for a compiled document, its own. Null when none does.",
+                "example": "EU B2C individual KYC — EEA, applicant chooses the document"
+              },
+              "initialStep": {
+                "type": "string",
+                "description": "The step every onboarding of this workflow starts on."
+              },
+              "scores": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "required": ["name", "min", "max"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "min": { "type": "number" },
+                    "max": { "type": "number" }
+                  }
+                },
+                "description": "Every score the workflow declares, keyed by score name, with the bounds it is clamped to."
+              },
+              "webhook": {
+                "description": "The state-change webhook the workflow declares, or null when it declares none.",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "allOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "notify": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string",
+                                "description": "Path the state-change webhook is delivered to."
+                              }
+                            },
+                            "required": ["path"],
+                            "title": "WorkflowWebhookNotifyResponseDto"
+                          }
+                        },
+                        "required": ["notify"],
+                        "title": "WorkflowWebhookResponseDto"
+                      }
+                    ]
+                  },
+                  { "type": "null" }
+                ]
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "status": {
+                      "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+                      "allOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "awaiting_user",
+                            "awaiting_manual_review",
+                            "approved",
+                            "rejected",
+                            "invalid"
+                          ],
+                          "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+                          "title": "WorkflowStatus"
+                        }
+                      ]
+                    },
+                    "terminal": {
+                      "type": "boolean",
+                      "description": "True for a step the onboarding ends in."
+                    },
+                    "transitions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "status": {
+                            "type": "string",
+                            "description": "The transition status this arm handles, such as `success`, `rejected` or `manual.approve`."
+                          },
+                          "target": {
+                            "type": ["string", "null"],
+                            "description": "Step this transition moves to, or null for a transition that re-enters its own step."
+                          },
+                          "when": {
+                            "description": "Condition guarding the transition, or null when it always applies.",
+                            "oneOf": [
+                              {
+                                "allOf": [
+                                  {
+                                    "description": "A condition in normalized form: a combinator over other conditions, a comparison of a score, or a test of a submitted field.",
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "required": ["all"],
+                                        "properties": {
+                                          "all": {
+                                            "type": "array",
+                                            "items": "circular(WorkflowCondition)"
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["any"],
+                                        "properties": {
+                                          "any": {
+                                            "type": "array",
+                                            "items": "circular(WorkflowCondition)"
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["not"],
+                                        "properties": { "not": "circular(WorkflowCondition)" }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["score", "gte"],
+                                        "properties": {
+                                          "score": { "type": "string" },
+                                          "gte": { "type": "number" }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["score", "gt"],
+                                        "properties": {
+                                          "score": { "type": "string" },
+                                          "gt": { "type": "number" }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["score", "lte"],
+                                        "properties": {
+                                          "score": { "type": "string" },
+                                          "lte": { "type": "number" }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["score", "lt"],
+                                        "properties": {
+                                          "score": { "type": "string" },
+                                          "lt": { "type": "number" }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["field", "equals"],
+                                        "properties": {
+                                          "field": { "type": "string" },
+                                          "equals": {
+                                            "oneOf": [
+                                              { "type": "string" },
+                                              { "type": "number" },
+                                              { "type": "boolean" },
+                                              { "type": "null" }
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["field", "in"],
+                                        "properties": {
+                                          "field": { "type": "string" },
+                                          "in": {
+                                            "type": "array",
+                                            "items": {
+                                              "oneOf": [
+                                                { "type": "string" },
+                                                { "type": "number" },
+                                                { "type": "boolean" },
+                                                { "type": "null" }
+                                              ]
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["field", "isSet"],
+                                        "properties": {
+                                          "field": { "type": "string" },
+                                          "isSet": { "type": "boolean" }
+                                        }
+                                      }
+                                    ],
+                                    "title": "WorkflowCondition"
+                                  }
+                                ]
+                              },
+                              { "type": "null" }
+                            ]
+                          },
+                          "reason": {
+                            "type": ["array", "null"],
+                            "description": "Refusal reasons this arm claims, or null when it claims any. Without it two `rejected` arms to different targets are indistinguishable to a reader.",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "ATTEMPTS_EXHAUSTED",
+                                "CHALLENGE_EXPIRED",
+                                "CHALLENGE_NOT_FOUND",
+                                "CONNECTOR_REJECTED"
+                              ],
+                              "description": "Why a connector refused the step's data: the caller exhausted its attempts, the challenge expired or was never issued, or the provider rejected outright.",
+                              "title": "ConnectorRejectionReason"
+                            }
+                          }
+                        },
+                        "required": ["status", "target", "when", "reason"],
+                        "title": "WorkflowTransitionResponseDto"
+                      }
+                    },
+                    "source": {
+                      "description": "The authored step this one compiled from, or null when no report was available.",
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "allOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "step": {
+                                  "type": "string",
+                                  "description": "The authored step name."
+                                },
+                                "type": {
+                                  "type": "string",
+                                  "description": "The authored step type, such as `otp-verify` or `custom`."
+                                },
+                                "category": {
+                                  "type": "string",
+                                  "description": "The step type category, such as `collect` or `terminal`."
+                                }
+                              },
+                              "required": ["step", "type", "category"],
+                              "title": "WorkflowStepSourceResponseDto"
+                            }
+                          ]
+                        },
+                        { "type": "null" }
+                      ]
+                    },
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": { "type": "string" },
+                          "type": {
+                            "type": "string",
+                            "description": "The field type name, such as `text`, `file` or `boolean`."
+                          },
+                          "required": { "type": "boolean" },
+                          "persist": {
+                            "type": "boolean",
+                            "description": "False when the accepted value is validated but not stored."
+                          },
+                          "when": {
+                            "description": "Condition that makes the field apply, or null when it always does.",
+                            "oneOf": [
+                              {
+                                "allOf": [
+                                  {
+                                    "description": "A condition in normalized form: a combinator over other conditions, a comparison of a score, or a test of a submitted field.",
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "required": ["all"],
+                                        "properties": {
+                                          "all": {
+                                            "type": "array",
+                                            "items": "circular(WorkflowCondition)"
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["any"],
+                                        "properties": {
+                                          "any": {
+                                            "type": "array",
+                                            "items": "circular(WorkflowCondition)"
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["not"],
+                                        "properties": { "not": "circular(WorkflowCondition)" }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["score", "gte"],
+                                        "properties": {
+                                          "score": { "type": "string" },
+                                          "gte": { "type": "number" }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["score", "gt"],
+                                        "properties": {
+                                          "score": { "type": "string" },
+                                          "gt": { "type": "number" }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["score", "lte"],
+                                        "properties": {
+                                          "score": { "type": "string" },
+                                          "lte": { "type": "number" }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["score", "lt"],
+                                        "properties": {
+                                          "score": { "type": "string" },
+                                          "lt": { "type": "number" }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["field", "equals"],
+                                        "properties": {
+                                          "field": { "type": "string" },
+                                          "equals": {
+                                            "oneOf": [
+                                              { "type": "string" },
+                                              { "type": "number" },
+                                              { "type": "boolean" },
+                                              { "type": "null" }
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["field", "in"],
+                                        "properties": {
+                                          "field": { "type": "string" },
+                                          "in": {
+                                            "type": "array",
+                                            "items": {
+                                              "oneOf": [
+                                                { "type": "string" },
+                                                { "type": "number" },
+                                                { "type": "boolean" },
+                                                { "type": "null" }
+                                              ]
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": "object",
+                                        "required": ["field", "isSet"],
+                                        "properties": {
+                                          "field": { "type": "string" },
+                                          "isSet": { "type": "boolean" }
+                                        }
+                                      }
+                                    ],
+                                    "title": "WorkflowCondition"
+                                  }
+                                ]
+                              },
+                              { "type": "null" }
+                            ]
+                          },
+                          "schema": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "JSON Schema for this field's value, as the state endpoint serves it."
+                          },
+                          "upload": {
+                            "description": "What the document upload routes accept for an upload field, otherwise null.",
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "allOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "contentTypes": {
+                                        "description": "MIME types the field accepts.",
+                                        "type": "array",
+                                        "items": { "type": "string" }
+                                      },
+                                      "maxSizeBytes": { "type": "integer" },
+                                      "maxImageWidth": {
+                                        "type": "integer",
+                                        "description": "Present for image fields that bound width."
+                                      },
+                                      "maxImageHeight": {
+                                        "type": "integer",
+                                        "description": "Present for image fields that bound height."
+                                      }
+                                    },
+                                    "required": ["contentTypes", "maxSizeBytes"],
+                                    "title": "WorkflowFieldUploadResponseDto"
+                                  }
+                                ]
+                              },
+                              { "type": "null" }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "type",
+                          "required",
+                          "persist",
+                          "when",
+                          "schema",
+                          "upload"
+                        ],
+                        "title": "WorkflowFieldResponseDto"
+                      }
+                    },
+                    "connectors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "name": { "type": "string" },
+                          "type": {
+                            "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on.",
+                            "allOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "kyc",
+                                  "kyb",
+                                  "aml",
+                                  "credit",
+                                  "phone_verification",
+                                  "email_verification",
+                                  "email_delivery",
+                                  "sms_delivery",
+                                  "bank_verification",
+                                  "payment",
+                                  "e_signature",
+                                  "document_storage",
+                                  "custom"
+                                ],
+                                "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on.",
+                                "title": "ConnectorType"
+                              }
+                            ]
+                          },
+                          "order": {
+                            "type": "integer",
+                            "description": "Position among the step connectors."
+                          },
+                          "canReject": {
+                            "type": "boolean",
+                            "description": "Whether the connector may refuse the step."
+                          },
+                          "async": {
+                            "type": "boolean",
+                            "description": "Whether the connector resolves asynchronously."
+                          },
+                          "fieldMapping": {
+                            "type": "object",
+                            "additionalProperties": { "type": "string" },
+                            "description": "Required connector inputs, mapped to the context field that fills each."
+                          },
+                          "optionalFieldMapping": {
+                            "type": "object",
+                            "additionalProperties": { "type": "string" },
+                            "description": "Optional connector inputs, mapped to the context field that fills each."
+                          },
+                          "authoredId": {
+                            "type": "string",
+                            "description": "The connector id the workflow document authored. Differs from `id` while an operator selection is in force.",
+                            "example": "sumsub_kyc"
+                          },
+                          "selected": {
+                            "type": "boolean",
+                            "description": "True when an operator selection replaces the authored connector on this step, in every stored version of the workflow that has the step."
+                          },
+                          "selectableIds": {
+                            "description": "The connector ids a selection on this step would be accepted with, for this version, sorted: the authored and effective ids, plus every registered connector that passes the same rules the write applies — same `type`, callback-capable for an asynchronous step, every one of its callback fields declared by the step, its own declaration rules satisfied, and not already a fallback here. Empty when the step declares no connector or more than one, since no selection can address it.",
+                            "example": ["sumsub_kyc", "veriff_kyc"],
+                            "type": "array",
+                            "items": { "type": "string" }
+                          },
+                          "fallbacks": {
+                            "description": "The chain behind this connector, in declared order.",
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": { "type": "string" },
+                                "name": { "type": "string" },
+                                "type": {
+                                  "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on.",
+                                  "allOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "kyc",
+                                        "kyb",
+                                        "aml",
+                                        "credit",
+                                        "phone_verification",
+                                        "email_verification",
+                                        "email_delivery",
+                                        "sms_delivery",
+                                        "bank_verification",
+                                        "payment",
+                                        "e_signature",
+                                        "document_storage",
+                                        "custom"
+                                      ],
+                                      "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on.",
+                                      "title": "ConnectorType"
+                                    }
+                                  ]
+                                },
+                                "order": {
+                                  "type": "integer",
+                                  "description": "Position among the step connectors."
+                                },
+                                "canReject": {
+                                  "type": "boolean",
+                                  "description": "Whether the connector may refuse the step."
+                                },
+                                "async": {
+                                  "type": "boolean",
+                                  "description": "Whether the connector resolves asynchronously."
+                                },
+                                "fieldMapping": {
+                                  "type": "object",
+                                  "additionalProperties": { "type": "string" },
+                                  "description": "Required connector inputs, mapped to the context field that fills each."
+                                },
+                                "optionalFieldMapping": {
+                                  "type": "object",
+                                  "additionalProperties": { "type": "string" },
+                                  "description": "Optional connector inputs, mapped to the context field that fills each."
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name",
+                                "type",
+                                "order",
+                                "canReject",
+                                "async",
+                                "fieldMapping",
+                                "optionalFieldMapping"
+                              ],
+                              "title": "WorkflowStepConnectorResponseDto"
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "type",
+                          "order",
+                          "canReject",
+                          "async",
+                          "fieldMapping",
+                          "optionalFieldMapping",
+                          "authoredId",
+                          "selected",
+                          "selectableIds",
+                          "fallbacks"
+                        ],
+                        "title": "WorkflowStepConnectorWithFallbacksResponseDto"
+                      }
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "terminal",
+                    "transitions",
+                    "source",
+                    "fields",
+                    "connectors"
+                  ],
+                  "title": "WorkflowStepResponseDto"
+                }
+              }
+            },
+            "required": [
+              "workflowId",
+              "workflowVersion",
+              "name",
+              "initialStep",
+              "scores",
+              "webhook",
+              "steps"
+            ],
+            "title": "WorkflowDefinitionResponseDto"
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "403": {
+      "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "404": {
+      "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["WORKFLOW_NOT_FOUND"] } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "responses": {
+    "201": {
+      "description": "The onboarding exists and sits on its initial step.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "onboardingId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The new onboarding. Treat it as a capability: every flow route is keyed by it and none of them is authenticated."
+              },
+              "status": {
+                "description": "Status after the initial step was entered.",
+                "allOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "awaiting_user",
+                      "awaiting_manual_review",
+                      "approved",
+                      "rejected",
+                      "invalid"
+                    ],
+                    "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+                    "title": "WorkflowStatus"
+                  }
+                ]
+              },
+              "currentStep": {
+                "type": ["string", "null"],
+                "description": "The step now awaiting data; null once the onboarding is terminal."
+              },
+              "expiresAt": {
+                "type": "null",
+                "description": "Reserved. Onboardings do not expire yet, so this is always null."
+              }
+            },
+            "required": ["onboardingId", "status", "currentStep", "expiresAt"],
+            "title": "CreateOnboardingResponseDto"
+          }
+        }
+      }
+    },
+    "400": {
+      "description": "The body or query violates its declared shape; `message` names each violated rule.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "404": {
+      "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["WORKFLOW_NOT_FOUND"] } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["AGREEMENT_NOT_PUBLISHED"] } }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

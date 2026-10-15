@@ -1,0 +1,46 @@
+---
+id: accept-onboarding-agreement
+title: 'Accept an agreement version'
+description: 'Records that the end customer accepted one published version the onboarding already holds, typically the `latestAgreementId` of a family `GET /v1/onboardings/{id}/agreements` reports as `outdated` or `not_accepted`. Idempotent: a repeat reports the original `acceptedAt`, and `200` says nothing is created beyond the recorded acceptance. Not gated on the lifecycle status, so an approved customer can still accept new terms. Only a version the onboarding is already linked to can be accepted, which is what keeps this open route from being a way to attach arbitrary versions to an onboarding.'
+sidebar_label: 'Accept an agreement version'
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: 'post api-method'
+info_path: api/0.1/tsh-onboarding-conductor-engine-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from '@theme/ApiExplorer/MethodEndpoint';
+import ParamsDetails from '@theme/ParamsDetails';
+import RequestSchema from '@theme/RequestSchema';
+import StatusCodes from '@theme/StatusCodes';
+import OperationTabs from '@theme/OperationTabs';
+import TabItem from '@theme/TabItem';
+import Heading from '@theme/Heading';
+import Translate from '@docusaurus/Translate';
+
+<Heading
+  as={'h1'}
+  className={'openapi__heading'}
+  children={'Accept an agreement version'}
+></Heading>
+
+<MethodEndpoint
+  method={'post'}
+  path={'/v1/onboardings/{id}/agreements/{agreementId}/accept'}
+  context={'endpoint'}
+></MethodEndpoint>
+
+Records that the end customer accepted one published version the onboarding already holds, typically the `latestAgreementId` of a family `GET /v1/onboardings/{id}/agreements` reports as `outdated` or `not_accepted`. Idempotent: a repeat reports the original `acceptedAt`, and `200` says nothing is created beyond the recorded acceptance. Not gated on the lifecycle status, so an approved customer can still accept new terms. Only a version the onboarding is already linked to can be accepted, which is what keeps this open route from being a way to attach arbitrary versions to an onboarding.
+
+<Heading id={'request'} as={'h2'} className={'openapi-tabs__heading'}>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails {...require('./accept-onboarding-agreement.ParamsDetails.json')}></ParamsDetails>
+
+<RequestSchema {...require('./accept-onboarding-agreement.RequestSchema.json')}></RequestSchema>
+
+<StatusCodes {...require('./accept-onboarding-agreement.StatusCodes.json')}></StatusCodes>

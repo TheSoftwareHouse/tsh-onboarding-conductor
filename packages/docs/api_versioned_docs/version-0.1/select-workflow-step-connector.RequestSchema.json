@@ -1,0 +1,23 @@
+{
+  "title": "Body",
+  "body": {
+    "required": true,
+    "content": {
+      "application/json": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "connectorId": {
+              "type": "string",
+              "description": "The id of a registered connector adapter that can serve the step's connector slot.",
+              "example": "veriff_kyc",
+              "maxLength": 64
+            }
+          },
+          "required": ["connectorId"],
+          "title": "SelectWorkflowConnectorRequestDto"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,189 @@
+{
+  "responses": {
+    "200": {
+      "description": "The chosen state, the key history, the rotation schedule and the sweep progress toward that state.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "description": "Whether encryption is turned on: a key exists that has not been retired. `true` from the moment an operator turns it on, including the grace window before that key activates (`keys[].pendingActivation`); `false` from the moment it is turned off, including the grace window in which the retiring key still protects new writes (`keys[].active`)."
+              },
+              "keyConfigured": {
+                "type": "boolean",
+                "description": "Whether this engine process holds the key-encryption key (`ENCRYPTION_KEY`). Without it, encryption cannot be turned on and no key can be added from this process."
+              },
+              "keys": {
+                "description": "Every key that has ever protected `onboardings.context`, most recent first.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "The id written into every envelope this key produced."
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When the row was created."
+                    },
+                    "createdBy": {
+                      "type": ["string", "null"],
+                      "description": "The operator who turned encryption on or added this key, as the bearer token identified them, or the unknown-actor marker when admin authentication is off. Null only for a row inserted outside the API; every key the engine creates records who asked for it."
+                    },
+                    "activatedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When this key becomes (or became) the active one. May be in the future — see `pendingActivation`."
+                    },
+                    "deletedAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time",
+                      "description": "When this key stops (or stopped) protecting new writes — superseded by a rotation or retired by turning encryption off; null while it has not been. May be in the future: the key stays `active` until then."
+                    },
+                    "active": {
+                      "type": "boolean",
+                      "description": "Whether this is the key `encrypt` currently uses."
+                    },
+                    "pendingActivation": {
+                      "type": "boolean",
+                      "description": "Whether this key has been added but has not activated yet — `activatedAt` is still in the future, during the grace window that gives every replica a chance to learn of it before anything encrypts with it. The previous key remains `active` until then."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "createdAt",
+                    "createdBy",
+                    "activatedAt",
+                    "deletedAt",
+                    "active",
+                    "pendingActivation"
+                  ],
+                  "title": "EncryptionKeyResponseDto"
+                }
+              },
+              "rotation": {
+                "type": "object",
+                "properties": {
+                  "interval": {
+                    "description": "How often the engine rotates the key on its own; `null` when it does not, and while encryption is off.",
+                    "oneOf": [
+                      {
+                        "allOf": [
+                          {
+                            "type": "string",
+                            "enum": ["48h", "96h", "1w", "2w", "1mo"],
+                            "description": "How often the engine rotates the encryption key on its own, measured from the active key's creation: 48 or 96 hours, one or two weeks, or a fixed 30-day month.",
+                            "title": "EncryptionKeyRotationInterval"
+                          }
+                        ]
+                      },
+                      { "type": "null" }
+                    ]
+                  },
+                  "nextRotationAt": {
+                    "type": ["string", "null"],
+                    "format": "date-time",
+                    "description": "When the next automatic rotation falls due: the active key's `createdAt` plus `interval`. Null whenever `interval` is. In the past for a schedule that has come due but whose rotation the engine has not run yet — it checks every `ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS`."
+                  }
+                },
+                "required": ["interval", "nextRotationAt"],
+                "title": "EncryptionRotationResponseDto"
+              },
+              "progress": {
+                "type": "object",
+                "properties": {
+                  "pending": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Onboardings not yet in the chosen state: stored as plain JSON while encryption is on, still encrypted while it is off. A row on a superseded key is not pending — rotation is lazy, so it moves to the current key the next time it is written."
+                  },
+                  "total": { "type": "integer", "minimum": 0, "description": "Every onboarding." }
+                },
+                "required": ["pending", "total"],
+                "title": "SweepProgressResponseDto"
+              },
+              "reencrypting": {
+                "type": "boolean",
+                "description": "Whether an operator's request to re-encrypt every stored onboarding onto the active key is still outstanding. While it is, `progress.pending` counts rows on a superseded key as work; otherwise those rows are not pending, because rotation is lazy."
+              }
+            },
+            "required": [
+              "enabled",
+              "keyConfigured",
+              "keys",
+              "rotation",
+              "progress",
+              "reencrypting"
+            ],
+            "title": "EncryptionStateResponseDto"
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "403": {
+      "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    }
+  }
+}

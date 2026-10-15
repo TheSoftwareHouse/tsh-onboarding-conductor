@@ -16,6 +16,7 @@ describe('field type registry', () => {
       'boolean',
       'date',
       'file',
+      'json',
       'object',
       'array',
     ]);

@@ -1,0 +1,18 @@
+{
+  "parameters": [
+    {
+      "name": "workflowId",
+      "required": true,
+      "in": "path",
+      "description": "The workflow id.",
+      "schema": { "example": "eu-b2c-individual-kyc-eea", "type": "string" }
+    },
+    {
+      "name": "stepName",
+      "required": true,
+      "in": "path",
+      "description": "The step whose binding is cleared.",
+      "schema": { "example": "submit_kyc", "type": "string" }
+    }
+  ]
+}

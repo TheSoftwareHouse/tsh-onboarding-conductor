@@ -5,3 +5,13 @@ packages/shared/openapi/engine.openapi.json
 # pnpm owns this file's layout and rewrites it on every install; Prettier would turn its flow
 # mappings into block style and the two would fight forever.
 pnpm-lock.yaml
+
+# Prettier has no parser for these and errors out when handed one explicitly (a staged-file list,
+# a package directory); listing them here makes it skip them silently instead.
+**/Dockerfile
+*.sh
+*.conf
+.env
+.env.*
+*.txt
+*.mov

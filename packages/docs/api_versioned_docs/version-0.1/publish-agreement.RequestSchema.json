@@ -1,0 +1,35 @@
+{
+  "title": "Body",
+  "body": {
+    "required": true,
+    "content": {
+      "application/json": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "maxLength": 100,
+              "pattern": "^[a-z0-9][a-z0-9-]*$",
+              "description": "The family to publish the next version of: lowercase letters, digits and dashes, opening on an alphanumeric, the same shape a workflow's `agreements[].key` takes. A key nobody has published starts a new family at version 1.",
+              "example": "eu-b2c-terms"
+            },
+            "type": {
+              "description": "The family's classification. Must match the type of every version already published under `key`.",
+              "allOf": [
+                {
+                  "type": "string",
+                  "enum": ["terms_and_conditions", "privacy_notice"],
+                  "description": "What an agreement family is: terms, or a privacy notice. A property of the family rather than of one version, so every version published under one `key` classifies the same way.",
+                  "title": "AgreementType"
+                }
+              ]
+            }
+          },
+          "required": ["key", "type"],
+          "title": "PublishAgreementRequestDto"
+        }
+      }
+    }
+  }
+}

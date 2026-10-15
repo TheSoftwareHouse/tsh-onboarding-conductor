@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   Max,
   Min,
   validateSync,
@@ -81,6 +82,10 @@ const SUMSUB_TIMEOUT_MS_MAX = 30000;
 const VERIFF_TIMEOUT_MS_DEFAULT = 10000;
 const VERIFF_TIMEOUT_MS_MIN = 100;
 const VERIFF_TIMEOUT_MS_MAX = 30000;
+
+const ALGOAN_TIMEOUT_MS_DEFAULT = 10000;
+const ALGOAN_TIMEOUT_MS_MIN = 100;
+const ALGOAN_TIMEOUT_MS_MAX = 30000;
 
 const CONNECTOR_CALLBACK_UNSIGNED_TYPES_DEFAULT = '';
 
@@ -402,6 +407,21 @@ export class AppConfig {
   @IsOptional()
   @Type(() => Number)
   VERIFF_TIMEOUT_MS: number = VERIFF_TIMEOUT_MS_DEFAULT;
+
+  /**
+   * Algoan's `clientId` and `clientSecret` are operator-provided connector settings, not
+   * environment variables. ALGOAN_API_BASE_URL and ALGOAN_TIMEOUT_MS are deployment settings.
+   */
+  @IsUrl({ require_tld: false, require_protocol: true, protocols: ['http', 'https'] })
+  @Type(() => String)
+  ALGOAN_API_BASE_URL: string = 'https://api.algoan.com';
+
+  @IsInt()
+  @Min(ALGOAN_TIMEOUT_MS_MIN)
+  @Max(ALGOAN_TIMEOUT_MS_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  ALGOAN_TIMEOUT_MS: number = ALGOAN_TIMEOUT_MS_DEFAULT;
 
   @IsString()
   @IsOptional()

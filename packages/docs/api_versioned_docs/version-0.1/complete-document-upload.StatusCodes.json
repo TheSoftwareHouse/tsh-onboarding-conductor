@@ -1,0 +1,114 @@
+{
+  "responses": {
+    "201": {
+      "description": "The document is verified and attached to the onboarding.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": { "documentId": { "type": "string", "format": "uuid" } },
+            "required": ["documentId"],
+            "title": "CompleteDocumentUploadResponseDto"
+          }
+        }
+      }
+    },
+    "400": {
+      "description": "`INVALID_DOCUMENT_UPLOAD`: The reservation or completion is not acceptable: the current step has no such upload field, the content type, size or image dimensions fall outside what the field allows, or the completion body is not empty.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["INVALID_DOCUMENT_UPLOAD"] } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "404": {
+      "description": "`DOCUMENT_UPLOAD_NOT_FOUND`: No onboarding has this id, or no reservation with this document id belongs to it.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": ["DOCUMENT_UPLOAD_NOT_FOUND", "WORKFLOW_NOT_FOUND"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "409": {
+      "description": "`DOCUMENT_UPLOAD_EXPIRED`: The reservation's upload window has passed; reserve again.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["DOCUMENT_UPLOAD_EXPIRED"] } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "410": {
+      "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["WORKFLOW_RETIRED"] } }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -4,6 +4,7 @@ export const STEP_KIND_LABELS: Record<string, string> = {
   'connector-call': 'Connector call',
   consents: 'Consents',
   'contact-details': 'Contact details',
+  'credit-assessment': 'Credit check',
   custom: 'Custom',
   decision: 'Branch',
   'document-capture': 'Document upload',

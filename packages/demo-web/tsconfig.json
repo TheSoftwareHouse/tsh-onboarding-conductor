@@ -1,9 +1,26 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "node", "@playwright/test", "@testing-library/jest-dom/vitest"],
+    "jsx": "react-jsx",
+    "useDefineForClassFields": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
     "noEmit": true,
-    "types": ["node", "@playwright/test"]
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
-  "include": ["playwright.config.ts", "e2e/**/*.ts"]
+  "include": [
+    "src",
+    "e2e",
+    "vite.config.ts",
+    "tailwind.config.ts",
+    "playwright.config.ts",
+    "vitest.setup.ts"
+  ]
 }

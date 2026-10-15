@@ -1,0 +1,18 @@
+{
+  "parameters": [
+    {
+      "name": "id",
+      "required": true,
+      "in": "path",
+      "description": "The onboarding id.",
+      "schema": { "format": "uuid", "type": "string" }
+    },
+    {
+      "name": "documentId",
+      "required": true,
+      "in": "path",
+      "description": "The reservation to complete, as the reserve route returned it.",
+      "schema": { "format": "uuid", "type": "string" }
+    }
+  ]
+}

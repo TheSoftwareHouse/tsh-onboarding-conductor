@@ -114,6 +114,22 @@ export class StepDescriptionResponseDto {
   schema!: JsonSchemaFragment;
 }
 
+/** The connector a parked onboarding waits on; the provider's own reference stays server-side. */
+export class OnboardingStatePendingResponseDto {
+  @ApiProperty({ description: 'The id of the connector the onboarding is waiting on.' })
+  connectorId!: string;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'When the onboarding was first parked on this connector; null for a row parked before ' +
+      'the engine recorded it.',
+  })
+  parkedAt!: string | null;
+}
+
 /** Everything a client needs to render the current step and to know when there is none left. */
 export class OnboardingStateResponseDto {
   @ApiProperty({ format: 'uuid' })
@@ -154,4 +170,22 @@ export class OnboardingStateResponseDto {
     description: 'The step to render, resolved against the persisted data; null when terminal.',
   })
   step!: StepDescriptionResponseDto | null;
+
+  @ApiProperty({
+    type: () => OnboardingStatePendingResponseDto,
+    nullable: true,
+    description:
+      'The connector the onboarding is parked on awaiting a provider callback, so a client can ' +
+      'show it as processing; null when it is not waiting for one.',
+  })
+  pending!: OnboardingStatePendingResponseDto | null;
+
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: { allOf: [{ $ref: schemaRef(JSON_VALUE_SCHEMA) }] },
+    description:
+      'The current value of every field a step marked client-visible, for every step already ' +
+      'passed, keyed by field name. Nothing else the onboarding collected appears here.',
+  })
+  data!: Record<string, unknown>;
 }

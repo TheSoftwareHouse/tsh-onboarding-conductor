@@ -89,17 +89,17 @@ Three design commitments run through the whole codebase and explain most of the 
 
 ### Packages
 
-| Package                                          | State                  | Role                                                                                                                                                                                               |
-| ------------------------------------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/engine` (`@tsh/engine`)                | **Substantive**        | The orchestrator. All business logic.                                                                                                                                                              |
-| `packages/shared/ddl-schema` (`@tsh/ddl-schema`) | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine.                                                              |
-| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors section that writes settings. Talks to the engine directly.                                                              |
-| `packages/demo-bff`                              | **Empty placeholder**  | Name/version only. No source.                                                                                                                                                                      |
-| `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                                                                              |
-| `packages/docs` (`@tsh/docs`)                    | **Substantive**        | The documentation site: Docusaurus 3 with the TSH theme; hand-written guides, an API reference generated from the OpenAPI document and a fixtures gallery generated from the workflow files (§13). |
-| `packages/shared/openapi` (`@tsh/openapi`)       | **Generated artefact** | `engine.openapi.json`, the engine's OpenAPI 3.1 document, written by `pnpm openapi:generate` and held equal to the code by a unit test (§11). No source of its own.                                |
-| `packages/skill-evals` (`@tsh/skill-evals`)      | **Substantive**        | Golden-set evaluation of the skills under `.claude/skills/`: runs each case through headless Claude Code, grades the sandbox with the DDL oracles and a Claude judge, writes a report (§13).       |
-| `packages/shared`                                | **Empty placeholder**  | Placeholder exports.                                                                                                                                                                               |
+| Package                                          | State                  | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/engine` (`@tsh/engine`)                | **Substantive**        | The orchestrator. All business logic.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `packages/shared/ddl-schema` (`@tsh/ddl-schema`) | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors section that writes settings. Talks to the engine directly.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `packages/demo-bff` (`@tsh/demo-bff`)            | **Implemented**        | NestJS backend-for-frontend of the BNPL demo (ADR 0048): validated `AppConfig`, the engine client and its `EngineError`, and `v1/bnpl` routes: `GET personas`, `POST sessions`, `GET sessions/:token` (long-poll with `wait`), `POST sessions/:token/submit` and `POST sessions/:token/run`. Configured from the environment only; on the host `pnpm demo:dev` (`scripts/demo-dev.cjs`) loads the repository's `.env` and runs it beside the web app, and a relative `PERSONAS_DIR` resolves against the repository root. |
+| `packages/demo-web` (`@tsh/demo-web`)            | **Implemented**        | React 19 + Vite web app of the BNPL demo (ADR 0048): Tailwind 4 with TSH tokens, shadcn/ui, TanStack Query, the typed BFF client with its long-poll `waitForResult`, runtime BFF origin via `/config.js`, nginx image and Compose service `demo-web` (profile `demo`). Pages: persona picker, `start/:persona`, then per session `details`, `consent`, `run`, `processing` and `result`; Playwright smoke and journey specs.                                                                                              |
+| `packages/docs` (`@tsh/docs`)                    | **Substantive**        | The documentation site: Docusaurus 3 with the TSH theme; hand-written guides, an API reference generated from the OpenAPI document and a fixtures gallery generated from the workflow files (§13).                                                                                                                                                                                                                                                                                                                        |
+| `packages/shared/openapi` (`@tsh/openapi`)       | **Generated artefact** | `engine.openapi.json`, the engine's OpenAPI 3.1 document, written by `pnpm openapi:generate` and held equal to the code by a unit test (§11). No source of its own.                                                                                                                                                                                                                                                                                                                                                       |
+| `packages/skill-evals` (`@tsh/skill-evals`)      | **Substantive**        | Golden-set evaluation of the skills under `.claude/skills/`: runs each case through headless Claude Code, grades the sandbox with the DDL oracles and a Claude judge, writes a report (§13).                                                                                                                                                                                                                                                                                                                              |
+| `packages/shared`                                | **Empty placeholder**  | Placeholder exports.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 The split between `engine` and `ddl-schema` matters: the DDL package has no Nest dependency and no
 HTTP concerns, so the workflow contract can be consumed by a future BFF, admin UI, or a workflow
@@ -245,6 +245,10 @@ onboarding, not of the connector — the same identity check serves both — so 
 `custom` covers a connector with no capability of its own, which is what makes the generic
 `http_request` connector expressible at all.
 
+`credit` is the capability of a connector that scores an applicant's finances: it takes a bank-data
+document and reports a score the workflow routes on. Its kernel and the one step type that binds it
+are described under "The credit connector" (§4) and `credit-assessment` (§2.1).
+
 **The workflow root has no `type`.** A workflow is classified by the connectors it calls, and a
 workflow like `manual-review` calls none, so there is nothing it could honestly declare. Declaring
 one at the root would also be a second copy of a value the step already carries.
@@ -336,7 +340,11 @@ the applicant unlimited provider sessions. `Workflow.evaluate` therefore refuses
 (`continuation` absent) that carries any key an async candidate of the step's slots — fallbacks
 included — lists in `callbackFields`: `400 INVALID_STEP_DATA` with `{field: ['CALLBACK_ONLY']}`,
 before any connector runs. The continuation — the provider's callback and the operator reconcile,
-applied through the same submit path — carries them freely. `GET …/state` still lists the fields in
+applied through the same submit path — carries them freely, and carries only them: before
+validation, `Workflow.evaluate` layers the continuation's fields over the values the client's own
+submit already persisted for that step (`Step.collectPersistedData`), so a required client field on
+the parking step — the credit step's `bankData` document — is not demanded a second time, while a
+required field the client never sent still fails `REQUIRED`. `GET …/state` still lists the fields in
 `step.schema`, since they are the step's; a client should not send them.
 
 **The shipped Veriff family carries Sumsub's keys.** A selection keeps the authored `config`, and
@@ -353,7 +361,7 @@ boot and fails loudly when the step executes; it never falls back to the authore
 
 ### Fields
 
-Root types: `boolean`, `number`, `text`, `date`, `file`, `object`, `array`. `string` is a legacy
+Root types: `boolean`, `number`, `text`, `date`, `file`, `object`, `array`, `json`. `string` is a legacy
 alias normalized to `text`. Validation is strict: unknown root fields and unknown nested object
 properties are rejected, and values are never coerced (Ajv strict mode).
 
@@ -377,6 +385,14 @@ statically analysable — `collectConditionReferences` is what powers both depen
 the `dependsOn` hint the `/state` endpoint gives the client; (c) safe by construction, with no
 evaluator to audit. The cost is that arithmetic and cross-field comparison are not expressible;
 that has not yet been needed, and the escape hatch is a connector.
+
+`json` is an open JSON object — any properties, any nesting — for a value the engine only carries,
+such as a provider's report, where `object` cannot serve because it must enumerate its children and
+rejects every other key. It is root-level only (so a checked shape never contains an unchecked one),
+takes no `validation` (any `validation` key is `INVALID_VALUE`), its step-data schema is plain
+`{ "type": "object" }`, and it cannot be compared in a condition. `packages/shared/ddl-schema/src/fields/json.field-type.ts`;
+Any step may declare one. The credit step uses it for callback-only provider data, which `CALLBACK_ONLY` keeps a client from submitting; an applicant-writable `json` field is bounded only by the engine's request body limit.
+[0047](./decisions/0047-credit-assessment-step-bank-data-document-and-bands.md) records why it exists.
 
 `file` fields are special-cased: `required` must be `true`, `validation.contentTypes` and
 `validation.maxSizeBytes` are mandatory, and at most one per step. They are not submitted inline —
@@ -635,6 +651,7 @@ keyed to its version — the same seam, and the same reasoning, as the field-typ
 | `selfie-capture`            | collect   | One upload, in the selfie slot rather than the identity one                                                      |
 | `otp-verify`                | verify    | Send, check and re-send of a code to the address a collector published                                           |
 | `kyc-identity-verification` | verify    | One parked step, seven ports, five callback fields, connector declaration derived from the contract              |
+| `credit-assessment`         | verify    | One parked step: a `bankData` upload, four outcome ports, nine callback fields, connector declaration derived    |
 | `decision`                  | decide    | A data-less branch point; one port per condition                                                                 |
 | `risk-score`                | decide    | A step's scoring rules, with score-banded ports                                                                  |
 | `manual-review`             | decide    | An `awaiting_manual_review` step; approve / reject ports, `invalid` optional                                     |
@@ -689,6 +706,33 @@ own `startConfig` and `checkConfig`, since a mock's `challenge` is Twilio's `sta
 The `connector-call` type has no slot at all: its `connectors` are declarations in full, as a
 compiled step carries them, which is what makes a mock `kyc` adapter on a collection step
 expressible without a `custom` step.
+
+**The credit-assessment step** (`step-types/types/credit-assessment.step-type.ts`,
+[0047](./decisions/0047-credit-assessment-step-bank-data-document-and-bands.md)) is the credit
+counterpart of the identity-verification step, with slot `{ types: ['credit'], extras: 'none' }`: the
+binding names the connector and the failure policy, and nothing else may be added to the compiled
+declaration's `fieldMapping` or `config`. It owns the one input the client gives it, `bankData`, a
+required `file` field restricted to `application/json` (default cap 1 MiB, `bankDataMaxSizeBytes`),
+and declares every field the callback fills: `creditOutcome` (`oneOf` the four ports),
+`creditScore`, `creditScoreBand` (`approve` | `review` | `decline`), `creditIndicators`,
+`creditSecondaryScores`, `creditReasonCodes`, `creditAttemptCount`, `creditProviderReference` and
+`creditReport`. `creditOutcome`, `creditScore`, `creditScoreBand`, `creditIndicators`,
+`creditSecondaryScores`, `creditReport` and `creditAttemptCount` are `clientVisible` (§3); the
+reason codes and the provider reference are not. `creditIndicators`, `creditSecondaryScores` and `creditReport` are of the `json` type.
+Field names are unique across a document, so a document holds one such step.
+
+Config: `connector` (required), `bands` (`approveFrom` default 700, `reviewFrom` default 400,
+integers 0–1000, `approveFrom` strictly above `reviewFrom`), `maxAttempts` (default 3), `applicant`
+(`firstName` / `lastName` / `email`, each a boolean opt-in; an opted-in role no earlier step published
+as a canonical field fails the load with `INVALID_VALUE`, and each maps to that field as a
+`fieldMapping` key of the role's name), `products` (default `creditScore`, `paymentScore`), `report`
+(`full` default, `summary`, `none`) and `bankDataMaxSizeBytes`. The compiled declaration carries
+`bands`, `maxAttempts`, `products` and `report` in its `config` and has `async: true`, so the step
+parks. Ports are `approved`, `review`, `declined` and `retry` (`CREDIT_OUTCOMES`, owned by
+`@tsh/ddl-schema`); `approved`, `declined` and `retry` compile to `success` transitions on
+`creditOutcome`, and `review` is the unconditional last transition, so an outcome the arms do not
+claim is a human's call. The step's connector binding takes no extra `config` or `fieldMapping`, so a typed credit
+step cannot carry provider-specific keys; the kernel's `providerConfig` is empty for it.
 
 **Collecting contact details and proving them are two steps.** `contact-details` collects `email`
 and `phoneNumber` under those canonical names, each `required`, `optional` or `omitted`.
@@ -919,17 +963,18 @@ database.
 #### `built-in/` — shipped, loaded in every environment
 
 A built-in family cannot be extended from `users/`: a users file reusing its `id` fails the boot
-with `WorkflowScopeConflictError`. The four `users/*-local.workflow.json` files — `eu-b2c-individual-kyc-eea-local`,
-`eu-b2c-individual-kyc-eea-v2-local`, `eu-b2c-individual-kyc-eea-veriff-local` and
-`eu-b2c-individual-kyc-eea-veriff-v2-local` — are the fork pattern instead: copies under ids of their
+with `WorkflowScopeConflictError`. The five `users/*-local.workflow.json` files — `eu-b2c-individual-kyc-eea-local`,
+`eu-b2c-individual-kyc-eea-v2-local`, `eu-b2c-individual-kyc-eea-veriff-local`,
+`eu-b2c-individual-kyc-eea-veriff-v2-local` and `uk-bnpl-credit-check-algoan-local` — are the fork pattern instead: copies under ids of their
 own, with renamed `sourceKey`s (and, for the manual-test walkthroughs, a local provisioning stub).
 
-| File                                                | Rev | Authored as                           | Connector types                       | Is                                                                                                |
-| --------------------------------------------------- | --- | ------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `eu-b2c-individual-kyc-eea.workflow.json`           | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card      |
-| `eu-b2c-individual-kyc-eea-v2.workflow.json`        | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The identical flow, authored through the specialized step types (§2.1)                            |
-| `eu-b2c-individual-kyc-eea-veriff.workflow.json`    | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The same flow with the KYC step bound to `veriff_kyc` (family `eu-b2c-individual-kyc-eea-veriff`) |
-| `eu-b2c-individual-kyc-eea-veriff-v2.workflow.json` | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The Veriff family's revision 2, through the specialized step types                                |
+| File                                                | Rev | Authored as                           | Connector types                       | Is                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------- | --- | ------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `eu-b2c-individual-kyc-eea.workflow.json`           | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card                                                                                                                                                                                                                             |
+| `eu-b2c-individual-kyc-eea-v2.workflow.json`        | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The identical flow, authored through the specialized step types (§2.1)                                                                                                                                                                                                                                                   |
+| `eu-b2c-individual-kyc-eea-veriff.workflow.json`    | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The same flow with the KYC step bound to `veriff_kyc` (family `eu-b2c-individual-kyc-eea-veriff`)                                                                                                                                                                                                                        |
+| `eu-b2c-individual-kyc-eea-veriff-v2.workflow.json` | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The Veriff family's revision 2, through the specialized step types                                                                                                                                                                                                                                                       |
+| `uk-bnpl-credit-check-algoan.workflow.json`         | 1   | specialized step types                | `credit`                              | UK BNPL credit check on `algoan_credit`: consent, one `bankData` upload, a score banded at 700 / 400 into approved, `manual_review` or declined, `retry` back to `credit_consent`; its fork `users/uk-bnpl-credit-check-algoan-local.workflow.json` differs only in id and name; guide: docs site "UK BNPL credit check" |
 
 Seventeen steps: contact and consents → SMS one-time code (with a resend path) → declared identity →
 purpose and source of funds → `select_document_type` → the capture steps for the document chosen →
@@ -1085,6 +1130,7 @@ scopes, and holds each fixture's file name to its `id`, which the fixtures site 
 | `sendgrid-email`                     | `email_delivery`                              | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `file-upload`                        | `kyc`                                         | `file` field plus the document reservation flow                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `manual-review`                      | none                                          | All three manual triggers and a recursive `success` transition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `credit-check`                       | `credit`                                      | The built-in `uk-bnpl-credit-check-algoan` shape on `mock_credit`: a `credit-assessment` step with a `bankData` upload, banded outcome ports and a `retry` loop; the e2e suite `credit-assessment.e2e-spec.ts` runs against it without network                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `scoring`                            | `phone_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_verify` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting |
 
 ---
@@ -1206,6 +1252,8 @@ without knowing the workflow:
   "currentStep": "collect_email",
   "terminal": false,
   "rejectionReason": null,
+  "pending": null, // { connectorId, parkedAt } while parked on a provider callback
+  "data": {}, // values of client-visible fields of the steps already passed
   "step": {
     "name": "collect_email",
     "status": "awaiting_user",
@@ -1234,6 +1282,27 @@ rather than only the resolved `active` flag, because the server resolves against
 context while a form's conditions depend on values the user is still typing — the client must be
 able to re-resolve locally. `upload` exists because JSON Schema cannot express content types and
 size limits.
+
+### Client-visible data
+
+`/state` carries two keys beyond the step descriptor, so a client can render a processing screen and
+show what an earlier step produced without the engine publishing the whole context.
+
+- **`data`** holds the context value of every field its step marked `clientVisible: true`, keyed by
+  field name, for every step **except the current one** — and for every step once the onboarding is
+  terminal, since `currentStep` is then null. A field with no value in the context is left out, so
+  `data` is `{}` until a step has written one. The current step's own values reach the client
+  through its `fields[].value`. `clientVisible` is a boolean on a root field of a step's `data`
+  declaration; the normalizer keeps it only when it is `true` (default false), and rejects a
+  non-boolean with `INVALID_VALUE`. A step type opts a field in through the `clientVisible` flag on
+  its field declaration. Nothing else the onboarding collected appears in `data`.
+- **`pending`** is `{ "connectorId": "…", "parkedAt": "…" }` while the onboarding is parked on a
+  connector awaiting a provider callback, otherwise `null`. `parkedAt` is null for a row parked
+  before the engine recorded it. The provider's `providerReference` is never exposed.
+
+_Reasoning:_ the field's author, not the client, decides what is safe to show: opting in per field
+keeps verdicts and scores that a step collects for its own routing out of the public contract by
+default. See ADR 0046.
 
 ---
 
@@ -1468,6 +1537,7 @@ Declared schemas:
 | `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       |
 | `sumsub_kyc`     | `appToken` (required), `secretKey` (secret, required), `callbackSigningSecret` (secret, required)                     |
 | `veriff_kyc`     | `apiKey` (required), `sharedSecretKey` (secret, required)                                                             |
+| `algoan_credit`  | `clientId` (required), `clientSecret` (secret, required), `callbackSigningSecret` (secret, required)                  |
 
 Stored values are one flat `Record<string, string>` per connector, held as plaintext JSON in the
 `connectors` table (`id` primary key, `type`, `settings jsonb`, `updated_at`, `updated_by`) — see
@@ -1560,6 +1630,8 @@ adapters directory.
 | `smtp`                                               | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`.                                                                         |
 | `sumsub_kyc`                                         | Real        | KYC via Sumsub; `async: true`-only (park on `execute`, resume on the provider's callback). See "The KYC connector" below.                                                                                       |
 | `veriff_kyc`                                         | Real        | KYC via Veriff, API-only; the same kernel and the same `async: true`-only contract as `sumsub_kyc`. See "The KYC connector" below.                                                                              |
+| `algoan_credit`                                      | Real        | Credit assessment via Algoan, API-only; `async: true`-only, signed callback. See "`algoan_credit`" under "The credit connector" below.                                                                          |
+| `mock_credit`                                        | Mock        | A credit provider with no vendor: scores a bank-data upload by the account owner's name; state in process memory, lost on restart; unsigned callback. See "The credit connector" below.                         |
 | `mock_kyc_1`, `mock_kyc_2`                           | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                                                                                          |
 | `mock_phone_verification`, `mock_email_verification` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.                                                                           |
 | `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                                                                                                    |
@@ -1932,6 +2004,189 @@ since `VeriffMediaFitter` brings them within Veriff's 1920 px longer-side limit 
 `scripts/run-eu-b2c-kyc-manual-test-veriff.sh` drives the Veriff walkthrough end to end against
 `eu-b2c-individual-kyc-eea-veriff-v2-local` and stops at the one step only the Portal can perform.
 
+#### Algoan sandbox manual test
+
+`scripts/run-uk-bnpl-manual-test-algoan.sh [--persona sherlock_holmes|james_watson|james_moriarty]`
+drives the UK BNPL credit check against the Algoan sandbox: it stores the `algoan_credit` settings,
+recreates the two webhook subscriptions for `$TUNNEL`, starts an onboarding on
+`uk-bnpl-credit-check-algoan-local`, submits the applicant and consent, uploads the persona with its
+dates re-based to today (`scripts/rebase-bank-data-dates.cjs <in.json> [out.json]`, which shifts every
+`balanceDate` and `transactions[].dates.*` by `today - max(balanceDate)`) and prints `currentStep`,
+`creditOutcome`, `creditScore` and `creditScoreBand`. `API`, `TUNNEL`, `AUTO_CONFIRM=1` and
+`CREDIT_TIMEOUT` (300 s; afterwards it offers `POST /v1/onboardings/:id/pending-connector/reconcile`)
+work as in the Veriff script.
+
+`scripts/algoan-subscriptions.cjs list | create --target <url> [--events analysis_completed,analysis_failed]
+(--secret <value> | --secret-from-connector) | delete --path /v1/webhooks/algoan_credit/callback`
+manages Algoan's `/v1/subscriptions`: `create` deletes subscriptions whose target path matches (stale
+tunnel hosts), then makes one signed subscription per event. **Credentials come from the environment,
+not the engine:** the admin API masks connector secrets, so the scripts read `ALGOAN_CLIENT_ID`,
+`ALGOAN_CLIENT_SECRET` and `ALGOAN_CALLBACK_SIGNING_SECRET` (what `--secret-from-connector` means), and
+`ALGOAN_API_BASE_URL` overrides `https://api.algoan.com`. Neither script prints a secret or a token.
+Their request shaping is covered by `node --test scripts/algoan-subscriptions.spec.cjs` (no root
+script collects it).
+
+### The credit connector
+
+`CreditConnector` is the credit counterpart of the KYC kernel, in
+`connectors/adapters/built-in/credit/`: one abstract engine-facing class plus one `CreditProvider`
+strategy per vendor, on the pattern of
+[0037](./decisions/0037-kyc-connector-kernel-and-providers.md).
+[0045](./decisions/0045-credit-assessment-kernel-algoan-first-provider.md) records the decision
+(status Proposed). `algoan_credit` is the first real provider and `mock_credit` the fixture; another
+provider is a `CreditProvider` and a few registration lines ([EXTENDING.md](./EXTENDING.md), "Add a credit provider").
+
+- **`CreditConnector`** (`credit-connector.ts`, abstract, `type = 'credit'`,
+  `supportsAsyncCallback = true`) owns parsing the step's compiled `config` (`credit-config.ts`),
+  reading the `bankData` document before any provider call (`credit-submission.ts`), correlating a
+  callback, deciding the outcome (`credit-outcome.ts`), the attempt cap, the closed
+  `submittedData` and the log lines. `id`, `name`, `callbackAuth` and `settingsSchema` come from
+  the provider. Its `callbackFields` are the nine `credit*` keys, so a typed credit step can be
+  switched to it (§2, "Runtime selection").
+- **`CreditProvider`** (`credit-provider.port.ts`) owns the wire half: `id`, `name`,
+  `settingsSchema`, `callbackAuth`, `validateConfig(providerConfig, config)`,
+  `validateBankData(bankData)`, `startAssessment(settings, submission) → {providerReference}`,
+  `parseCallback(input, settings) → CreditCallbackEvent`, `buildReconcileEvent(reference)` and
+  `fetchResult(settings, event, context) → CreditResult`. A provider that needs more of its webhook
+  between `parseCallback` and `fetchResult` extends the event type.
+- **`MockCreditConnector`** / **`MockCreditProvider`** (`adapters/fixtures/mock-credit.connector.ts`)
+  are the only subclass today, registered in `FIXTURE_CONNECTOR_ADAPTER_PROVIDERS` in
+  `connectors.module.ts` with the provider in the module's providers.
+
+`shared/` (`built-in/shared/`) holds what the KYC and credit kernels both use, extracted when the
+second kernel arrived: `readCompletedDocument` (resolve a completed document through
+`CompletedOnboardingDocumentResolver` and read its verified bytes from `ObjectStoragePort`) and
+`buildParkedCallbackResult` (the redelivery-safe re-park that spreads the stored `pendingConnector`
+first, so the recorded reference and `parkedAt` survive).
+
+**Every outcome is `accepted()`; the workflow document routes.** As for KYC, the connector never
+returns `rejected()`: it reports `creditOutcome: 'approved' | 'review' | 'declined' | 'retry'` in
+`submittedData` and the step's ports route on it.
+
+**`config`.** `parseCreditConfig` reads `bands` (`approveFrom` strictly above `reviewFrom`),
+`maxAttempts` (a positive integer, **no code default** — the step type always emits one), `applicant`
+(role → payload key renames; a key that is not `firstName`, `lastName` or `email` is refused),
+`products` (default `creditScore`, `paymentScore`), `report` (`full`, `summary`, `none`) and
+`bankDataMaxSizeBytes`, and passes every other key to the provider as `providerConfig`. A malformed
+key raises `CreditConfigInvalidError` naming it, at startup through `validateDeclaration` (then the
+provider's own `validateConfig`).
+
+**`execute()`** reads the `bankData` document id from the payload; none, or one that resolves to no
+completed document, is `invalid()`. A content type other than `application/json` and a document the
+provider's `validateBankData` refuses both raise `CreditBankDataInvalidError`, which the connector
+answers as retryable `invalid-data` on the `bankData` field with reason `INVALID_BANK_DATA`
+(logged as `CREDIT_BANK_DATA_INVALID connectorId= onboardingId=`),
+so the client sees `400 INVALID_STEP_DATA` and uploads again. Otherwise it builds the submission —
+onboarding id, the 1-based attempt number (`creditAttemptCount` in the context plus one), the applicant roles
+the workflow bound (read from the payload by role name, or by the `config.applicant` rename; an
+unanswered role is absent) and the document — calls `provider.startAssessment` and returns
+`accepted({ providerReference })`; the executor records the reference on the park. One provider
+analysis per attempt.
+
+**`mapCallbackResult()`** follows the KYC order: `parseCallback`; a non-UUID onboarding id and an
+onboarding no longer awaiting this connector throw `ConnectorCallbackAlreadyAppliedError` (`204`,
+§5); `actionable: false` re-parks (`CREDIT_CALLBACK_ACKNOWLEDGED`, debug); an event whose
+`providerReference` differs from the parked one re-parks before anything is fetched
+(`CREDIT_CALLBACK_SUPERSEDED`); otherwise `provider.fetchResult` reads the result back — never taken
+from the webhook body — and the kernel decides. `reconcilePending` is the same without the parse
+(`reference_missing` when the park holds no reference; `CREDIT_RECONCILE ... outcome=`).
+
+**`CreditResult`** is what a provider maps onto: `pending` (re-park), `failed(codes, message?)`, or
+`scored(score, report)` where a `CreditScore` carries `value` and its `scale`, an optional
+`version`, `indicators` and `secondary` scores (Algoan's payment score, say).
+
+**Outcome rules** (`evaluateCreditOutcome`), in order:
+
+1. `failed` is `retry` while the attempt number is below `maxAttempts`, otherwise `review`, with the
+   provider's codes as `creditReasonCodes`. There is no score and no band.
+2. A score at or above `bands.approveFrom` is `approved` (band `approve`).
+3. At or above `bands.reviewFrom`, `review` (band `review`).
+4. Below it, `declined` (band `decline`).
+
+The attempt being decided is the one in the context plus one, the same number `execute` handed the
+provider. The kernel does not count attempts the provider reports: it is always the kernel's count.
+
+**`submittedData`** (`CreditCallbackSubmission`) is a closed declared shape, written verbatim into
+`webhook.inbound_callback_applied` metadata except for the report (§8):
+
+```ts
+type CreditCallbackSubmission = {
+  creditOutcome: 'approved' | 'review' | 'declined' | 'retry';
+  creditScore?: number; // rounded integer, provider's own scale; absent on a failure
+  creditScoreBand?: 'approve' | 'review' | 'decline';
+  creditIndicators?: Record<string, number>;
+  creditSecondaryScores?: Record<string, { value; scale: { min; max }; version? }>;
+  creditReasonCodes: readonly string[]; // empty when scored
+  creditAttemptCount: number; // this attempt included
+  creditProviderReference: string;
+  creditReport?: Record<string, unknown>; // shaped by config.report
+};
+```
+
+**The report.** `config.report` of `none` omits `creditReport`; `summary` keeps only the report's
+`scores` and `metadata` keys; `full` keeps all of it, trimmed by `trimCreditReport` to
+`CREDIT_REPORT_MAX_BYTES` (262144) of compact JSON, dropping the bulkiest parts first: the top-level
+`transactions`, then every `transactions` array inside `creditInsights`, then `creditInsights.cashFlows`;
+a report still over the cap becomes `{ truncated: true, bytes }`. The report is client-visible
+(§3) and lands in the onboarding context.
+
+**`mock_credit`** parks on `mock:<onboardingId>:<attempt>`, declares `callbackAuth: { kind: 'none' }`
+with a justification (production ingress refuses it unless named in `CONNECTOR_CALLBACK_UNSIGNED_TYPES`),
+and scores by `accounts[0].owners[0].name`, case-insensitively: `Sherlock Holmes` 965, `James Watson`
+598, `James Moriarty` 362 — the values measured against the Algoan sandbox — `Fail Case` fails with
+`NO_CHECKING_ACCOUNT`, any other name 600. Its callback body is `{ onboardingId, providerReference }`
+and carries no result. The provider keeps the uploaded document in memory, so an engine restart between
+submit and callback leaves the step parked until the client resubmits (`adapters/README.md`).
+
+#### `algoan_credit`
+
+`algoan-credit.connector.ts` is a thin `CreditConnector` subclass; the wire half is
+`algoan-credit/algoan-credit.provider.ts` over the `AlgoanClient` (bearer token from client
+credentials, cached). Declared in `connectors.module.ts`'s built-in array. The provider receives the
+parsed step config on `validateBankData` and `startAssessment`, so the step's `currency` (default
+`GBP`) is checked before Algoan is called and `config.products` decides whether insights are computed.
+
+**Settings** (`PUT /v1/admin/connectors/algoan_credit`):
+
+| Key                     | Secret | Required | Meaning                                                                                  |
+| ----------------------- | ------ | -------- | ---------------------------------------------------------------------------------------- |
+| `clientId`              | no     | yes      | The Algoan project's API client id                                                       |
+| `clientSecret`          | yes    | yes      | The matching client secret                                                               |
+| `callbackSigningSecret` | yes    | yes      | The `secret` of the Algoan webhook subscriptions; never the same value as `clientSecret` |
+
+`ALGOAN_API_BASE_URL` and `ALGOAN_TIMEOUT_MS` are deployment settings (§10), not credentials.
+
+**Callback recipe.** `callbackAuth` is `hmac` / `sha256` / hex over the header `X-Hub-Signature`,
+whose value is `sha256=<hex>`. The signed bytes are not the raw body: Algoan signs the JSON of the
+body's `payload` object only, in its escaped form (non-ASCII as `\uXXXX`, then `/`, `<`, `%` and `@`
+as `\/`, `\u003C`, `\u0025` and `\u0040`), keyed with `callbackSigningSecret`. `algoan-signature.ts`
+rebuilds that message from the parsed body.
+
+**Correlation.** `customIdentifier` of the Algoan customer is the onboarding id, and there is one
+customer per onboarding (an `ALREADY_EXISTS` answer on create recovers the existing one). Each
+attempt creates one analysis, and the park records the reference `<customerId>/<analysisId>`. A
+callback names `customerId` and `analysisId`; the provider looks the customer up to learn the
+onboarding id, and the kernel re-parks a callback whose reference is not the one parked. The body
+never carries the result: the provider reads the analysis, scores and report back through the API.
+
+**Events.** `analysis_completed` and `analysis_failed` are the two actionable events; the decision
+follows the analysis status read back (`COMPLETED` scores, `ERROR` fails, anything else re-parks).
+Any other event name (`bank_details_fetched`, `report_*`) is not actionable and names no onboarding,
+so ingress acknowledges it with no effect.
+
+**Error codes.** Algoan being unreachable, timing out or answering with a server error raises `AlgoanUnavailableException`
+(`ALGOAN_UNAVAILABLE`, 503), the same retry-later contract as the other providers. A `failed` result
+carries Algoan's own code into `creditReasonCodes`, such as `NO_CHECKING_ACCOUNT` (no personal
+checking account in the step's currency) or `NO_CREDIT_SCORE` (completed analysis with no credit
+score); the kernel's attempt cap then routes it to retry or review. A document the provider cannot
+accept is the step's own `bankData` field error (`INVALID_BANK_DATA`).
+
+**The subscription rule.** Operators create the two subscriptions (`analysis_completed`,
+`analysis_failed`, same target `<public host>/v1/webhooks/algoan_credit/callback`) with
+`scripts/algoan-subscriptions.cjs`, passing the connector's `callbackSigningSecret` as the secret.
+Never through the Algoan console: its "Add a webhook" dialog has no secret field, so the deliveries
+it creates are signed with a secret the operator cannot read and every callback fails verification.
+
 ---
 
 ## 5. Async provider callbacks
@@ -2216,8 +2471,11 @@ reservation for the same step/field is a `409`; an expired one is deleted from s
 `completeDocumentUpload` is where trust is established. It reads the staged object back and:
 
 - verifies the **actual** byte size equals the reserved size,
-- **sniffs** the MIME type from the bytes (`file-type`) and requires it to equal both the requested
-  content type and one of the field's allowed types,
+- **sniffs** the MIME type from the bytes (`file-type`; when no binary signature matches, UTF-8
+  text that opens like a JSON value — and parses, when the whole object fit the 1 MiB inspection
+  window — is reported as `application/json`, which is how the credit step's `bankData` document
+  passes) and requires it to equal both the requested content type and one of the field's allowed
+  types,
 - checks image dimensions (`image-size`) against `maxImageWidth` / `maxImageHeight` when declared,
 - promotes staging → final with an `If-Match` on the inspected ETag, then marks the row `completed`.
 
@@ -2340,7 +2598,17 @@ Data boundaries are deliberate and documented rather than incidental:
   response/error bodies and exception text.
 - `webhook.inbound_callback_applied` **does** retain the applied submitted data and connector
   result — a declared sensitive-data exception, because reconstructing a provider-driven state
-  change otherwise is impossible.
+  change otherwise is impossible. The one exception to the exception is a field the adapter names in
+  `ConnectorAdapter.auditRedactedFields`: `redactAuditFields` (`connectors/ports/audit-redaction.ts`)
+  replaces each such top-level field of `submittedData` with `<field>Bytes`, the size of its compact
+  JSON, so the row records that the value arrived without holding it. The credit connector names
+  `creditReport` — provider-shaped, up to 256 KiB — so its audit rows carry `creditReportBytes`
+  (and every other `credit*` field) while the context holds the report itself. The redaction is
+  applied in `WebhookService` on the callback path and in `PendingConnectorReconcileService` on the
+  reconcile path, and travels to `OnboardingsService.submit` as `SubmitContinuation.auditSubmittedData`;
+  the same value is used for `webhook.inbound_callback_applied` and
+  `onboarding.pending_connector_reconciled`, while the submit itself still receives the full
+  `submittedData`.
 - Outbound payloads **are** retained in full on intent/attempt/success/failure records — also
   declared, not accidental.
 
@@ -2683,13 +2951,15 @@ cannot express:
   sweep.
 
 Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_CONNECTOR_TIMEOUT_MS`,
-`TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`, `VERIFF_TIMEOUT_MS`: 100–30000).
+`TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`, `VERIFF_TIMEOUT_MS`, `ALGOAN_TIMEOUT_MS`: 100–30000).
 `SUMSUB_BASE_URL` (default `https://api.sumsub.com`) and `SUMSUB_TIMEOUT_MS` are deployment
 settings on `AppConfig`, not credentials — `sumsub_kyc`'s `appToken`/`secretKey` are DB-backed
 like every other adapter's `settingsSchema` (§4). So are `VERIFF_BASE_URL` (default
 `https://stationapi.veriff.com`, the same host for test and live — the API key decides the mode)
 and `VERIFF_TIMEOUT_MS` (default 10000, as Sumsub's); `veriff_kyc`'s `apiKey`/`sharedSecretKey` are
-DB-backed.
+DB-backed. `ALGOAN_API_BASE_URL` (default `https://api.algoan.com`, one host for sandbox and live —
+the project's credentials decide) and `ALGOAN_TIMEOUT_MS` (default 10000) are deployment settings
+too; `algoan_credit`'s `clientId`/`clientSecret`/`callbackSigningSecret` are DB-backed.
 
 **No connector credential is declared in `AppConfig` any more.** `TWILIO_ACCOUNT_SID`,
 `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY`, `SENDGRID_FROM`,

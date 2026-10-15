@@ -1,0 +1,41 @@
+{
+  "accounts": [
+    {
+      "balance": 100,
+      "balanceDate": "2026-10-14T12:00:00.000Z",
+      "owners": [
+        {
+          "name": "FAIL CASE"
+        }
+      ],
+      "bank": {
+        "name": "Algoan Demo",
+        "id": "AD"
+      },
+      "currency": "GBP",
+      "type": "CHECKING",
+      "usage": "PERSONAL",
+      "iban": "GB05GQKQ13065644352477",
+      "number": "account 01",
+      "bic": "HBUKGB4BXXX",
+      "transactions": [
+        {
+          "currency": "GBP",
+          "dates": {
+            "debitedAt": "2026-10-01T12:00:00.000Z"
+          },
+          "description": "TEST SALARY",
+          "amount": 200
+        },
+        {
+          "currency": "GBP",
+          "dates": {
+            "debitedAt": "2026-10-02T12:00:00.000Z"
+          },
+          "description": "TEST SHOP CD 0000",
+          "amount": -100
+        }
+      ]
+    }
+  ]
+}

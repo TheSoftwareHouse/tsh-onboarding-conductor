@@ -1,15 +1,10 @@
 import { expect, test } from '@playwright/test';
 
-test('should render placeholder content when the Playwright browser pipeline runs', async ({
-  page,
-}) => {
-  await page.setContent(`
-    <main>
-      <h1>Demo web Playwright skeleton is ready</h1>
-    </main>
-  `);
+test('should render the app shell when the demo web is served', async ({ page }) => {
+  await page.goto('/');
 
+  await expect(page.getByRole('banner').getByText('BNPL credit check')).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Demo web Playwright skeleton is ready' }),
+    page.getByRole('heading', { name: 'Check your credit with open banking' }),
   ).toBeVisible();
 });

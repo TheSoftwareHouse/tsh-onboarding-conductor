@@ -1,0 +1,42 @@
+---
+id: merge-connector-settings
+title: 'Merge connector settings'
+description: "Changes only the keys the body names: a string overwrites, `null` deletes, an absent key is left as it is. This is how an operator changes one field without resubmitting secrets the API never returns. Every submitted key and value is validated against the adapter's schema. The write is audited under the operator the token identifies."
+sidebar_label: 'Merge connector settings'
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: 'patch api-method'
+info_path: api/0.1/tsh-onboarding-conductor-engine-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from '@theme/ApiExplorer/MethodEndpoint';
+import ParamsDetails from '@theme/ParamsDetails';
+import RequestSchema from '@theme/RequestSchema';
+import StatusCodes from '@theme/StatusCodes';
+import OperationTabs from '@theme/OperationTabs';
+import TabItem from '@theme/TabItem';
+import Heading from '@theme/Heading';
+import Translate from '@docusaurus/Translate';
+
+<Heading as={'h1'} className={'openapi__heading'} children={'Merge connector settings'}></Heading>
+
+<MethodEndpoint
+  method={'patch'}
+  path={'/v1/admin/connectors/{connectorId}'}
+  context={'endpoint'}
+></MethodEndpoint>
+
+Changes only the keys the body names: a string overwrites, `null` deletes, an absent key is left as it is. This is how an operator changes one field without resubmitting secrets the API never returns. Every submitted key and value is validated against the adapter's schema. The write is audited under the operator the token identifies.
+
+<Heading id={'request'} as={'h2'} className={'openapi-tabs__heading'}>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails {...require('./merge-connector-settings.ParamsDetails.json')}></ParamsDetails>
+
+<RequestSchema {...require('./merge-connector-settings.RequestSchema.json')}></RequestSchema>
+
+<StatusCodes {...require('./merge-connector-settings.StatusCodes.json')}></StatusCodes>

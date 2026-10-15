@@ -1,0 +1,33 @@
+{
+  "title": "Body",
+  "body": {
+    "required": true,
+    "content": {
+      "application/json": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "field": {
+              "type": "string",
+              "description": "Name of the current step's upload field the document is for.",
+              "example": "identity_document_front"
+            },
+            "contentType": {
+              "type": "string",
+              "description": "MIME type of the file to upload; must be one the field accepts.",
+              "example": "image/jpeg"
+            },
+            "sizeBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Exact size of the file in bytes; must not exceed the field's limit.",
+              "example": 245760
+            }
+          },
+          "required": ["field", "contentType", "sizeBytes"],
+          "title": "ReserveDocumentUploadDto"
+        }
+      }
+    }
+  }
+}

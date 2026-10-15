@@ -269,6 +269,25 @@ describe('S3ObjectStorageService', () => {
     );
   });
 
+  it('detects a UTF-8 JSON document that no binary signature matches', async () => {
+    queueInspectRead(Buffer.from('\uFEFF {"accounts":[{"balance":1}]}', 'utf8'));
+
+    const service = new S3ObjectStorageService(mockConfigService, mockS3Client);
+    const result = await service.inspectStagedObject({ objectKey: 'staged/object' });
+
+    expect(result.detectedMimeType).toBe('application/json');
+    expect(result.dimensions).toBeUndefined();
+  });
+
+  it('rejects text that opens like JSON but does not parse', async () => {
+    queueInspectRead(Buffer.from('{"accounts": [', 'utf8'));
+
+    const service = new S3ObjectStorageService(mockConfigService, mockS3Client);
+    await expect(service.inspectStagedObject({ objectKey: 'staged/object' })).rejects.toThrow(
+      'storage object content type could not be detected',
+    );
+  });
+
   it('returns detected ZIP metadata without adapter-side allowlist rejection', async () => {
     queueInspectRead(ZIP_MINIMAL);
 

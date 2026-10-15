@@ -4,6 +4,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AppConfig } from '../config/app.config';
 import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
+import { redactAuditFields } from '../connectors/ports/audit-redaction';
 import type { ConnectorAdapter } from '../connectors/ports/connector-adapter.port';
 import {
   CONNECTOR_ID_PATTERN,
@@ -39,6 +40,8 @@ import { WebhookQueueService } from './webhook-queue.service';
 export type WebhookCallbackResult = Readonly<{
   onboardingId: string;
   submittedData: unknown;
+  /** `submittedData` as the audit row records it: the adapter's redacted fields replaced by sizes. */
+  auditSubmittedData?: unknown;
   providerIdentity: string;
   resolvedConnector: Readonly<{
     connectorOrder: number;
@@ -156,6 +159,10 @@ export class WebhookService {
       return {
         onboardingId: mappedResult.onboardingId,
         submittedData: mappedResult.submittedData,
+        auditSubmittedData: redactAuditFields(
+          mappedResult.submittedData,
+          adapter.auditRedactedFields,
+        ),
         providerIdentity,
         resolvedConnector: {
           connectorOrder: mappedResult.resolvedConnector.connectorOrder,

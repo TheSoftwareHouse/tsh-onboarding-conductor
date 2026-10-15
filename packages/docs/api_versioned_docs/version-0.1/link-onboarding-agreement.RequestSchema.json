@@ -1,0 +1,22 @@
+{
+  "title": "Body",
+  "body": {
+    "required": true,
+    "content": {
+      "application/json": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "agreementId": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The published version to link, by id and never by family key: which version an onboarding owes is a decision, and a key would silently resolve to whatever was latest when the call landed."
+            }
+          },
+          "required": ["agreementId"],
+          "title": "LinkAgreementRequestDto"
+        }
+      }
+    }
+  }
+}

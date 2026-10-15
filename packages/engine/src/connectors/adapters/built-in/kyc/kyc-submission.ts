@@ -2,6 +2,7 @@ import type { ObjectStoragePort } from '../../../../storage/object-storage.port'
 import type { ConnectorExecutionInput } from '../../../ports/connector-adapter.port';
 import type { CompletedOnboardingDocumentResolver } from '../../../resolvers/completed-onboarding-document.resolver';
 import type { KycConfig, KycDocumentMapping } from './kyc-config';
+import { readCompletedDocument } from '../shared/read-completed-document';
 import { normalizeAlpha2 } from './kyc-country';
 import type { KycApplicant, KycDocument, KycSubmission } from './kyc-provider.port';
 
@@ -137,21 +138,17 @@ export async function buildKycSubmission(
 
     const source = input.payloadFieldSources[document.payloadField];
     const sourceField = typeof source === 'string' ? source : document.payloadField;
-    const resolved = await documentResolver.resolve({
+    const read = await readCompletedDocument(documentResolver, objectStoragePort, {
       documentId,
       onboardingId: input.execution.onboardingId,
       sourceField,
     });
 
-    if (!resolved) {
+    if (!read) {
       return undefined;
     }
 
-    const content = await objectStoragePort.readObject({
-      objectKey: resolved.finalObjectKey,
-      expectedEtag: resolved.verifiedEtag,
-      maxBytes: resolved.verifiedSizeBytes,
-    });
+    const { resolved, content } = read;
 
     documents.push({
       documentId,

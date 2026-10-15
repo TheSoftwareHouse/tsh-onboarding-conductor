@@ -1,0 +1,42 @@
+---
+id: add-encryption-key
+title: 'Rotate the encryption key'
+description: "Generates a new key, wraps it under the key-encryption key, retires the active key and inserts the new one in one transaction, then reloads the local key ring. The new key does not become active immediately: for up to `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` it is reported as `pendingActivation` while the previous key keeps protecting new writes, so every engine process has a chance to learn of it first. Stored onboardings are not rewritten: rotation is lazy, so a row keeps naming the key it was written under and moves onto this one only the next time it is written. The new key carries the automatic-rotation schedule the superseded one had, and the countdown to the next scheduled rotation restarts from this key's creation. Returns only the new key's id — never its material."
+sidebar_label: 'Rotate the encryption key'
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: 'post api-method'
+info_path: api/0.1/tsh-onboarding-conductor-engine-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from '@theme/ApiExplorer/MethodEndpoint';
+import ParamsDetails from '@theme/ParamsDetails';
+import RequestSchema from '@theme/RequestSchema';
+import StatusCodes from '@theme/StatusCodes';
+import OperationTabs from '@theme/OperationTabs';
+import TabItem from '@theme/TabItem';
+import Heading from '@theme/Heading';
+import Translate from '@docusaurus/Translate';
+
+<Heading as={'h1'} className={'openapi__heading'} children={'Rotate the encryption key'}></Heading>
+
+<MethodEndpoint
+  method={'post'}
+  path={'/v1/admin/encryption/keys'}
+  context={'endpoint'}
+></MethodEndpoint>
+
+Generates a new key, wraps it under the key-encryption key, retires the active key and inserts the new one in one transaction, then reloads the local key ring. The new key does not become active immediately: for up to `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` it is reported as `pendingActivation` while the previous key keeps protecting new writes, so every engine process has a chance to learn of it first. Stored onboardings are not rewritten: rotation is lazy, so a row keeps naming the key it was written under and moves onto this one only the next time it is written. The new key carries the automatic-rotation schedule the superseded one had, and the countdown to the next scheduled rotation restarts from this key's creation. Returns only the new key's id — never its material.
+
+<Heading id={'request'} as={'h2'} className={'openapi-tabs__heading'}>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails {...require('./add-encryption-key.ParamsDetails.json')}></ParamsDetails>
+
+<RequestSchema {...require('./add-encryption-key.RequestSchema.json')}></RequestSchema>
+
+<StatusCodes {...require('./add-encryption-key.StatusCodes.json')}></StatusCodes>

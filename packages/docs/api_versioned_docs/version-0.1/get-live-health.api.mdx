@@ -1,0 +1,38 @@
+---
+id: get-live-health
+title: 'Liveness probe'
+description: 'Answers as soon as the process serves HTTP. It does not touch the database, Redis or object storage, so it says the engine is up, not that it is ready.'
+sidebar_label: 'Liveness probe'
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: 'get api-method'
+info_path: api/0.1/tsh-onboarding-conductor-engine-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from '@theme/ApiExplorer/MethodEndpoint';
+import ParamsDetails from '@theme/ParamsDetails';
+import RequestSchema from '@theme/RequestSchema';
+import StatusCodes from '@theme/StatusCodes';
+import OperationTabs from '@theme/OperationTabs';
+import TabItem from '@theme/TabItem';
+import Heading from '@theme/Heading';
+import Translate from '@docusaurus/Translate';
+
+<Heading as={'h1'} className={'openapi__heading'} children={'Liveness probe'}></Heading>
+
+<MethodEndpoint method={'get'} path={'/v1/health/live'} context={'endpoint'}></MethodEndpoint>
+
+Answers as soon as the process serves HTTP. It does not touch the database, Redis or object storage, so it says the engine is up, not that it is ready.
+
+<Heading id={'request'} as={'h2'} className={'openapi-tabs__heading'}>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails {...require('./get-live-health.ParamsDetails.json')}></ParamsDetails>
+
+<RequestSchema {...require('./get-live-health.RequestSchema.json')}></RequestSchema>
+
+<StatusCodes {...require('./get-live-health.StatusCodes.json')}></StatusCodes>

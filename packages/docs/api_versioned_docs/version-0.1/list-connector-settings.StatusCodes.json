@@ -1,0 +1,184 @@
+{
+  "responses": {
+    "200": {
+      "description": "Every configurable connector.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "connectors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "The connector's own identifier.",
+                      "example": "twilio_verify"
+                    },
+                    "type": {
+                      "description": "The capability class, drawn from the same set a workflow's connector `type` is.",
+                      "allOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "kyc",
+                            "kyb",
+                            "aml",
+                            "credit",
+                            "phone_verification",
+                            "email_verification",
+                            "email_delivery",
+                            "sms_delivery",
+                            "bank_verification",
+                            "payment",
+                            "e_signature",
+                            "document_storage",
+                            "custom"
+                          ],
+                          "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on.",
+                          "title": "ConnectorType"
+                        }
+                      ]
+                    },
+                    "scope": {
+                      "description": "Which group registered the adapter: `built-in` ships with the engine and is always available; `fixtures` is a mock used for demos and tests, never a production integration; `users` was added by this deployment.",
+                      "allOf": [
+                        {
+                          "type": "string",
+                          "enum": ["built-in", "fixtures", "users"],
+                          "description": "Which group registered the connector adapter: `built-in` ships with the engine, `fixtures` is a mock used for demos and tests, `users` was added by this deployment.",
+                          "title": "ConnectorScope"
+                        }
+                      ]
+                    },
+                    "name": { "type": "string", "example": "Twilio Verify" },
+                    "configured": {
+                      "type": "boolean",
+                      "description": "True when every required key resolves to a value."
+                    },
+                    "settings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "description": "The setting key, as the adapter declares it.",
+                            "example": "apiKey"
+                          },
+                          "secret": {
+                            "type": "boolean",
+                            "description": "Whether the value is a secret. A secret's value never leaves the engine: the response says that it is set, not what it is."
+                          },
+                          "required": {
+                            "type": "boolean",
+                            "description": "Whether the connector cannot run without this key."
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": ["stored", "unset"],
+                            "description": "`stored` when an operator has set the key; `unset` when nothing resolves."
+                          },
+                          "value": {
+                            "type": "string",
+                            "description": "Present only when `secret` is false and the key is set."
+                          }
+                        },
+                        "required": ["key", "secret", "required", "source"],
+                        "title": "ConnectorSettingResponseDto"
+                      }
+                    },
+                    "updatedAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time",
+                      "description": "When an operator last wrote the settings; null when nothing was ever stored."
+                    },
+                    "updatedBy": {
+                      "type": ["string", "null"],
+                      "description": "The operator who last wrote the settings, as the bearer token identified them."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "scope",
+                    "name",
+                    "configured",
+                    "settings",
+                    "updatedAt",
+                    "updatedBy"
+                  ],
+                  "title": "ConnectorSettingsResponseDto"
+                }
+              }
+            },
+            "required": ["connectors"],
+            "title": "ConnectorSettingsListResponseDto"
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "403": {
+      "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    }
+  }
+}

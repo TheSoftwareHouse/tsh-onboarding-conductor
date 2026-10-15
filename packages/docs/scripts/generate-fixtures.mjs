@@ -34,6 +34,8 @@ const DESCRIPTIONS = {
     'A step that parks the onboarding for an operator, with approve, reject and invalid each leading somewhere.',
   scoring:
     'Named scores accumulated by rules across phone verification, an identity check and a manual review, with transitions that branch on them.',
+  'credit-check':
+    'A UK BNPL credit check on the mock_credit provider: consent, one bank-data upload, a score banded into approved, review or declined, and a retry path. Runs with no network.',
   'sendgrid-email': 'Sending an email through SendGrid.',
   'twilio-verify': 'A one-time code sent and checked through Twilio Verify.',
   'eu-b2c-individual-kyc-eea':
@@ -42,6 +44,8 @@ const DESCRIPTIONS = {
     'The same flow written with specialized step types, which compiles to the steps of revision 1 when it loads.',
   'eu-b2c-individual-kyc-eea-veriff':
     'The production reference flow with Veriff as the identity provider — identical to eu-b2c-individual-kyc-eea except that the KYC step binds veriff_kyc — written as custom steps.',
+  'uk-bnpl-credit-check-algoan':
+    'A UK buy-now-pay-later credit check: the applicant consents, one open-banking document is scored by Algoan, and the score decides approved, manual review or declined, with a retry path for a failed analysis.',
   'eu-b2c-individual-kyc-eea-veriff-v2':
     'The Veriff flow written with specialized step types, which compiles to the steps of its revision 1 when it loads.',
 };

@@ -1,0 +1,46 @@
+---
+id: set-encryption-key-rotation
+title: 'Choose how often the key rotates on its own'
+description: "Stores the automatic-rotation schedule on the active key, or clears it with `null`. The next rotation is always the active key's creation plus this interval, never this request's own instant, so choosing an interval shorter than the active key's age makes it due immediately and the engine rotates on its next check (`ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS`). A rotation — scheduled or asked for with `POST /keys` — creates a key that carries the same schedule forward and restarts the countdown from its own creation. Turning encryption on schedules no rotation at all. Idempotent: choosing the interval already in force changes nothing. Returns the resulting state, as `GET` would."
+sidebar_label: 'Choose how often the key rotates on its own'
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: 'patch api-method'
+info_path: api/0.1/tsh-onboarding-conductor-engine-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from '@theme/ApiExplorer/MethodEndpoint';
+import ParamsDetails from '@theme/ParamsDetails';
+import RequestSchema from '@theme/RequestSchema';
+import StatusCodes from '@theme/StatusCodes';
+import OperationTabs from '@theme/OperationTabs';
+import TabItem from '@theme/TabItem';
+import Heading from '@theme/Heading';
+import Translate from '@docusaurus/Translate';
+
+<Heading
+  as={'h1'}
+  className={'openapi__heading'}
+  children={'Choose how often the key rotates on its own'}
+></Heading>
+
+<MethodEndpoint
+  method={'patch'}
+  path={'/v1/admin/encryption/rotation'}
+  context={'endpoint'}
+></MethodEndpoint>
+
+Stores the automatic-rotation schedule on the active key, or clears it with `null`. The next rotation is always the active key's creation plus this interval, never this request's own instant, so choosing an interval shorter than the active key's age makes it due immediately and the engine rotates on its next check (`ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS`). A rotation — scheduled or asked for with `POST /keys` — creates a key that carries the same schedule forward and restarts the countdown from its own creation. Turning encryption on schedules no rotation at all. Idempotent: choosing the interval already in force changes nothing. Returns the resulting state, as `GET` would.
+
+<Heading id={'request'} as={'h2'} className={'openapi-tabs__heading'}>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails {...require('./set-encryption-key-rotation.ParamsDetails.json')}></ParamsDetails>
+
+<RequestSchema {...require('./set-encryption-key-rotation.RequestSchema.json')}></RequestSchema>
+
+<StatusCodes {...require('./set-encryption-key-rotation.StatusCodes.json')}></StatusCodes>

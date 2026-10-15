@@ -247,6 +247,66 @@ services:
       engine:
         condition: service_healthy
 
+  # The BNPL demo's backend-for-frontend (ADR 0048). Behind the `demo` profile so no unscoped `up`
+  # starts it; `docker compose --profile demo up` does. It reaches the engine over the Compose
+  # network and holds no provider credentials. The container always listens on 3100; only the
+  # host side of the port follows DEMO_BFF_PORT.
+  demo-bff:
+    profiles: ['demo']
+    image: tsh-onboarding-conductor-demo-bff:local
+    build:
+      context: .
+      dockerfile: packages/demo-bff/Dockerfile
+    environment:
+      NODE_ENV: development
+      ENGINE_BASE_URL: http://engine:3000
+      # Budget for one engine call; `POST /submit` runs the connector chain inline.
+      ENGINE_REQUEST_TIMEOUT_MS: ${ENGINE_REQUEST_TIMEOUT_MS:-60000}
+      DEMO_BFF_PORT: 3100
+      DEMO_WEB_ORIGIN: ${DEMO_WEB_ORIGIN:-http://localhost:5173}
+      BNPL_WORKFLOW_ID: ${BNPL_WORKFLOW_ID:-uk-bnpl-credit-check-algoan}
+      PERSONAS_DIR: /app/packages/demo-bff/personas
+      # The engine signs presigned upload URLs against http://garage:3900; the BFF swaps that
+      # origin for this one. Defaults to the host-published Garage port.
+      UPLOAD_PUBLIC_HOST: ${UPLOAD_PUBLIC_HOST:-http://localhost:${STORAGE_S3_PORT:-3900}}
+    ports:
+      - '${DEMO_BFF_PORT:-3100}:3100'
+    healthcheck:
+      # The runtime image installs curl.
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:3100/health']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      engine:
+        condition: service_healthy
+
+  # The BNPL demo's web app (ADR 0048): a static build served by nginx. Behind the `demo` profile
+  # like `demo-bff`; `docker compose --profile demo up` starts both. The container always listens
+  # on 80; only the host side follows DEMO_WEB_PORT. The browser, not this container, calls the
+  # BFF, so VITE_BNPL_BFF_BASE_URL is the BFF's host-published origin, written into /config.js at
+  # start-up. Keep DEMO_WEB_ORIGIN (the BFF's CORS allow-list) in step with DEMO_WEB_PORT.
+  demo-web:
+    profiles: ['demo']
+    image: tsh-onboarding-conductor-demo-web:local
+    build:
+      context: .
+      dockerfile: packages/demo-web/Dockerfile
+    environment:
+      VITE_BNPL_BFF_BASE_URL: ${VITE_BNPL_BFF_BASE_URL:-http://localhost:3100}
+    ports:
+      - '${DEMO_WEB_PORT:-5173}:80'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:80/']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      demo-bff:
+        condition: service_healthy
+
   # Short-lived internal test runner for the SMTP connector integration spec against MailHog
   # (added in a follow-up task); never publishes SMTP and has no volumes. Joins `postgres` too,
   # not just `mailhog`: the spec resolves its credentials through the real

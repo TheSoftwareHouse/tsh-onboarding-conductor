@@ -1,0 +1,60 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/inter-tight/wght.css';
+
+/* TSH tokens (palette, fonts, radii) live in `tailwind.config.ts`. */
+@config '../tailwind.config.ts';
+
+/* shadcn/ui semantic colours, mapped onto the TSH palette. Light only, like the admin panel. */
+:root {
+  color-scheme: light;
+  --background: #f7f9fa;
+  --foreground: #444849;
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --primary: #1d1f20;
+  --primary-foreground: #ffffff;
+  --secondary: #edf1f4;
+  --secondary-foreground: #1d1f20;
+  --muted: #edf1f4;
+  --muted-foreground: #62686a;
+  --accent: #d1e8ff;
+  --accent-foreground: #1d1f20;
+  --destructive: #ee1313;
+  --destructive-foreground: #ffffff;
+  --success: #30ded8;
+  --success-foreground: #1d1f20;
+  --warning: #ffb84a;
+  --warning-foreground: #1d1f20;
+  --border: rgb(0 0 0 / 12%);
+  --input: rgb(0 0 0 / 15%);
+  --ring: #000000;
+  --radius: 0.5rem;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    @apply font-sans;
+    color: var(--foreground);
+    background: var(--background);
+  }
+
+  #app {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 3px solid var(--ring);
+    outline-offset: 2px;
+  }
+}

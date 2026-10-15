@@ -32,6 +32,7 @@ import { PendingConnectorReconcileUnsupportedException } from '../connectors/err
 import { ConnectorNotConfiguredException } from '../connectors/errors/connector-not-configured.exception';
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
 import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
+import { AlgoanUnavailableException } from '../connectors/errors/algoan-unavailable.exception';
 import { VeriffUnavailableException } from '../connectors/errors/veriff-unavailable.exception';
 import { TwilioVerifyUnavailableException } from '../connectors/errors/twilio-verify-unavailable.exception';
 import {
@@ -110,6 +111,7 @@ const CONNECTOR_EXECUTION_ERRORS = [
   SendgridEmailUnavailableException,
   SumsubUnavailableException,
   VeriffUnavailableException,
+  AlgoanUnavailableException,
   frameworkError(
     HttpStatus.INTERNAL_SERVER_ERROR,
     'A connector failed in a way its adapter raises as a plain error rather than one of the codes ' +

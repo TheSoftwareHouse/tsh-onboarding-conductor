@@ -1,0 +1,11 @@
+{
+  "parameters": [
+    {
+      "name": "workflowId",
+      "required": true,
+      "in": "path",
+      "description": "The workflow id.",
+      "schema": { "example": "eu-b2c-individual-kyc-eea", "type": "string" }
+    }
+  ]
+}

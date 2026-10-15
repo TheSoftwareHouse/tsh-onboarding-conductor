@@ -79,6 +79,24 @@ export class Step {
   private readonly orderedFieldNames: readonly string[];
   private readonly activeSubsetValidatorCache = new Map<string, StepDataValidator>();
 
+  /**
+   * The values the client already submitted for this step, read back from the context: a
+   * continuation (callback or operator reconcile) carries only the connector's fields, so the step's
+   * own required inputs — a credit step's `bankData` document — are replayed from here.
+   */
+  collectPersistedData(
+    persistedContext: Readonly<Record<string, unknown>>,
+  ): Record<string, unknown> {
+    const persisted: Record<string, unknown> = {};
+    for (const fieldName of Object.keys(this.definition.data)) {
+      if (Object.prototype.hasOwnProperty.call(persistedContext, fieldName)) {
+        persisted[fieldName] = persistedContext[fieldName];
+      }
+    }
+
+    return persisted;
+  }
+
   constructor(private readonly definition: NormalizedWorkflowStep) {
     this.validator = createStepDataValidator(this.definition);
     this.validatorsByFieldName = Object.fromEntries(

@@ -447,6 +447,50 @@ describe('Workflow', () => {
     });
   });
 
+  describe('collectClientVisibleData', () => {
+    const visible = normalizeUntypedSteps({
+      id: 'client-visible',
+      version: 1,
+      initial: 'first',
+      steps: [
+        {
+          name: 'first',
+          status: 'awaiting_user',
+          data: {
+            shown: { type: 'text', required: true, clientVisible: true },
+            hidden: { type: 'text', required: true },
+          },
+          transitions: [{ status: 'success', target: 'second' }],
+        },
+        {
+          name: 'second',
+          status: 'awaiting_user',
+          data: { current: { type: 'text', required: false, clientVisible: true } },
+          transitions: [{ status: 'success', target: 'done' }],
+        },
+        { name: 'done', status: 'approved', data: {}, transitions: [] },
+      ],
+    });
+    const context = { shown: 'a', hidden: 'b', current: 'c' };
+
+    it('returns only visible fields of steps other than the current one', () => {
+      expect(new Workflow(visible).collectClientVisibleData('second', context)).toEqual({
+        shown: 'a',
+      });
+    });
+
+    it('returns every passed visible field once the onboarding is terminal', () => {
+      expect(new Workflow(visible).collectClientVisibleData(null, context)).toEqual({
+        shown: 'a',
+        current: 'c',
+      });
+    });
+
+    it('leaves out a visible field the context holds no value for', () => {
+      expect(new Workflow(visible).collectClientVisibleData(null, {})).toEqual({});
+    });
+  });
+
   describe('agreements', () => {
     /** One step collects two families and a second step collects a third. */
     const declaring = normalizeUntypedSteps({
@@ -3033,6 +3077,102 @@ describe('Workflow', () => {
         resolvedResult,
       );
       expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('replays the fields the client already submitted when a continuation carries only the connector fields', async () => {
+      const resume = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+      const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+      const callbackWorkflow = new Workflow(
+        normalizeUntypedSteps({
+          id: 'continuation-replay',
+          version: 1,
+          initial: 'assess',
+          steps: [
+            {
+              name: 'assess',
+              status: 'awaiting_user',
+              data: {
+                bankData: { type: 'text', required: true },
+                verdict: { type: 'text', required: false },
+              },
+              connectors: [
+                {
+                  name: 'mock_async_callback_1',
+                  id: 'mock_async_callback',
+                  type: 'custom',
+                  async: true,
+                  order: 1,
+                  fieldMapping: { bankData: 'bankData' },
+                },
+              ],
+              transitions: [{ status: 'success', target: 'approved' }],
+            },
+            { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          ],
+        }),
+        { execute, resume },
+      );
+
+      const result = await callbackWorkflow.evaluate({
+        currentStep: 'assess',
+        submittedData: { verdict: 'scored' },
+        onboardingContext: { bankData: 'doc-1' },
+        onboardingId: 'onboarding-123',
+        onboardingScores: {},
+        continuation: {
+          resolvedConnector: { connectorOrder: 1, result: ConnectorExecutionResult.accepted() },
+        },
+      });
+
+      expect(result.isAccepted()).toBe(true);
+      expect(result.getNextState()?.context).toEqual(
+        expect.objectContaining({ bankData: 'doc-1', verdict: 'scored' }),
+      );
+    });
+
+    it('still refuses a continuation that omits a required field the client never submitted', async () => {
+      const resume = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+      const callbackWorkflow = new Workflow(
+        normalizeUntypedSteps({
+          id: 'continuation-missing',
+          version: 1,
+          initial: 'assess',
+          steps: [
+            {
+              name: 'assess',
+              status: 'awaiting_user',
+              data: { bankData: { type: 'text', required: true } },
+              connectors: [
+                {
+                  name: 'mock_async_callback_1',
+                  id: 'mock_async_callback',
+                  type: 'custom',
+                  async: true,
+                  order: 1,
+                  fieldMapping: { bankData: 'bankData' },
+                },
+              ],
+              transitions: [{ status: 'success', target: 'approved' }],
+            },
+            { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          ],
+        }),
+        { execute: jest.fn(), resume },
+      );
+
+      const result = await callbackWorkflow.evaluate({
+        currentStep: 'assess',
+        submittedData: {},
+        onboardingContext: {},
+        onboardingId: 'onboarding-123',
+        onboardingScores: {},
+        continuation: {
+          resolvedConnector: { connectorOrder: 1, result: ConnectorExecutionResult.accepted() },
+        },
+      });
+
+      expect(result.isRetryableInvalidData()).toBe(true);
+      expect(result.getErrors()).toEqual({ bankData: ['REQUIRED'] });
     });
 
     it('keeps ordinary two-argument synchronous evaluation unchanged when continuation is not provided', async () => {

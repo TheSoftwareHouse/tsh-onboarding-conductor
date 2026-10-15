@@ -45,6 +45,11 @@ vocabulary, and
 `pnpm workflow:compile <file>` prints what a document compiles to — or where it
 fails.
 
+`built-in/uk-bnpl-credit-check-algoan.workflow.json` is the BNPL credit-check flow on the
+`algoan_credit` connector (`credit-assessment` step), with its `users/` fork
+`uk-bnpl-credit-check-algoan-local.workflow.json`; `fixtures/credit-check.workflow.json` is the
+same layout on `mock_credit`.
+
 `fixtures/` is skipped when `NODE_ENV=production`, so test workflows never
 reach a production deployment.
 

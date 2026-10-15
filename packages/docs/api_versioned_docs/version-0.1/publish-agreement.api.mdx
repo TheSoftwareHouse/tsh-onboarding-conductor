@@ -1,0 +1,42 @@
+---
+id: publish-agreement
+title: 'Publish the next version of an agreement family'
+description: "Derives the next version of the family `key` names, `1` for a family nobody has published yet, and links it as pending to every onboarding whose accepted version is now behind, notifying each through its own workflow's notify webhook. `type` belongs to the family, so a publish under an existing key with a different type is refused. There is no content and no name: a version is identity and number only."
+sidebar_label: 'Publish the next version of an agreement family'
+hide_title: true
+hide_table_of_contents: true
+api: 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
+sidebar_class_name: 'post api-method'
+info_path: api/0.1/tsh-onboarding-conductor-engine-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from '@theme/ApiExplorer/MethodEndpoint';
+import ParamsDetails from '@theme/ParamsDetails';
+import RequestSchema from '@theme/RequestSchema';
+import StatusCodes from '@theme/StatusCodes';
+import OperationTabs from '@theme/OperationTabs';
+import TabItem from '@theme/TabItem';
+import Heading from '@theme/Heading';
+import Translate from '@docusaurus/Translate';
+
+<Heading
+  as={'h1'}
+  className={'openapi__heading'}
+  children={'Publish the next version of an agreement family'}
+></Heading>
+
+<MethodEndpoint method={'post'} path={'/v1/admin/agreements'} context={'endpoint'}></MethodEndpoint>
+
+Derives the next version of the family `key` names, `1` for a family nobody has published yet, and links it as pending to every onboarding whose accepted version is now behind, notifying each through its own workflow's notify webhook. `type` belongs to the family, so a publish under an existing key with a different type is refused. There is no content and no name: a version is identity and number only.
+
+<Heading id={'request'} as={'h2'} className={'openapi-tabs__heading'}>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails {...require('./publish-agreement.ParamsDetails.json')}></ParamsDetails>
+
+<RequestSchema {...require('./publish-agreement.RequestSchema.json')}></RequestSchema>
+
+<StatusCodes {...require('./publish-agreement.StatusCodes.json')}></StatusCodes>

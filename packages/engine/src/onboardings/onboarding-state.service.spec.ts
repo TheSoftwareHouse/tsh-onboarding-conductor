@@ -54,13 +54,19 @@ describe('OnboardingStateService', () => {
       ...overrides,
     });
 
-  const createService = (onboarding: OnboardingEntity | null, findStepDescription: jest.Mock) => {
+  const createService = (
+    onboarding: OnboardingEntity | null,
+    findStepDescription: jest.Mock,
+    collectClientVisibleData: jest.Mock = jest.fn().mockReturnValue({}),
+  ) => {
     const dataSource = { manager: {} } as unknown as DataSource;
     const onboardingsRepository = {
       findById: jest.fn().mockResolvedValue(onboarding),
     } as unknown as jest.Mocked<Pick<OnboardingsRepository, 'findById'>>;
     const workflowRegistryService = {
-      getByVersionId: jest.fn().mockReturnValue({ findStepDescription } as unknown as Workflow),
+      getByVersionId: jest
+        .fn()
+        .mockReturnValue({ findStepDescription, collectClientVisibleData } as unknown as Workflow),
     } as unknown as jest.Mocked<Pick<WorkflowRegistryService, 'getByVersionId'>>;
 
     return {
@@ -90,6 +96,8 @@ describe('OnboardingStateService', () => {
       terminal: false,
       rejectionReason: null,
       step: stepDescription,
+      pending: null,
+      data: {},
     });
     expect(workflowRegistryService.getByVersionId).toHaveBeenCalledWith(workflowVersionId);
     expect(findStepDescription).toHaveBeenCalledWith('collect_details', { country: 'US' });
@@ -114,6 +122,64 @@ describe('OnboardingStateService', () => {
         step: null,
       }),
     );
+  });
+
+  it('reports the parked connector without its provider reference', async () => {
+    const { service } = createService(
+      createOnboarding({
+        pendingConnector: {
+          connectorName: 'algoan',
+          connectorId: 'algoan_credit',
+          connectorOrder: 1,
+          providerReference: 'secret-reference',
+          parkedAt: '2026-10-15T10:00:00.000Z',
+        },
+      }),
+      jest.fn().mockReturnValue(stepDescription),
+    );
+
+    const state = await service.getState('onboarding-id');
+
+    expect(state.pending).toEqual({
+      connectorId: 'algoan_credit',
+      parkedAt: '2026-10-15T10:00:00.000Z',
+    });
+    expect(JSON.stringify(state)).not.toContain('secret-reference');
+  });
+
+  it('reports a null parkedAt for a park recorded before the time was kept', async () => {
+    const { service } = createService(
+      createOnboarding({
+        pendingConnector: {
+          connectorName: 'algoan',
+          connectorId: 'algoan_credit',
+          connectorOrder: 1,
+          providerReference: 'ref',
+        },
+      }),
+      jest.fn().mockReturnValue(stepDescription),
+    );
+
+    await expect(service.getState('onboarding-id')).resolves.toMatchObject({
+      pending: { connectorId: 'algoan_credit', parkedAt: null },
+    });
+  });
+
+  it('returns the client-visible data the workflow collects from the persisted context', async () => {
+    const collectClientVisibleData = jest.fn().mockReturnValue({ creditScore: 712 });
+    const { service } = createService(
+      createOnboarding({ currentStep: 'next_step', context: { creditScore: 712, secret: 'x' } }),
+      jest.fn().mockReturnValue(stepDescription),
+      collectClientVisibleData,
+    );
+
+    await expect(service.getState('onboarding-id')).resolves.toMatchObject({
+      data: { creditScore: 712 },
+    });
+    expect(collectClientVisibleData).toHaveBeenCalledWith('next_step', {
+      creditScore: 712,
+      secret: 'x',
+    });
   });
 
   it('throws the stable not-found error for an unknown onboarding', async () => {

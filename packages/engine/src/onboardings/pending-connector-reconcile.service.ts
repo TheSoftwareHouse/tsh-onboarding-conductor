@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import type { PendingConnectorReconcileNoopOutcome } from '../audit/audit.types';
+import { redactAuditFields } from '../connectors/ports/audit-redaction';
 import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
 import { ConnectorCallbackSupersededError } from '../connectors/errors/connector-callback-superseded.error';
 import { PendingConnectorReconcileUnsupportedException } from '../connectors/errors/pending-connector-reconcile-unsupported.exception';
@@ -84,6 +85,7 @@ export class PendingConnectorReconcileService {
     try {
       await this.onboardingsService.submit(onboardingId, callback.submittedData, {
         providerIdentity: adapter.id,
+        auditSubmittedData: redactAuditFields(callback.submittedData, adapter.auditRedactedFields),
         origin: 'admin_reconcile',
         operatorId,
         resolvedConnector: {

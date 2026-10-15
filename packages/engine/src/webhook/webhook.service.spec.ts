@@ -891,6 +891,7 @@ describe('WebhookService', () => {
       ).resolves.toEqual({
         onboardingId: 'onboarding-1',
         submittedData: { acceptedTerms: true },
+        auditSubmittedData: { acceptedTerms: true },
         providerIdentity: 'mock_async_callback',
         resolvedConnector: {
           connectorOrder: 2,

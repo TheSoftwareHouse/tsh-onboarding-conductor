@@ -1,0 +1,22 @@
+{
+  "title": "Body",
+  "body": {
+    "required": true,
+    "content": {
+      "application/json": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "`true` turns encryption on — creating a first key if none is active — and encrypts every stored onboarding in the background; `false` turns it off, retires the active key, and decrypts every stored onboarding back to plain JSON in the background. Asking for the state that already holds changes nothing.",
+              "example": true
+            }
+          },
+          "required": ["enabled"],
+          "title": "SetEncryptionEnabledRequestDto"
+        }
+      }
+    }
+  }
+}

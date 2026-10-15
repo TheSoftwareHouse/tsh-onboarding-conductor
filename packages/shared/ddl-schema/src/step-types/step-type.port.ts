@@ -51,6 +51,8 @@ export type WorkflowStepPort = {
 type StepFieldEnvelope = {
   required: boolean;
   persist?: boolean;
+  /** Default false. True exposes the value through the public `/state` once the step has passed. */
+  clientVisible?: boolean;
   when?: RawWorkflowCondition;
 };
 

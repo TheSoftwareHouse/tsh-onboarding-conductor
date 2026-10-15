@@ -28,6 +28,7 @@ import type {
   AwaitingCallbackConnectorResolver,
 } from '../../../resolvers/awaiting-callback-connector.resolver';
 import type { CompletedOnboardingDocumentResolver } from '../../../resolvers/completed-onboarding-document.resolver';
+import { buildParkedCallbackResult } from '../shared/parked-callback-result';
 import {
   KYC_ATTEMPT_COUNT_FIELD,
   KYC_CUSTOMER_MESSAGE_FIELD,
@@ -365,24 +366,11 @@ export abstract class KycConnector<
     );
   }
 
-  /** Re-parks the step with no decision applied — the redelivery-safe "acknowledge" response. */
   private buildParkedResult(
     onboardingId: string,
     resolvedConnector: AwaitingCallbackConnectorResolution,
   ): ConnectorCallbackResult {
-    return {
-      onboardingId,
-      submittedData: {},
-      resolvedConnector,
-      // The stored record is spread first, or the re-park would forget the attempt it still
-      // waits on and when it started waiting.
-      result: ConnectorExecutionResult.pending({
-        ...resolvedConnector.pendingConnector,
-        connectorName: this.name,
-        connectorId: this.id,
-        connectorOrder: resolvedConnector.connectorOrder,
-      }),
-    };
+    return buildParkedCallbackResult(this, onboardingId, resolvedConnector);
   }
 
   private buildOutcomeResult(

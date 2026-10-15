@@ -1,0 +1,23 @@
+{
+  "responses": {
+    "200": {
+      "description": "The process is up.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["ok"],
+                "description": "Always `ok`: the process is up and answering HTTP."
+              }
+            },
+            "required": ["status"],
+            "title": "HealthResponseDto"
+          }
+        }
+      }
+    }
+  }
+}

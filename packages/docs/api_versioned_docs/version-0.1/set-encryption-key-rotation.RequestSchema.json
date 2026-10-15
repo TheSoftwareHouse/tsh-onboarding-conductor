@@ -1,0 +1,34 @@
+{
+  "title": "Body",
+  "body": {
+    "required": true,
+    "content": {
+      "application/json": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "interval": {
+              "description": "How often the engine rotates the encryption key on its own, or `null` to stop rotating it automatically. Measured from the active key's creation rather than from this request, so an interval shorter than that key's current age makes it due at once. Required: turning the schedule off is `null`, never an omitted field.",
+              "oneOf": [
+                {
+                  "example": "1w",
+                  "allOf": [
+                    {
+                      "type": "string",
+                      "enum": ["48h", "96h", "1w", "2w", "1mo"],
+                      "description": "How often the engine rotates the encryption key on its own, measured from the active key's creation: 48 or 96 hours, one or two weeks, or a fixed 30-day month.",
+                      "title": "EncryptionKeyRotationInterval"
+                    }
+                  ]
+                },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["interval"],
+          "title": "SetEncryptionRotationRequestDto"
+        }
+      }
+    }
+  }
+}

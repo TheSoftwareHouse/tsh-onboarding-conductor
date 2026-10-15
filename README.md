@@ -131,13 +131,14 @@ in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
 | `packages/shared/ddl-schema` | The workflow file format: its schema, validation and field types.                  |
 | `packages/admin-panel`       | The operator UI (React + Vite): onboarding list, audit log and connector settings. |
 | `packages/docs`              | The documentation site (Docusaurus).                                               |
+| `packages/demo-bff`          | The BNPL credit-check demo's backend-for-frontend (NestJS).                        |
+| `packages/demo-web`          | The BNPL credit-check demo's web app (React + Vite); `pnpm demo:dev` runs both.    |
 | `packages/shared/openapi`    | The engine's OpenAPI document, generated from the code.                            |
 | `workflows/`                 | Workflow definitions — `built-in/`, `fixtures/` (examples) and `users/`.           |
 | `email-templates/`           | HTML email templates, in the same three scopes.                                    |
 | `docs/`                      | Developer documentation.                                                           |
 
-`packages/demo-web`, `packages/demo-bff` and `packages/shared` are placeholders — reserved names with
-no application behind them yet.
+`packages/shared` is a placeholder — a reserved name with no application behind it yet.
 
 ## Contributing
 

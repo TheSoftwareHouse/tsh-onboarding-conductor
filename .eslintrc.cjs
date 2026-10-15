@@ -24,7 +24,7 @@ module.exports = {
       // scope rather than exporting anything. This config's env is node + jest, which the rest of
       // the repository needs, so the browser globals are granted here instead. lint-staged runs
       // eslint from the repository root, so without this the pre-commit hook rejects the file.
-      files: ['packages/admin-panel/public/*.js'],
+      files: ['packages/admin-panel/public/*.js', 'packages/demo-web/public/*.js'],
       env: {
         browser: true,
       },

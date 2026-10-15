@@ -43,6 +43,21 @@ responsibility, not the engine's: the `settings` column is plaintext JSON. See
 `docs/IMPLEMENTATION.md` §4 ("Operator-provided settings") for the resolution
 order and the admin routes.
 
+## Fixture connectors that run a kernel
+
+| Connector id  | Kernel            | Does                                                                                    |
+| ------------- | ----------------- | --------------------------------------------------------------------------------------- |
+| `mock_credit` | `CreditConnector` | Scores the bank-data upload by `accounts[0].owners[0].name`; unsigned callback (`none`) |
+
+`mock_credit` parks on `mock:<onboardingId>:<attempt>`. Its callback carries no result: post
+`{ "onboardingId": "...", "providerReference": "mock:<onboardingId>:<attempt>" }` to
+`POST /v1/webhooks/mock_credit/callback` (`buildMockCreditCallbackBody` in
+`fixtures/mock-credit.connector.ts` builds it) and the connector reads the score back. The
+owner name, case-insensitively, picks the result: `Sherlock Holmes` 965, `James Watson` 598,
+`James Moriarty` 362, `Fail Case` fails with `NO_CHECKING_ACCOUNT`, any other name 600. The
+provider keeps the uploaded document in memory, so an engine restart between submit and
+callback leaves the step parked until the client resubmits.
+
 ## Standing in for a built-in adapter during e2e runs
 
 A production workflow cannot be exercised end to end when its connector talks to a

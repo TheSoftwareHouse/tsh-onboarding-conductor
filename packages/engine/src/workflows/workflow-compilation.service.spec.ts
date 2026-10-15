@@ -169,7 +169,8 @@ describe('WorkflowCompilationService', () => {
     const { service } = createService();
     const { stepTypes } = service.listStepTypes();
 
-    expect(stepTypes).toHaveLength(20);
+    expect(stepTypes).toHaveLength(21);
+    expect(stepTypes.map((stepType) => stepType.type)).toContain('credit-assessment');
     expect(stepTypes.find((stepType) => stepType.type === 'address')).toMatchObject({
       category: 'collect',
       composable: true,

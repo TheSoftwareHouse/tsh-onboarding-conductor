@@ -1,0 +1,18 @@
+{
+  "parameters": [
+    {
+      "name": "connectorId",
+      "required": true,
+      "in": "path",
+      "description": "The connector's id, as the list reports it.",
+      "schema": { "example": "twilio_verify", "type": "string" }
+    },
+    {
+      "name": "replace",
+      "required": false,
+      "in": "query",
+      "description": "Opt in to dropping every stored key the body omits. Without it, omitting a stored key is refused with `CONNECTOR_SETTINGS_INVALID` (`would_be_dropped`).",
+      "schema": { "type": "string", "enum": ["true", "false"] }
+    }
+  ]
+}

@@ -1,0 +1,171 @@
+{
+  "responses": {
+    "200": {
+      "description": "Where the onboarding stands after the decision.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "appliedStep": {
+                "type": ["string", "null"],
+                "description": "The step whose manual transition was applied; null when none was."
+              },
+              "status": {
+                "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+                "allOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "awaiting_user",
+                      "awaiting_manual_review",
+                      "approved",
+                      "rejected",
+                      "invalid"
+                    ],
+                    "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+                    "title": "WorkflowStatus"
+                  }
+                ]
+              },
+              "currentStep": {
+                "type": ["string", "null"],
+                "description": "The step now awaiting data; null once the onboarding is terminal."
+              }
+            },
+            "required": ["appliedStep", "status", "currentStep"],
+            "title": "ManualReviewResponseDto"
+          }
+        }
+      }
+    },
+    "400": {
+      "description": "`action` is not one of `approve`, `reject`, `invalid`.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "404": {
+      "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": ["ONBOARDING_NOT_FOUND", "WORKFLOW_NOT_FOUND"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "409": {
+      "description": "`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`MANUAL_TRANSITION_NOT_AVAILABLE`: The current step declares no transition for this manual trigger.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": [
+                      "ONBOARDING_COMPLETED",
+                      "MANUAL_TRANSITION_NOT_AVAILABLE",
+                      "UNKNOWN_WORKFLOW_EVALUATION"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "410": {
+      "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["WORKFLOW_RETIRED"] } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "500": {
+      "description": "`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": { "type": "string", "enum": ["CLIENT_WEBHOOK_DELIVERY_FAILED"] }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

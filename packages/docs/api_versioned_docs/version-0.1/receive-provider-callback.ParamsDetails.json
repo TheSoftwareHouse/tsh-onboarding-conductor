@@ -1,0 +1,11 @@
+{
+  "parameters": [
+    {
+      "name": "providerKey",
+      "required": true,
+      "in": "path",
+      "description": "The connector adapter's id, the same value a workflow's connector declaration names.",
+      "schema": { "example": "sumsub_kyc", "type": "string" }
+    }
+  ]
+}

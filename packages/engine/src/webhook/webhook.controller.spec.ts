@@ -8,6 +8,7 @@ import { DataSource } from 'typeorm';
 import { AppConfig } from '../config/app.config';
 import { MockAsyncCallbackConnector } from '../connectors/adapters/fixtures/mock-async-callback.connector';
 import { FallbackOnErrorHandler } from '../connectors/error-handlers/built-in/fallback-on-error.handler';
+import { redactAuditFields } from '../connectors/ports/audit-redaction';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { OnboardingsService } from '../onboardings/onboardings.service';
@@ -131,6 +132,30 @@ describe('WebhookController', () => {
         },
       },
     );
+  });
+
+  it('hands the audit the adapter-redacted submitted data: the report size, never the report', async () => {
+    const controller = createController();
+    const report = { scores: [640], transactions: [{ amount: 1 }] };
+    webhookServiceMock.process.mockResolvedValue({
+      onboardingId: 'onboarding-1',
+      submittedData: { creditOutcome: 'approved', creditReport: report },
+      auditSubmittedData: redactAuditFields({ creditOutcome: 'approved', creditReport: report }, [
+        'creditReport',
+      ]),
+      providerIdentity: 'credit',
+      resolvedConnector: { connectorOrder: 1, result: ConnectorExecutionResult.accepted() },
+    });
+
+    await controller.receive('credit', { body: Buffer.from('{}'), headers: {} } as never);
+
+    const [, submitted, continuation] = onboardingsServiceMock.submit.mock.calls[0];
+    expect(submitted).toEqual({ creditOutcome: 'approved', creditReport: report });
+    expect(continuation?.auditSubmittedData).toEqual({
+      creditOutcome: 'approved',
+      creditReportBytes: Buffer.byteLength(JSON.stringify(report)),
+    });
+    expect(continuation?.auditSubmittedData).not.toHaveProperty('creditReport');
   });
 
   it('throws BadRequestException when raw callback body is not binary', async () => {
@@ -447,6 +472,7 @@ describe('WebhookController', () => {
       { kycStatus: 'approved' },
       {
         providerIdentity: 'mock_async_callback',
+        auditSubmittedData: { kycStatus: 'approved' },
         origin: 'provider_callback',
         resolvedConnector: {
           connectorOrder: 1,

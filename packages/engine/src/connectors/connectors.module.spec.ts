@@ -51,6 +51,8 @@ const createTestConfigModule = (overrides: Record<string, unknown> = {}) =>
         SUMSUB_TIMEOUT_MS: 10000,
         VERIFF_BASE_URL: 'https://stationapi.veriff.com',
         VERIFF_TIMEOUT_MS: 10000,
+        ALGOAN_API_BASE_URL: 'https://api.algoan.com',
+        ALGOAN_TIMEOUT_MS: 10000,
         ...overrides,
       }),
     ],
@@ -564,6 +566,27 @@ describe('ConnectorsModule', () => {
     expect(veriffAdapters[0].settingsSchema?.fields.map((field) => field.key)).toEqual([
       'apiKey',
       'sharedSecretKey',
+    ]);
+  });
+
+  it('registers the Algoan credit adapter exactly once, callback-capable and signed over X-Hub-Signature', async () => {
+    const moduleRef = await compileConnectorsModule(testConfigModule);
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
+      strict: false,
+    }) as readonly ConnectorAdapter[];
+    const algoanAdapters = adapterCollection.filter((adapter) => adapter.id === 'algoan_credit');
+
+    expect(algoanAdapters).toHaveLength(1);
+    expect(algoanAdapters[0]).toMatchObject({
+      type: 'credit',
+      supportsAsyncCallback: true,
+      callbackAuth: { kind: 'hmac', signatureHeader: 'X-Hub-Signature', encoding: 'hex' },
+    });
+    expect(algoanAdapters[0].settingsSchema?.fields.map((field) => field.key)).toEqual([
+      'clientId',
+      'clientSecret',
+      'callbackSigningSecret',
     ]);
   });
 

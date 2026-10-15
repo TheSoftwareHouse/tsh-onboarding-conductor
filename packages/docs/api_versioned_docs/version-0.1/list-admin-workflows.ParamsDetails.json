@@ -1,0 +1,44 @@
+{
+  "parameters": [
+    {
+      "name": "page",
+      "required": false,
+      "in": "query",
+      "description": "The page to read, counted from 1.",
+      "schema": { "minimum": 1, "default": 1, "type": "integer" }
+    },
+    {
+      "name": "limit",
+      "required": false,
+      "in": "query",
+      "description": "Rows per page.",
+      "schema": { "minimum": 1, "maximum": 100, "default": 20, "type": "integer" }
+    },
+    {
+      "name": "search",
+      "required": false,
+      "in": "query",
+      "description": "Case-insensitive substring match against the workflow id or name.",
+      "schema": { "maxLength": 100, "type": "string" }
+    },
+    {
+      "name": "scope",
+      "required": false,
+      "in": "query",
+      "description": "Only workflows in this scope.",
+      "schema": {
+        "type": "string",
+        "enum": ["built-in", "fixtures", "users"],
+        "description": "The scope directory that created the workflow family: `built-in` ships with the engine, `fixtures` is demo and test data, `users` was added by this deployment.",
+        "title": "WorkflowScope"
+      }
+    },
+    {
+      "name": "hasDraft",
+      "required": false,
+      "in": "query",
+      "description": "When `true`, only workflows holding at least one draft version.",
+      "schema": { "type": "boolean" }
+    }
+  ]
+}

@@ -138,6 +138,7 @@ describe('PendingConnectorReconcileService', () => {
       { kycOutcome: 'verified' },
       {
         providerIdentity: 'veriff_kyc',
+        auditSubmittedData: { kycOutcome: 'verified' },
         origin: 'admin_reconcile',
         operatorId: OPERATOR_ID,
         resolvedConnector: { connectorOrder: 1, result, pendingConnector: PARK },

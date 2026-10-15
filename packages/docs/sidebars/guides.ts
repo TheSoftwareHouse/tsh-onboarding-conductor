@@ -17,6 +17,12 @@ const sidebars: SidebarsConfig = {
         'extending',
       ],
     },
+    {
+      type: 'category',
+      label: 'Workflows',
+      collapsible: false,
+      items: ['bnpl-credit-check'],
+    },
   ],
 };
 

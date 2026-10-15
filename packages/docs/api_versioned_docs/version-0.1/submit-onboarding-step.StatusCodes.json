@@ -1,0 +1,252 @@
+{
+  "responses": {
+    "201": {
+      "description": "Where the onboarding stands after the move.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "appliedStep": {
+                "type": ["string", "null"],
+                "description": "The step whose transition the submit applied, normally the one that was current when the data arrived; null when no transition was applied."
+              },
+              "status": {
+                "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+                "allOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "awaiting_user",
+                      "awaiting_manual_review",
+                      "approved",
+                      "rejected",
+                      "invalid"
+                    ],
+                    "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+                    "title": "WorkflowStatus"
+                  }
+                ]
+              },
+              "currentStep": {
+                "type": ["string", "null"],
+                "description": "The step now awaiting data; null once the onboarding is terminal."
+              },
+              "rejectionReason": {
+                "description": "Why a connector refused, when the move was a rejection a connector drove; null otherwise.",
+                "oneOf": [
+                  {
+                    "allOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "ATTEMPTS_EXHAUSTED",
+                          "CHALLENGE_EXPIRED",
+                          "CHALLENGE_NOT_FOUND",
+                          "CONNECTOR_REJECTED"
+                        ],
+                        "description": "Why a connector refused the step's data: the caller exhausted its attempts, the challenge expired or was never issued, or the provider rejected outright.",
+                        "title": "ConnectorRejectionReason"
+                      }
+                    ]
+                  },
+                  { "type": "null" }
+                ]
+              }
+            },
+            "required": ["appliedStep", "status", "currentStep", "rejectionReason"],
+            "title": "SubmitOnboardingResponseDto"
+          }
+        }
+      }
+    },
+    "400": {
+      "description": "`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons (`UNKNOWN`, `REQUIRED`, `INVALID`, `CALLBACK_ONLY`, or a connector's own), and the onboarding stays where it was.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["INVALID_STEP_DATA"] } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "404": {
+      "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": ["ONBOARDING_NOT_FOUND", "WORKFLOW_NOT_FOUND"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "409": {
+      "description": "`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`ONBOARDING_AWAITING_CONNECTOR`: The onboarding is parked on an asynchronous connector and accepts no client submit until its callback, or an operator reconcile, decides the step; `pendingConnector` names the connector. Poll the state rather than resubmitting: a resubmit would open a second provider attempt.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": [
+                      "ONBOARDING_COMPLETED",
+                      "ONBOARDING_AWAITING_CONNECTOR",
+                      "UNKNOWN_WORKFLOW_EVALUATION"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "410": {
+      "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["WORKFLOW_RETIRED"] } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "500": {
+      "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "oneOf": [
+              {
+                "type": "object",
+                "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+                "required": ["statusCode", "message"],
+                "properties": {
+                  "statusCode": { "type": "integer" },
+                  "message": {
+                    "oneOf": [
+                      { "type": "string" },
+                      { "type": "array", "items": { "type": "string" } }
+                    ]
+                  },
+                  "error": { "type": "string" }
+                },
+                "title": "NestHttpError"
+              },
+              {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                    "required": ["code", "message"],
+                    "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                    "additionalProperties": true,
+                    "title": "ApiError"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "code": {
+                        "type": "string",
+                        "enum": [
+                          "TWILIO_VERIFY_UNAVAILABLE",
+                          "SENDGRID_EMAIL_UNAVAILABLE",
+                          "SUMSUB_UNAVAILABLE",
+                          "VERIFF_UNAVAILABLE",
+                          "CLIENT_WEBHOOK_DELIVERY_FAILED"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\n`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": ["CONNECTOR_NOT_CONFIGURED", "AGREEMENT_NOT_PUBLISHED"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

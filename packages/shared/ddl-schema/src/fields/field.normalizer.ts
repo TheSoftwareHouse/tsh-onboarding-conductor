@@ -57,6 +57,12 @@ export const normalizeWorkflowField = (
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(fieldRecord, 'clientVisible')) {
+    if (!includePersist || typeof fieldRecord.clientVisible !== 'boolean') {
+      failWorkflow('INVALID_VALUE');
+    }
+  }
+
   const validation = fieldRecord.validation;
   if (validation !== undefined && !isPlainObject(validation)) {
     failWorkflow('INVALID_VALUE');
@@ -73,6 +79,7 @@ export const normalizeWorkflowField = (
     validation: validationObject,
     required: includeRequired ? (fieldRecord.required as boolean) : undefined,
     persist: includePersist ? (fieldRecord.persist as boolean | undefined) : undefined,
+    clientVisible: includePersist ? (fieldRecord.clientVisible as boolean | undefined) : undefined,
     includeRequired,
     includePersist,
     normalizeChild: (child, childLevel) => normalizeWorkflowField(child, childLevel, registry),

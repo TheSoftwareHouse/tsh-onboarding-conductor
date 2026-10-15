@@ -60,6 +60,8 @@ export type ConnectorExecutionAuditProjection = {
  */
 export type SubmitContinuation = Readonly<{
   providerIdentity?: string;
+  /** What the audit row records in place of `submittedData`, when the adapter redacts fields. */
+  auditSubmittedData?: unknown;
   origin?: 'provider_callback' | 'admin_reconcile';
   operatorId?: string;
   resolvedConnector?: Readonly<{
@@ -663,7 +665,7 @@ export class OnboardingsService {
           connectorId: continuation.providerIdentity,
           connectorOrder: continuation.resolvedConnector.connectorOrder,
           providerIdentity: continuation.providerIdentity,
-          submittedData,
+          submittedData: continuation.auditSubmittedData ?? submittedData,
           connectorExecutionResult,
         },
       });
@@ -678,7 +680,7 @@ export class OnboardingsService {
       metadata: {
         providerIdentity: continuation.providerIdentity,
         connectorOrder: continuation.resolvedConnector.connectorOrder,
-        submittedData,
+        submittedData: continuation.auditSubmittedData ?? submittedData,
         connectorExecutionResult,
         outcome: 'persisted',
       },

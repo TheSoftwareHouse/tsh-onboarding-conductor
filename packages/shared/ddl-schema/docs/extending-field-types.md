@@ -14,6 +14,11 @@ There are two ways in: **compile it in** (a built-in, below) or **mount it at st
 (see [Mounting at runtime](#mounting-at-runtime)). Both end up in the same registry and are
 subject to the same port.
 
+The built-in types are `boolean`, `number`, `text`, `date`, `file`, `object`, `array` and `json`.
+`json` is the smallest definition to copy: root level only, no `validation` keys (`validateValidation`
+fails every one), a bare `{ "type": "object" }` data schema and no condition levels, because it
+exists to carry an open value — a provider's report — that `object` cannot hold.
+
 ## Adding a field type
 
 1. **Create `src/fields/<type>.field-type.ts`** exporting a definition written
@@ -101,3 +106,4 @@ while adding a type:
 - `text` declares `"type": { "enum": ["text", "string"] }`; every other type uses `const`.
 - `boolean` has no `manyOf`.
 - `array` validation exists only at the array level, never on its items.
+- `json` is root-only, accepts no `validation` and its descriptor declares no condition levels.

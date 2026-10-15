@@ -1,0 +1,18 @@
+{
+  "parameters": [
+    {
+      "name": "action",
+      "required": true,
+      "in": "path",
+      "description": "The decision. Anything else is refused before the onboarding is looked up.",
+      "schema": { "enum": ["approve", "reject", "invalid"], "type": "string" }
+    },
+    {
+      "name": "id",
+      "required": true,
+      "in": "path",
+      "description": "The onboarding id.",
+      "schema": { "format": "uuid" }
+    }
+  ]
+}

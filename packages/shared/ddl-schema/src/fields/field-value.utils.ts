@@ -40,6 +40,9 @@ export const buildFieldEnvelope = <TType extends string, TMembers extends Record
 
   if (context.includePersist) {
     normalized.persist = context.persist ?? true;
+    if (context.clientVisible === true) {
+      normalized.clientVisible = true;
+    }
   }
 
   Object.assign(normalized, members);
@@ -121,6 +124,7 @@ export const buildFieldDescriptorSchema = (
 
   if (level === 'root') {
     properties.persist = { type: 'boolean' };
+    properties.clientVisible = { type: 'boolean' };
   }
 
   if (spec.conditionLevels.includes(level)) {

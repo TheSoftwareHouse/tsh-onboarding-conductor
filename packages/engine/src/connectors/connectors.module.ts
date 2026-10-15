@@ -18,6 +18,9 @@ import { ConnectorsRepository } from './connectors.repository';
 import { ConnectorSettingsService } from './connector-settings.service';
 import { ConnectorsController } from './connectors.controller';
 import { ConnectorEntity } from './entity/connector.entity';
+import { AlgoanCreditConnector } from './adapters/built-in/algoan-credit.connector';
+import { AlgoanClient } from './adapters/built-in/algoan-credit/algoan-client';
+import { AlgoanCreditProvider } from './adapters/built-in/algoan-credit/algoan-credit.provider';
 import { HttpRequestConnector } from './adapters/built-in/http-request.connector';
 import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
 import { SmtpConnector } from './adapters/built-in/smtp.connector';
@@ -33,6 +36,7 @@ import {
   MockAsyncCallback2Connector,
   MockAsyncCallbackConnector,
 } from './adapters/fixtures/mock-async-callback.connector';
+import { MockCreditConnector, MockCreditProvider } from './adapters/fixtures/mock-credit.connector';
 import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
 import { MockKyc1Connector, MockKyc2Connector } from './adapters/fixtures/mock-kyc.connector';
 import { MockSumsubFileUploadConnector } from './adapters/fixtures/mock-sumsub-file-upload.connector';
@@ -74,6 +78,7 @@ import { WorkflowConnectorExecutorService } from './workflow-connector-executor.
 
 /** Production-grade adapters shipped with the engine. */
 const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
+  AlgoanCreditConnector,
   HttpRequestConnector,
   SendgridEmailConnector,
   SmtpConnector,
@@ -90,6 +95,7 @@ const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
 const FIXTURE_CONNECTOR_ADAPTER_PROVIDERS = [
   MockAsyncCallbackConnector,
   MockAsyncCallback2Connector,
+  MockCreditConnector,
   MockEmailDeliveryConnector,
   MockEmailVerificationConnector,
   MockKyc1Connector,
@@ -199,11 +205,14 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
     ConnectorsRepository,
     ConnectorSettingsService,
     ConnectorSettingsAdminService,
+    AlgoanClient,
+    AlgoanCreditProvider,
     SumsubClient,
     SumsubKycProvider,
     VeriffClient,
     VeriffMediaFitter,
     VeriffKycProvider,
+    MockCreditProvider,
     ...CONNECTOR_ADAPTER_PROVIDERS,
     {
       provide: CONNECTOR_ADAPTER_COLLECTION,

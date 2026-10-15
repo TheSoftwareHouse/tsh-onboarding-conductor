@@ -25,6 +25,7 @@ describe('the step type registry', () => {
       'selfie-capture',
       'otp-verify',
       'kyc-identity-verification',
+      'credit-assessment',
       'decision',
       'risk-score',
       'manual-review',

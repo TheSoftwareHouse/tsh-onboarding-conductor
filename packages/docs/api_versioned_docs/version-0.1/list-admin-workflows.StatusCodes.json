@@ -1,0 +1,181 @@
+{
+  "responses": {
+    "200": {
+      "description": "One page of workflow summaries.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "workflowId": {
+                      "type": "string",
+                      "description": "The workflow id — `workflows.key`."
+                    },
+                    "name": {
+                      "type": ["string", "null"],
+                      "description": "The family's display label."
+                    },
+                    "scope": {
+                      "description": "The scope directory that created the workflow family: `built-in` ships with the engine, `fixtures` is demo and test data, `users` was added by this deployment.",
+                      "allOf": [
+                        {
+                          "type": "string",
+                          "enum": ["built-in", "fixtures", "users"],
+                          "description": "The scope directory that created the workflow family: `built-in` ships with the engine, `fixtures` is demo and test data, `users` was added by this deployment.",
+                          "title": "WorkflowScope"
+                        }
+                      ]
+                    },
+                    "servingVersion": {
+                      "type": ["integer", "null"],
+                      "minimum": 1,
+                      "description": "The highest published version, or null when none is served."
+                    },
+                    "versionCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Every stored version, any status."
+                    },
+                    "draftCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Stored versions currently in draft."
+                    },
+                    "inProgressCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Onboardings on any version of this workflow that have not completed."
+                    },
+                    "createdAt": { "type": "string", "format": "date-time" },
+                    "updatedAt": { "type": "string", "format": "date-time" }
+                  },
+                  "required": [
+                    "workflowId",
+                    "name",
+                    "scope",
+                    "servingVersion",
+                    "versionCount",
+                    "draftCount",
+                    "inProgressCount",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "title": "AdminWorkflowSummaryResponseDto"
+                }
+              },
+              "meta": {
+                "type": "object",
+                "properties": {
+                  "pagination": {
+                    "type": "object",
+                    "properties": {
+                      "page": { "type": "integer", "minimum": 1 },
+                      "limit": { "type": "integer", "minimum": 1 },
+                      "total": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Rows matching the filters, across all pages."
+                      },
+                      "totalPages": { "type": "integer", "minimum": 0 }
+                    },
+                    "required": ["page", "limit", "total", "totalPages"],
+                    "title": "PaginationMetaResponseDto"
+                  }
+                },
+                "required": ["pagination"],
+                "title": "PaginatedMetaResponseDto"
+              }
+            },
+            "required": ["items", "meta"],
+            "title": "ListAdminWorkflowsResponseDto"
+          }
+        }
+      }
+    },
+    "400": {
+      "description": "The body or query violates its declared shape; `message` names each violated rule.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "403": {
+      "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,169 @@
+{
+  "responses": {
+    "201": {
+      "description": "The reservation and the presigned target to send the bytes to.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "documentId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Identifies the reservation; completion names it in the path."
+              },
+              "upload": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": ["post-form"],
+                    "description": "The upload mechanism. `post-form` is a multipart form POST to `url` that carries every entry of `fields` before the file part, as a presigned POST requires."
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "The object store endpoint to POST the form to."
+                  },
+                  "fields": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" },
+                    "description": "Form fields to send verbatim, before the file part."
+                  }
+                },
+                "required": ["kind", "url", "fields"],
+                "title": "DocumentUploadTargetResponseDto"
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When the presigned target stops accepting the upload. Complete before then."
+              }
+            },
+            "required": ["documentId", "upload", "expiresAt"],
+            "title": "ReserveDocumentUploadResponseDto"
+          }
+        }
+      }
+    },
+    "400": {
+      "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`INVALID_DOCUMENT_UPLOAD`: The reservation or completion is not acceptable: the current step has no such upload field, the content type, size or image dimensions fall outside what the field allows, or the completion body is not empty.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "oneOf": [
+              {
+                "type": "object",
+                "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+                "required": ["statusCode", "message"],
+                "properties": {
+                  "statusCode": { "type": "integer" },
+                  "message": {
+                    "oneOf": [
+                      { "type": "string" },
+                      { "type": "array", "items": { "type": "string" } }
+                    ]
+                  },
+                  "error": { "type": "string" }
+                },
+                "title": "NestHttpError"
+              },
+              {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                    "required": ["code", "message"],
+                    "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                    "additionalProperties": true,
+                    "title": "ApiError"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "code": { "type": "string", "enum": ["INVALID_DOCUMENT_UPLOAD"] }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "404": {
+      "description": "`DOCUMENT_UPLOAD_NOT_FOUND`: No onboarding has this id, or no reservation with this document id belongs to it.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": ["DOCUMENT_UPLOAD_NOT_FOUND", "WORKFLOW_NOT_FOUND"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "409": {
+      "description": "`DOCUMENT_UPLOAD_CONFLICT`: The onboarding is already terminal, or the field still has an unexpired reservation pending.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["DOCUMENT_UPLOAD_CONFLICT"] } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "410": {
+      "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["WORKFLOW_RETIRED"] } }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,226 @@
+{
+  "responses": {
+    "204": {
+      "description": "The result was applied to the onboarding, had already been applied by an earlier delivery of the same callback, or named a park the onboarding has since left and was dropped."
+    },
+    "400": {
+      "description": "`ASYNC_CALLBACK_RAW_BODY_REQUIRED`: The callback arrived without a body the signature could be verified over.\n\n`ASYNC_CALLBACK_PROVIDER_KEY_INVALID`: The provider key is not made of lower-case letters, digits and underscores.\n\n`ASYNC_CALLBACK_AUTHENTICATION_FAILED`: No connector adapter that accepts callbacks is registered under this provider key.\n\n`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons (`UNKNOWN`, `REQUIRED`, `INVALID`, `CALLBACK_ONLY`, or a connector's own), and the onboarding stays where it was.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": [
+                      "ASYNC_CALLBACK_RAW_BODY_REQUIRED",
+                      "ASYNC_CALLBACK_PROVIDER_KEY_INVALID",
+                      "ASYNC_CALLBACK_AUTHENTICATION_FAILED",
+                      "INVALID_STEP_DATA"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "`ASYNC_CALLBACK_SIGNATURE_INVALID`: The signature could not be verified: the header is missing or malformed, the digest does not match, the timestamp is missing or outside the tolerance, or the connector is not allowed to send unsigned callbacks.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": { "type": "string", "enum": ["ASYNC_CALLBACK_SIGNATURE_INVALID"] }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "404": {
+      "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": ["ONBOARDING_NOT_FOUND", "WORKFLOW_NOT_FOUND"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "409": {
+      "description": "`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": ["ONBOARDING_COMPLETED", "UNKNOWN_WORKFLOW_EVALUATION"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "410": {
+      "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": { "code": { "type": "string", "enum": ["WORKFLOW_RETIRED"] } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "500": {
+      "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "oneOf": [
+              {
+                "type": "object",
+                "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+                "required": ["statusCode", "message"],
+                "properties": {
+                  "statusCode": { "type": "integer" },
+                  "message": {
+                    "oneOf": [
+                      { "type": "string" },
+                      { "type": "array", "items": { "type": "string" } }
+                    ]
+                  },
+                  "error": { "type": "string" }
+                },
+                "title": "NestHttpError"
+              },
+              {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                    "required": ["code", "message"],
+                    "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                    "additionalProperties": true,
+                    "title": "ApiError"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "code": {
+                        "type": "string",
+                        "enum": [
+                          "TWILIO_VERIFY_UNAVAILABLE",
+                          "SENDGRID_EMAIL_UNAVAILABLE",
+                          "SUMSUB_UNAVAILABLE",
+                          "VERIFF_UNAVAILABLE",
+                          "CLIENT_WEBHOOK_DELIVERY_FAILED"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "`ASYNC_CALLBACK_SIGNATURE_INVALID`: A configuration gap on the engine side: the adapter declares no `callbackAuth`, or its signing secret is not configured. Retry once the connector settings are fixed.\n\n`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": ["ASYNC_CALLBACK_SIGNATURE_INVALID", "CONNECTOR_NOT_CONFIGURED"]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

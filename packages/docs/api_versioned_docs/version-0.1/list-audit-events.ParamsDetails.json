@@ -1,0 +1,67 @@
+{
+  "parameters": [
+    {
+      "name": "page",
+      "required": false,
+      "in": "query",
+      "description": "The page to read, counted from 1.",
+      "schema": { "minimum": 1, "default": 1, "type": "integer" }
+    },
+    {
+      "name": "limit",
+      "required": false,
+      "in": "query",
+      "description": "Rows per page.",
+      "schema": { "minimum": 1, "maximum": 100, "default": 20, "type": "integer" }
+    },
+    {
+      "name": "actorType",
+      "required": false,
+      "in": "query",
+      "description": "Only events by this actor type.",
+      "schema": { "maxLength": 64, "type": "string" }
+    },
+    {
+      "name": "actorId",
+      "required": false,
+      "in": "query",
+      "description": "Only events by this actor.",
+      "schema": { "maxLength": 255, "type": "string" }
+    },
+    {
+      "name": "action",
+      "required": false,
+      "in": "query",
+      "description": "Only events with this action name.",
+      "schema": { "maxLength": 255, "type": "string" }
+    },
+    {
+      "name": "resourceType",
+      "required": false,
+      "in": "query",
+      "description": "Only events about this resource type.",
+      "schema": { "maxLength": 64, "type": "string" }
+    },
+    {
+      "name": "resourceId",
+      "required": false,
+      "in": "query",
+      "description": "Only events about this resource.",
+      "schema": { "maxLength": 255, "type": "string" }
+    },
+    {
+      "name": "occurredFrom",
+      "required": false,
+      "in": "query",
+      "description": "Only events at or after this instant. ISO-8601 with seconds and an offset or `Z`; other forms are refused rather than guessed at.",
+      "schema": { "format": "date-time", "type": "string" }
+    },
+    {
+      "name": "occurredTo",
+      "required": false,
+      "in": "query",
+      "description": "Only events at or before this instant; must not precede `occurredFrom`.",
+      "schema": { "format": "date-time", "type": "string" }
+    }
+  ]
+}

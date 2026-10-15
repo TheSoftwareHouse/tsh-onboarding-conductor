@@ -97,6 +97,15 @@ export const KYC_OUTCOMES = ['verified', 'human_review', 'retry', 'refused'] as 
 export type KycOutcome = (typeof KYC_OUTCOMES)[number];
 
 /**
+ * The outcomes a credit assessment connector reports, routed on by the `credit-assessment` step's
+ * ports (`docs/decisions/0045-credit-assessment-kernel-algoan-first-provider.md`). Declared here
+ * for the same reason as `KYC_OUTCOMES`: a workflow document routes on the vocabulary.
+ */
+export const CREDIT_OUTCOMES = ['approved', 'review', 'declined', 'retry'] as const;
+
+export type CreditOutcome = (typeof CREDIT_OUTCOMES)[number];
+
+/**
  * The document sets a `retry` outcome can reset. Exactly one is named per retry, and the workflow
  * routes the applicant back to the step that produced it.
  */
@@ -166,6 +175,8 @@ export type RawWorkflowField = {
   type: DeclaredFieldType;
   required: boolean;
   persist?: boolean;
+  /** Root-only. True makes the field's value readable through the public `/state` once the step has passed. */
+  clientVisible?: boolean;
   when?: RawWorkflowCondition;
 };
 
@@ -455,6 +466,8 @@ export type NormalizedWorkflowField = {
   type: WorkflowFieldTypeName;
   required: boolean;
   persist: boolean;
+  /** Present only when true; absent means the client never sees the value. */
+  clientVisible?: true;
   when?: NormalizedWorkflowCondition;
 };
 

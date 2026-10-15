@@ -1,0 +1,181 @@
+{
+  "responses": {
+    "201": {
+      "description": "The published version and how many onboardings it was linked to.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The version's own id: what a link, and the accept route, name."
+              },
+              "key": {
+                "type": "string",
+                "maxLength": 100,
+                "description": "The family this is a version of.",
+                "example": "eu-b2c-terms"
+              },
+              "type": {
+                "description": "What an agreement family is: terms, or a privacy notice. A property of the family rather than of one version, so every version published under one `key` classifies the same way.",
+                "allOf": [
+                  {
+                    "type": "string",
+                    "enum": ["terms_and_conditions", "privacy_notice"],
+                    "description": "What an agreement family is: terms, or a privacy notice. A property of the family rather than of one version, so every version published under one `key` classifies the same way.",
+                    "title": "AgreementType"
+                  }
+                ]
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Monotonic within the family, from 1. The engine derives it; nobody submits it."
+              },
+              "publishedAt": { "type": "string", "format": "date-time" },
+              "linkedOnboardings": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Onboardings this publish linked the new version to as pending, each of which was notified. One already holding the version is neither counted nor notified."
+              }
+            },
+            "required": ["id", "key", "type", "version", "publishedAt", "linkedOnboardings"],
+            "title": "PublishAgreementResponseDto"
+          }
+        }
+      }
+    },
+    "400": {
+      "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`AGREEMENT_TYPE_MISMATCH`: `key` is already published under another type; `publishedType` and `requestedType` name the two. The type belongs to the family and cannot change between versions.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "oneOf": [
+              {
+                "type": "object",
+                "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+                "required": ["statusCode", "message"],
+                "properties": {
+                  "statusCode": { "type": "integer" },
+                  "message": {
+                    "oneOf": [
+                      { "type": "string" },
+                      { "type": "array", "items": { "type": "string" } }
+                    ]
+                  },
+                  "error": { "type": "string" }
+                },
+                "title": "NestHttpError"
+              },
+              {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                    "required": ["code", "message"],
+                    "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                    "additionalProperties": true,
+                    "title": "ApiError"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "code": { "type": "string", "enum": ["AGREEMENT_TYPE_MISMATCH"] }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "403": {
+      "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "409": {
+      "description": "`AGREEMENT_VERSION_CONFLICT`: A concurrent publish of `key` won the same version number. Nothing is wrong; publish again.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "allOf": [
+              {
+                "type": "object",
+                "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
+                "required": ["code", "message"],
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" } },
+                "additionalProperties": true,
+                "title": "ApiError"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "code": { "type": "string", "enum": ["AGREEMENT_VERSION_CONFLICT"] }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    }
+  }
+}

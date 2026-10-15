@@ -1,0 +1,12 @@
+{
+  "title": "Body",
+  "body": {
+    "required": false,
+    "description": "No body, or an empty JSON object. Anything else is refused.",
+    "content": {
+      "application/json": {
+        "schema": { "type": "object", "additionalProperties": false, "maxProperties": 0 }
+      }
+    }
+  }
+}

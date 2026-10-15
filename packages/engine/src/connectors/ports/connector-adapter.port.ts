@@ -104,6 +104,11 @@ export interface ConnectorAdapter {
    * must declare every one of them in its `data`, or a verdict carrying one would be refused.
    */
   readonly callbackFields?: readonly string[];
+  /**
+   * `submittedData` keys too large or too sensitive for an audit row. The row carries
+   * `<field>Bytes`, the size of the value's compact JSON, in place of each one.
+   */
+  readonly auditRedactedFields?: readonly string[];
   /** Absent when the connector is not configurable through the admin settings API. */
   readonly settingsSchema?: ConnectorSettingsSchema;
   validateDeclaration?(declaration: NormalizedWorkflowConnectorFallback): void;

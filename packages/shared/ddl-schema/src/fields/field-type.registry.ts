@@ -4,6 +4,7 @@ import { booleanFieldTypeDefinition } from './boolean.field-type';
 import { dateFieldTypeDefinition } from './date.field-type';
 import type { WorkflowFieldTypeDefinition } from './field-type.port';
 import { fileFieldTypeDefinition } from './file.field-type';
+import { jsonFieldTypeDefinition } from './json.field-type';
 import { numberFieldTypeDefinition } from './number.field-type';
 import { objectFieldTypeDefinition } from './object.field-type';
 import { textFieldTypeDefinition } from './text.field-type';
@@ -18,6 +19,7 @@ export const BUILT_IN_FIELD_TYPES = [
   booleanFieldTypeDefinition,
   dateFieldTypeDefinition,
   fileFieldTypeDefinition,
+  jsonFieldTypeDefinition,
   objectFieldTypeDefinition,
   arrayFieldTypeDefinition,
 ] as const satisfies readonly WorkflowFieldTypeDefinition[];

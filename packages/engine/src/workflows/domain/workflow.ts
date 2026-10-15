@@ -39,6 +39,9 @@ import {
   WorkflowEvaluationResult,
 } from './workflow-evaluation-result';
 
+const isPlainObjectRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 export type WorkflowInitializationResult = {
   workflowId: string;
   workflowVersion: number;
@@ -327,6 +330,33 @@ export class Workflow {
   }
 
   /**
+   * The context value of every `clientVisible` field of every step other than the current one —
+   * the steps already passed, since a field's value is only ever written by its own step. A field
+   * the context holds no value for is left out. The current step's own values reach the client
+   * through its field descriptions.
+   */
+  collectClientVisibleData(
+    currentStep: string | null | undefined,
+    onboardingContext: Readonly<Record<string, unknown>>,
+  ): Record<string, unknown> {
+    const data: Record<string, unknown> = {};
+
+    for (const step of this.definition.steps) {
+      if (step.name === currentStep) {
+        continue;
+      }
+
+      for (const [fieldName, field] of Object.entries(step.data)) {
+        if (field.clientVisible === true && onboardingContext[fieldName] !== undefined) {
+          data[fieldName] = onboardingContext[fieldName];
+        }
+      }
+    }
+
+    return data;
+  }
+
+  /**
    * Every agreement family the workflow collects acceptance for, in declaration order, so an
    * onboarding start resolves and links each one once.
    */
@@ -394,7 +424,15 @@ export class Workflow {
       }
     }
 
-    const stepData = currentStep.collectAcceptedData(input.submittedData, input.onboardingContext);
+    // A continuation decides the step the client already filled in: the connector's fields are
+    // layered over the values the first submit persisted, so a required client field on the
+    // parking step does not fail validation a second time.
+    const submittedData =
+      input.continuation !== undefined && isPlainObjectRecord(input.submittedData)
+        ? { ...currentStep.collectPersistedData(input.onboardingContext), ...input.submittedData }
+        : input.submittedData;
+
+    const stepData = currentStep.collectAcceptedData(submittedData, input.onboardingContext);
     if (stepData.acceptedData === null || stepData.connectorData === null) {
       return WorkflowEvaluationResult.retryableInvalidData(stepData.fieldErrors, currentStep.name);
     }

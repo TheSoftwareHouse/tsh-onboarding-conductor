@@ -73,6 +73,7 @@ describe('workflow JSON schema', () => {
       { $ref: '#/definitions/booleanDescriptor' },
       { $ref: '#/definitions/dateDescriptor' },
       { $ref: '#/definitions/fileDescriptor' },
+      { $ref: '#/definitions/jsonDescriptor' },
       { $ref: '#/definitions/objectDescriptor' },
       { $ref: '#/definitions/arrayDescriptor' },
     ]);
@@ -120,6 +121,7 @@ describe('workflow JSON schema', () => {
         type: { enum: ['text', 'string'] },
         required: { type: 'boolean' },
         persist: { type: 'boolean' },
+        clientVisible: { type: 'boolean' },
         when: { $ref: '#/definitions/condition' },
         validation: { $ref: '#/definitions/textValidation' },
       },

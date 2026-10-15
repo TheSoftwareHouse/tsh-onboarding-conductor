@@ -37,6 +37,13 @@ export class OnboardingStateService {
       terminal: step === undefined,
       rejectionReason: onboarding.rejectionReason,
       step: step ?? null,
+      pending: onboarding.pendingConnector
+        ? {
+            connectorId: onboarding.pendingConnector.connectorId,
+            parkedAt: onboarding.pendingConnector.parkedAt ?? null,
+          }
+        : null,
+      data: workflow.collectClientVisibleData(onboarding.currentStep, onboarding.context),
     };
   }
 }

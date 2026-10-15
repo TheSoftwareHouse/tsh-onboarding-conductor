@@ -1,0 +1,23 @@
+{
+  "title": "Body",
+  "body": {
+    "required": true,
+    "content": {
+      "application/json": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "settings": {
+              "type": "object",
+              "additionalProperties": { "type": ["string", "null"] },
+              "description": "The keys to change. A string overwrites that key, `null` deletes it, and a key left out is untouched. Keys the adapter does not declare are refused.",
+              "example": { "accountSid": "AC0123456789abcdef", "authToken": null }
+            }
+          },
+          "required": ["settings"],
+          "title": "PatchConnectorSettingsRequestDto"
+        }
+      }
+    }
+  }
+}

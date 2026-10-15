@@ -133,7 +133,7 @@ const reachableFrom = (definition: NormalizedWorkflowDefinition, start: string):
 };
 
 const definitions: [string, NormalizedWorkflowDefinition][] = readdirSync(BUILT_IN_WORKFLOWS_DIR)
-  .filter((fileName) => fileName.endsWith('.json'))
+  .filter((fileName) => fileName.startsWith('eu-b2c-individual-kyc-') && fileName.endsWith('.json'))
   .sort()
   .map((fileName) => [
     fileName,

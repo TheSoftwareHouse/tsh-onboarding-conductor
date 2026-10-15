@@ -1,0 +1,11 @@
+{
+  "parameters": [
+    {
+      "name": "id",
+      "required": true,
+      "in": "path",
+      "description": "The onboarding id.",
+      "schema": { "format": "uuid", "type": "string" }
+    }
+  ]
+}

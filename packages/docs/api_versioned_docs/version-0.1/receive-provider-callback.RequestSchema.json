@@ -1,0 +1,8 @@
+{
+  "title": "Body",
+  "body": {
+    "required": true,
+    "description": "The provider's payload, byte for byte as the provider sent it: the signature is computed over exactly these bytes, so the body is read raw and parsed only after it verifies. The signature and timestamp header names are whatever the connector adapter declares for its provider.",
+    "content": { "*/*": { "schema": { "type": "string" } } }
+  }
+}

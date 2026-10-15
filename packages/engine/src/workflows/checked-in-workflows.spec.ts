@@ -111,6 +111,24 @@ describe('checked-in workflows', () => {
     }
   });
 
+  it('ships the Algoan credit check built-in with a users fork that differs only in id and name', () => {
+    const find = (workflows: CheckedInWorkflow[], id: string) =>
+      workflows.find((workflow) => workflow.normalized.id === id);
+    const shipped = find(builtIn, 'uk-bnpl-credit-check-algoan');
+    const fork = find(users, 'uk-bnpl-credit-check-algoan-local');
+
+    expect(shipped).toBeDefined();
+    expect(fork).toBeDefined();
+    expect(everyConnector(shipped!.normalized).map(({ connector }) => connector.id)).toContain(
+      'algoan_credit',
+    );
+    expect({ ...fork!.authored, id: undefined, name: undefined }).toEqual({
+      ...shipped!.authored,
+      id: undefined,
+      name: undefined,
+    });
+  });
+
   it('declares every id in exactly one scope directory', () => {
     const scopesById = new Map<string, Set<string>>();
 

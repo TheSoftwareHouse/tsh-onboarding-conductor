@@ -66,7 +66,13 @@ const guardedWorkflow = {
       type: 'custom',
       config: {
         status: 'awaiting_user',
-        data: { [MOCK_ASYNC_CALLBACK_VERDICT_FIELD]: { type: 'text', required: false } },
+        data: {
+          [MOCK_ASYNC_CALLBACK_VERDICT_FIELD]: {
+            type: 'text',
+            required: false,
+            clientVisible: true,
+          },
+        },
         connectors: [
           {
             name: VERDICT_PROVIDER_ID,
@@ -287,6 +293,11 @@ describe('Parked onboarding lifecycle (e2e)', () => {
       parkedAt: park!.parkedAt,
     });
     expect(JSON.stringify(summary.body)).not.toContain(providerReference);
+
+    const state = await http().get(`/v1/onboardings/${onboardingId}/state`).expect(200);
+    expect(state.body.pending).toEqual({ connectorId: PROVIDER_ID, parkedAt: park!.parkedAt });
+    expect(state.body.data).toEqual({});
+    expect(JSON.stringify(state.body)).not.toContain(providerReference);
   });
 
   it('refuses a second client submit while parked, without opening a second provider attempt', async () => {
@@ -344,6 +355,10 @@ describe('Parked onboarding lifecycle (e2e)', () => {
     const initiation = verdictProvider.getLatestInitiation();
     expect(initiation).toMatchObject({ onboardingId, connectorOrder: 1 });
 
+    const parkedState = await http().get(`/v1/onboardings/${onboardingId}/state`).expect(200);
+    expect(parkedState.body.pending).toMatchObject({ connectorId: VERDICT_PROVIDER_ID });
+    expect(parkedState.body.data).toEqual({});
+
     await postCallbackTo(
       VERDICT_PROVIDER_ID,
       verdictProvider.emitProviderCallback({
@@ -352,6 +367,14 @@ describe('Parked onboarding lifecycle (e2e)', () => {
       }).rawBody,
     ).expect(204);
     await expect(readStatus(onboardingId)).resolves.toBe('approved');
+
+    // The step has advanced, so the value is reachable only through `data` now.
+    const finalState = await http().get(`/v1/onboardings/${onboardingId}/state`).expect(200);
+    expect(finalState.body).toMatchObject({
+      terminal: true,
+      pending: null,
+      data: { [MOCK_ASYNC_CALLBACK_VERDICT_FIELD]: 'approved' },
+    });
     const rows: Array<{ context: Record<string, unknown> }> = await dataSource.query(
       'SELECT context FROM onboardings WHERE id = $1',
       [onboardingId],

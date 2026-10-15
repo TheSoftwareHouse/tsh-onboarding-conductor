@@ -1,0 +1,46 @@
+---
+id: request-encryption-reencryption
+title: 'Re-encrypt every stored onboarding onto the active key'
+description: 'Records a standing request for the background sweep to move every stored onboarding onto the active key, including rows still naming a superseded one. Rotation alone does not do this: it changes which key new writes use and leaves stored rows where they are until something rewrites them. This is the answer to a data key whose material leaked, where those rows must stop naming it without waiting. The work is a batch per sweep tick, each row decrypted and re-encrypted inside one transaction, so no row is ever stored as plain JSON on the way across — unlike turning encryption off and on again, which writes every onboarding to disk unencrypted in between. `progress.pending` counts rows not yet on the active key for as long as the request stands, and the sweep clears it once none are left. Idempotent: asking again while one stands re-stamps it and changes nothing else.'
+sidebar_label: 'Re-encrypt every stored onboarding onto the active key'
+hide_title: true
+hide_table_of_contents: true
+api: eJztWt1yG7mxfpWuyYXXrjElZ51UlqpccGVmrd21pCPJx5WYLg04aJJYYoAJgBHNo1LVeYjzhHmSnG5gfkjR6/gkdXLjG1skZ4BG/3z9dTfuM4m+dKoOyppsnF1haZ30IMAHYaQyS3D41wZ9gIV1EFYIc1Gul842RoLfINYQLFT2DgHv0G3BB+tQgjVzKxwvYE2w/KYog7pDWOM2B2VK3cT17caDD0prMKKibwT4pkbnUfJCOIIrGwRJCEJbgyAtejA2gKSFlR+DClCuhFmih81KlSvaBAxuYONUQA+NRxBGgkZxh74VkrferNAhybcF4RAaE5QGbysMq3j8tERYYTWCm5XyoHw8j/EbdHR+AVIEwZtuVtYjVCKgU0LThmuUebcL/cjbVo0PJEfdnloF2Kiwsk2AjVBBmSXthrCxbk07CpiLUK6gRtcqXpXrHFCUK1oSJJZuWweUfFKHz9G0XyjjlUTSJQQnjCdLWJODt2Asv6w826/VjPBQa6EM/Hh9cQ7W8Hk3YguidNZ7+Nt//w80Rqs1QmicIfnTbmQlu1iwDGSwpVAmT0ZJmoyOMvCQYEEqv4bGDEWGOYYNohlBUTu7dOj9qEZ2ygJK25jgoyrJE7YYWjF7N2OfFR60Ja+KRmvdmf3b5ywnfR9VWmoUzpMtrCkRDGmMvELjIozgTGJV24AmjEH4NfsqnY+Op6N647KkfR9EVfNStEXrncZGt0LtcZTlma3RsWufyWycJeGmnSqvsFdrlme1cKLCgM5n4/cf8syhr63x6LPxffbb42P6bzegyYN8EAHZuXY04DjWUZIYpTV0LHpf1LVWJct09IunRe4zX66wEvRX2NaYjTM7/wXLQBI5OkFQUQQ0Yq5RDh6cW6tRkOy7cr1bYVihG3oNRVXjDMf8GGI04UflAxlOBFiJaOo5ogGHQTmUIyiCa7CAhbMVn66yFRrSOUTVEmo1ziSbDoGHnl46UZJqjLQbmOPCcpCKwJuzIwny2G+KNW79+w+t/03iL8qa4ukJFAuh/QEZVBieabH41c2jF5WtiYJy9BiJEbGxdjZgGfwQ1TqxossXT0fZQ56tcXtqzUItG/dFpiAkBTRLZZB2K9F7WFktY9yscft8YCwS7Jtien569efLm7OL89ufpn8uno7gXYIwFfKhbUthoul6E3NYGMsrlYKiHYQkxE9qVL6Voj2Vf+zeU4YSWqJzEYaxpC2UUPQ440fs5h9DkUNlYwSQnRbK+UBRkBQlnBPbLM9UwMp/3unVUMk+kN2yPFtYV4mQjbOmUfKRzikslWQ7BjSgKEVGWERzh9rWGDVAJ6udlU1JcfqQZ6VDEVBOwq/uKUXA50FVeMjYESUJ9DfCQ1pwuPj3237x9/3qptE6+3DoJF2kbVa2NfAwHRggHGbjtqfKWzyeo3CcRNekB4kmqIXiB7HKIXGOxqyN3ZjnoqRdKuHWSJuhASErZUA0YUVvRtiiqLOLxQjOG63BGp0SQUx0xqMjx7BN4KRI608uz06S/qMvYRsIUSU+gaXnEwq/Jje1DlRgvbVA8U+bJVl8jqWtKL6to79FhU+HmY0p0RtBzxFs0C+LJjQOOS17RCge4xQLKlHjnpgHDPzF8hKNidLSXzXKp20AEoYNAIvl67ndfMtGSdzOuhbV6YfDtOIESMiUb9VuTjisk3GLXpQGtx6KhJWJ6JHf9DbEL4VL1YEjFEnSAsrGOTRBb4l2RvR6ZI8v3Yh2oMNy8ouhNG/683ceyESI1FwMnLIgOWMa2dFNDrJxB7MRo+lS3XVszSGzAhDMZEokzkZciaxChki5U5ht4jdRGT7SDhUil60d3inbxOM4rIQyn7LIQ85sSHEOe58xhvbgN8Sq3fgbOnln1UMG+JBnQQVNFuj51k+4vUqc6lWwUYrkn/9AIjAB3Z3Qj9PUa7sBuwgJehO08MLYOxABV/BgN+YECnLzIkKcCl3BE+lq9P5d5kR4R3TS4MUiG7+/z4TW6a99OELTVKTSl39YZXn23e/p3xebLM9+S/+8qOxjkP+s/HvMoD9KDhUKT0ykp0c9QX+S8o8ixvfyDwQB3/0eVrZxPmc6Tfi/sbBBXHvOBgIW6iNK+Pb4uRRbqKwJK07dB02ZTHfWGubhw0PeKYThjr7JDH4M7bP/MmxEoGUpNdlKBFX2QLcQWnuQTcKmHXUUnY8XUOvGQ9F6VZHyGfkEc5z+F1B+BGdx01qkWl0AsXbZaOy5EaUV2pixY5OK0STVwLItqrjGdHjCFTaW6xYQ9rjf7dXFzYQ/nL6env50e3Z+M736z8nPt2+uiwPR3Brkke4PRmX7+05ocvRxVfj5yEzRP3iQJFiiy/KsUkZVFBHH+4a86JljV2Mm/CxJdyZWVuPDRfPBKKWam3G4L3S7XNaylgnzFCLIw1xJYaWiHOk0bJbOfMqDFv+15ZpeBe7IeEiNl5SQOm7Djkm+m7ZNNJQzVbAhItgXKGq6V9A/NnhrgHb9gZmvqfC+TKbcs7Dryt8d430uYw6Kvye+q3eDHTRFvqRb1WdP4oypLzaCd73h8s+1KA5ZU3ju7ZyAJaE3yu/0h6jrMDB2zkSwGQZssvhjZbdV+H4pmIqoQUobxNCesg/G4TW5+25+pL1fHr94nPLO7Q6176h8JPoLobQHr5ZGRCKivG/Q5SAaqZD4hXWAH2vltnCHTi0Stf+nehV7AqIPP14/8SBxIRodAJ2jTVP9lRMZjaVM1yGEBbVfuCEXe3+eyomAgsr7AYCOO5+7E1rJaK5vipfHx0UORYXeiyUWoLm3wf27O2U10zfXaHyaRwfk0iYpcdkIJ3mNF7TGy+Nv6b/fHX9bPI2kQNCn46JtgvlmXqXWU+3snZLonpdCa+regrNNwLbzKaC0xiBXVkKKOqBL5mHqJhKmRe04kSipMPwi+bLDReOFHmW7XkjY2PhTKylDpjOTW+0i8+Cpx5jz0L84vh9wm11GM0jpn6rc2yc52/NJDv3Yuzz5xusQ6ik/2nr5t4fba9Gjo5f+b40z5+6Hh8JZjb6AUgtVpUYK9xPtAorJqzdn57dX0/94e3Y1fXV7dfHz9Lo44YDgXnBqnLZ9k4X6yGXAV/f/6v7/Nvf/7rH7D0ngq7Pryfc/T18VY5gebOpSA9RzbnUYqcwwx1J25oKCE4XtyOsJvx+7t7FTFw1TXE5uTl/D0d2LI/aUo55pFV8UJo8KpU8EzE3n30+4stkLmBEU5A9F2xLwgZJw39EiQl5qRTRs7oQpV0is4GQQDw5rFMFzsTxh54rEXUhJURqE4i5w8h7aJwo4j+3U0DXiIpsXIYUwr7jnneVn/LLc9cjO1YYO+dh/hJSKdhf6crAaNeh735rUKrlV/jnWfliIvoA94HzZhwfycvbY3x0C7P2y5fzi5vb04vxPZz+8vWLfvTnUBed6aL/kIYbXcquWdlMj26BilIiVHBjqizpRD4aEJ/2bn+qtxxGeD8KFAbKOZmZmpiY48cR3yYJ7WxiIb2qZumHgCFeTXD3tooZvLB5/aeSSxidXGNz2a1r5mlb+LWnlIc88lo1TYcsiILn292wbGnA+UBUiljTszCZkt/GgnqZT05De0uC0tp7xQ4RVNs4OJYUjtztK9ejuujlqK8Q1eXk7yhyIkvyfa8/4VZ7++FPbD/rx3U0/QVqFUD8KjQm8UTQ9t4sAHMNw9gpEyQiTxh9UBMnupkVCocnlGYi6BodL5YNr/X7yl7dX09vJ5dnt5O2rs+n56ZScthTObXkwHag/6wMkyhlnPpoSh/kE/4zTu/bHydub17fTc4bVP8YJZw4CtC2Ffs5DFY8htN3jtidIXhv3iGOreM+A+8sca1RKrxXNCNr5X3t0MIg8jSavUGZh2ZmS69xcv4a+HQOn1tDa1sG009HBhP365uYSfOMW1NtOWhgU+y2wcGyju1NlyrnaChnL84XmqxULZTi1+Zy6Yn5mBmPFyNU9A3XFx5KOW+cdBPi8wwto8cLHewGREmxwvrJ27Rngf/MbmKQy2NPn5/Ds2eDwJNHo2TOIhERC2fhgK3SJlgzaMPDWDCZjKMf751dkkJmB9L2mGYORGmPaoPzF9xfo8kkpajFXWoXtKErEAdnK0U0AW133UFsLg5rsO2+UJnccQeoXdWQlARzfceGoIpF2IuMbmmo9m+yM+Z49TZJcPlItifVuH4ef+N4IhBdkABB+a8qVs4amEg59o6nJPlQayTKPfbPXbyanNAlUdTzgY4iXWGrhcGDHocT0JautP7uPEcvLFQPMKaDFpFY7Vbx2cgBEZmZHV7vw8cQfBpDY/T1UpB5AjpnpqU5va36XuGqlvOfemYPGxEKYyW8X2jGvU9JngInpVrQ1s4wPzkx7/2l4eYM26V6j9ExRwykaPM3zenKzw38iv+maZokzzcyANHkgmaAxzJVI4NYzJZbKM3AtnTA8LHYJ2mQ+aJi2/VVqWhFmLFuzc4bj2O2rho7ciDa3c1GzMYkSFPcwY8o7y3KYtSl6lsFDMT5YW8zMoeLCr1gNscbghjMpjOlQH3A63apBJhu+Za6Rm43gmsYE/MvMCCkfFx8nu9UGN1ljVxAGGEw327qLc+8+Tfdm5iDfi2ljbiU3YDtiSRjHuupJzp7G6APTEVZexz3HM/NJAvkvIIcz8w+ww/xX6CFZgCjiIYaYbqk5MnqsRaJDBNtbunW+761UaSw3SGClkjGb3GxsR6Tn8dGVuKM6JY3W/EpQOTtp2S5bYGG1prb0cJzgA9ZEyoWcmeKH6Q0X44O8eHSv5MMRz0gKPgG3xeitUSwnUgjjR1HStHxDmXdAJjbUcidoq8NoZiY7SJ64h+/8Q0Al6oRqHNy/DtAn6Z6VkMC3QDgiZqa95EmvVjX19/v1e2XasiE0zrtDxePwJcpqjjydj10OA4tG6y4bzAndeJ7frkG//ICGAmk4It1pNLDr8F6vbi7oBJahMV1eLG1VERoR2HUXWsg7TkBAQB9mJhUe7VySJqpSebF0yHZ2jTE9G2IiFDFBBOjtWqMRtRpRQcgNFmLPkWgdj16MjlMJKUoqIR/yTKsSjecSg2AgG2dvzoghN04nguzHR7yqt40rcWTd8ii95I/oWeKBlKcrYQarXP2fRjj75PC+r3e/3nn+euf5653n/887z6lIppuYR6xxakkwLtynCv59dveCbu9QOuaG36Bw36njP+TZikr/8fvs/n4uPL51+uGBvv5rg24bq/s74ZiPckshz1YoJPcX7mkeSoU5pxiCNKEbbnjsN8Aehr2Gy4trAjIqEoYz6d2+wLCjIsx2sPj9fXzihkjrw0OcypI66HPGzcu/A6Gpn4E=
+sidebar_class_name: 'post api-method'
+info_path: api/0.1/tsh-onboarding-conductor-engine-api
+custom_edit_url: null
+hide_send_button: true
+---
+
+import MethodEndpoint from '@theme/ApiExplorer/MethodEndpoint';
+import ParamsDetails from '@theme/ParamsDetails';
+import RequestSchema from '@theme/RequestSchema';
+import StatusCodes from '@theme/StatusCodes';
+import OperationTabs from '@theme/OperationTabs';
+import TabItem from '@theme/TabItem';
+import Heading from '@theme/Heading';
+import Translate from '@docusaurus/Translate';
+
+<Heading
+  as={'h1'}
+  className={'openapi__heading'}
+  children={'Re-encrypt every stored onboarding onto the active key'}
+></Heading>
+
+<MethodEndpoint
+  method={'post'}
+  path={'/v1/admin/encryption/reencryption'}
+  context={'endpoint'}
+></MethodEndpoint>
+
+Records a standing request for the background sweep to move every stored onboarding onto the active key, including rows still naming a superseded one. Rotation alone does not do this: it changes which key new writes use and leaves stored rows where they are until something rewrites them. This is the answer to a data key whose material leaked, where those rows must stop naming it without waiting. The work is a batch per sweep tick, each row decrypted and re-encrypted inside one transaction, so no row is ever stored as plain JSON on the way across — unlike turning encryption off and on again, which writes every onboarding to disk unencrypted in between. `progress.pending` counts rows not yet on the active key for as long as the request stands, and the sweep clears it once none are left. Idempotent: asking again while one stands re-stamps it and changes nothing else.
+
+<Heading id={'request'} as={'h2'} className={'openapi-tabs__heading'}>
+  <Translate id="theme.openapi.request.title">Request</Translate>
+</Heading>
+
+<ParamsDetails {...require('./request-encryption-reencryption.ParamsDetails.json')}></ParamsDetails>
+
+<RequestSchema {...require('./request-encryption-reencryption.RequestSchema.json')}></RequestSchema>
+
+<StatusCodes {...require('./request-encryption-reencryption.StatusCodes.json')}></StatusCodes>

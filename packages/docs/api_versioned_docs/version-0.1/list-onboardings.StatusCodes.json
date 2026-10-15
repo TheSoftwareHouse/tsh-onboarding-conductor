@@ -1,0 +1,261 @@
+{
+  "responses": {
+    "200": {
+      "description": "One page of onboarding records.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "onboardingId": { "type": "string", "format": "uuid" },
+                    "workflowId": { "type": "string" },
+                    "workflowVersion": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "The workflow revision the onboarding is pinned to."
+                    },
+                    "status": {
+                      "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+                      "allOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "awaiting_user",
+                            "awaiting_manual_review",
+                            "approved",
+                            "rejected",
+                            "invalid"
+                          ],
+                          "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+                          "title": "WorkflowStatus"
+                        }
+                      ]
+                    },
+                    "currentStep": {
+                      "type": ["string", "null"],
+                      "description": "The step awaiting data; null once the onboarding is terminal."
+                    },
+                    "expiresAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time",
+                      "description": "Reserved. Onboardings do not expire yet, so this is always null."
+                    },
+                    "createdAt": { "type": "string", "format": "date-time" },
+                    "updatedAt": { "type": "string", "format": "date-time" },
+                    "completedAt": {
+                      "type": ["string", "null"],
+                      "format": "date-time",
+                      "description": "When the onboarding reached a terminal status; null while it is still running."
+                    },
+                    "rejectionReason": {
+                      "description": "Why a connector refused, when a rejection a connector drove ended the onboarding.",
+                      "oneOf": [
+                        {
+                          "allOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "ATTEMPTS_EXHAUSTED",
+                                "CHALLENGE_EXPIRED",
+                                "CHALLENGE_NOT_FOUND",
+                                "CONNECTOR_REJECTED"
+                              ],
+                              "description": "Why a connector refused the step's data: the caller exhausted its attempts, the challenge expired or was never issued, or the provider rejected outright.",
+                              "title": "ConnectorRejectionReason"
+                            }
+                          ]
+                        },
+                        { "type": "null" }
+                      ]
+                    },
+                    "scores": {
+                      "type": "object",
+                      "additionalProperties": { "type": "number" },
+                      "description": "The current value of every score the workflow declares, keyed by score name."
+                    },
+                    "agreementStatus": {
+                      "description": "Aggregated over every agreement family the onboarding holds, as the `onboarding_agreement_statuses` view derives it; `not_accepted` when it holds none.",
+                      "allOf": [
+                        {
+                          "type": "string",
+                          "enum": ["current", "outdated", "not_accepted"],
+                          "description": "Where an onboarding stands on an agreement family, or on every family it holds: `not_accepted` while there is no accepted version, `outdated` when there is one but a newer version has been published, `current` otherwise. Derived, never stored.",
+                          "title": "OnboardingAgreementStatus"
+                        }
+                      ]
+                    },
+                    "pendingConnector": {
+                      "description": "The connector the onboarding is parked on awaiting a callback; null when it is not waiting for one, and for onboardings parked before this was recorded.",
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "allOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "connectorId": {
+                                  "type": "string",
+                                  "description": "The id of the connector the onboarding is waiting on."
+                                },
+                                "connectorName": {
+                                  "type": "string",
+                                  "description": "The name the workflow step gives that connector declaration."
+                                },
+                                "connectorOrder": {
+                                  "type": "integer",
+                                  "description": "The order of the connector slot on the step the connector was parked in."
+                                },
+                                "parkedAt": {
+                                  "type": ["string", "null"],
+                                  "format": "date-time",
+                                  "description": "When the onboarding was first parked on this connector; null for a row parked before the engine recorded it."
+                                }
+                              },
+                              "required": [
+                                "connectorId",
+                                "connectorName",
+                                "connectorOrder",
+                                "parkedAt"
+                              ],
+                              "title": "AdminOnboardingPendingConnectorResponseDto"
+                            }
+                          ]
+                        },
+                        { "type": "null" }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "onboardingId",
+                    "workflowId",
+                    "workflowVersion",
+                    "status",
+                    "currentStep",
+                    "expiresAt",
+                    "createdAt",
+                    "updatedAt",
+                    "completedAt",
+                    "rejectionReason",
+                    "scores",
+                    "agreementStatus",
+                    "pendingConnector"
+                  ],
+                  "title": "AdminOnboardingSummaryResponseDto"
+                }
+              },
+              "meta": {
+                "type": "object",
+                "properties": {
+                  "pagination": {
+                    "type": "object",
+                    "properties": {
+                      "page": { "type": "integer", "minimum": 1 },
+                      "limit": { "type": "integer", "minimum": 1 },
+                      "total": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Rows matching the filters, across all pages."
+                      },
+                      "totalPages": { "type": "integer", "minimum": 0 }
+                    },
+                    "required": ["page", "limit", "total", "totalPages"],
+                    "title": "PaginationMetaResponseDto"
+                  }
+                },
+                "required": ["pagination"],
+                "title": "PaginatedMetaResponseDto"
+              }
+            },
+            "required": ["items", "meta"],
+            "title": "ListAdminOnboardingsResponseDto"
+          }
+        }
+      }
+    },
+    "400": {
+      "description": "The body or query violates its declared shape; `message` names each violated rule.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "401": {
+      "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "403": {
+      "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    },
+    "503": {
+      "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+            "required": ["statusCode", "message"],
+            "properties": {
+              "statusCode": { "type": "integer" },
+              "message": {
+                "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+              },
+              "error": { "type": "string" }
+            },
+            "title": "NestHttpError"
+          }
+        }
+      }
+    }
+  }
+}
