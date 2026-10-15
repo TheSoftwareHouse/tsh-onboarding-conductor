@@ -59,50 +59,44 @@ tool by hand produces confusing failures.
 
 ## Versioning
 
-Every merge into `main` is released automatically: the Version bump workflow
-(`.github/workflows/release.yml`) bumps the version, adds a `CHANGELOG.md` entry and tags `vX.Y.Z`
-([decision 0046](docs/decisions/0046-commit-driven-versioning.md)). You add nothing to the pull
-request — no version change, no changelog edit.
+One product version covers the whole monorepo: the root `package.json`, every workspace's and the
+OpenAPI document's `info.version` ([decision 0046](docs/decisions/0046-manual-versioning.md)). A
+merge does not change it; a maintainer bumps it in a pull request of its own.
 
-### Write the title
+### Changelog
 
-The squash-merge title becomes the changelog line, so write it as a Conventional Commit:
+Every pull request adds a line to `CHANGELOG.md`, under `## Unreleased`, in the
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) group it belongs to:
 
-```text
-feat(engine): postal code field type (#123)
+```markdown
+## Unreleased
+
+### Added
+
+- Engine — Postal code field type.
 ```
 
-- `feat` is listed under **Added**, `fix` under **Fixed**, any other type — or a title that is not
-  a Conventional Commit — under **Changed**
-  ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)). The line reads `Scope — Description`;
-  `(#123)` is dropped, so the description alone has to say what changed.
-- Check the title in the merge dialog. For a pull request with one commit, GitHub proposes that
-  commit's title instead of the pull request's.
+- **Added** for a new feature, **Changed** for a change to existing behaviour, **Fixed** for a bug
+  fix, **Removed** for a removed feature. Create the group if `## Unreleased` does not have it yet.
+- One line per change, `Area — What changed`, written for someone who reads the changelog and not
+  the code. Mark a breaking change `**Breaking:**` at the start of the line.
+- CI fails a pull request that leaves `CHANGELOG.md` unchanged (`pnpm changelog:check` runs the same
+  check locally).
 
-### How the version moves
+### Bump the version
 
-| The merge is… | While `0.x` | From `1.0.0` |
-| ------------- | ----------- | ------------ |
-| not breaking  | patch       | patch        |
-| breaking      | minor       | major        |
+On an up-to-date branch off `main`:
 
-A merge is breaking when the title has `!` after the type (`feat(api)!: drop the v0 routes`) or the
-squash message has a line starting `BREAKING CHANGE:`. The squash message carries the message of
-every commit in the pull request, so a footer left in a work-in-progress commit counts too — delete
-it in the merge dialog if the change is not breaking.
+```bash
+pnpm version:bump patch    # or minor, major, or an explicit version such as 1.0.0
+```
 
-### Jump to a specific version
+The script turns `## Unreleased` into `## X.Y.Z — <today>` above the entries collected so far and
+opens a new, empty `## Unreleased`, writes `X.Y.Z` into every `package.json`, and regenerates the
+OpenAPI document and the documentation site's API pages. It refuses when `## Unreleased` lists no
+change. It does not commit: review the diff and open a pull request titled `chore: release vX.Y.Z`.
 
-To release, say, `1.0.0` instead of the next patch:
-
-1. Set `"version": "1.0.0"` in every `package.json` — the root one and each one under `packages/`.
-2. Run `pnpm openapi:generate`, so the OpenAPI document carries the same version; `pnpm test` fails
-   until it does.
-3. Optionally write the `## 1.0.0` entry in `CHANGELOG.md` yourself. If you don't, one is generated
-   from the pull request title.
-
-The merge is released as exactly that version, with no further bump. It must be `X.Y.Z` (no
-`-rc.1` suffix) and not a version that was already released.
+While the version is `0.x`, a breaking change bumps the minor; from `1.0.0` on, the major.
 
 ## Checks
 

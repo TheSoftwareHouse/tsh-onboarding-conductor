@@ -27,6 +27,8 @@
     "skills:routing": "node scripts/test-skill-routing.cjs",
     "skills:ablation": "node scripts/test-skill-ablation.cjs",
     "skills:evals": "pnpm --filter @tsh/skill-evals run evals",
+    "version:bump": "node scripts/version-bump.cjs",
+    "changelog:check": "node scripts/check-changelog.cjs",
     "workflow:validate": "node scripts/validate-workflows.cjs",
     "workflow:compile": "pnpm --filter @tsh/ddl-schema build && node scripts/compile-workflow.cjs",
     "openapi:generate": "pnpm --filter @tsh/ddl-schema build && pnpm --filter @tsh/engine openapi:generate",

@@ -11,6 +11,7 @@
 
 - [ ] `pnpm format:fix`, `pnpm lint`, `pnpm typecheck` and `pnpm test` pass
 - [ ] `pnpm test:e2e` passes, or is not affected by this change
+- [ ] `CHANGELOG.md` has a line for this change under `## Unreleased`
 - [ ] Tests cover the change (a fix includes the test that would have caught the bug)
 - [ ] `docs/IMPLEMENTATION.md` updated if this adds, changes or removes a feature
 - [ ] `.env.dist` updated, with an explanatory comment, if this adds configuration

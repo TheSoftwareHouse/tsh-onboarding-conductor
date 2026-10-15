@@ -3,9 +3,17 @@
 All notable changes to this project are documented in this file. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-One product version covers the whole monorepo. Every pull request merged into `main` bumps it and
-adds an entry here, generated from the squash-merge commit subject (the PR title). See
+One product version covers the whole monorepo. Every pull request adds its line under
+`## Unreleased`; `pnpm version:bump` dates those lines under the new version. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning).
+
+## Unreleased
+
+### Changed
+
+- Versioning — The version is bumped by hand with `pnpm version:bump`, which also regenerates the
+  OpenAPI document and the API reference, instead of on every merge into `main`; every pull request
+  adds its own line to this changelog.
 
 ## 0.1.0 — 2026-10-13
 
