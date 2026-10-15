@@ -5,8 +5,10 @@
   "description": "Onboarding Conductor documentation site: guides, API reference and workflow fixtures",
   "scripts": {
     "docusaurus": "docusaurus",
-    "api:generate": "pnpm run api:clean && node scripts/copy-openapi.mjs && docusaurus gen-api-docs all && node scripts/label-info-page.mjs",
-    "api:clean": "docusaurus clean-api-docs all",
+    "api:generate": "pnpm run api:prepare && docusaurus clean-api-docs all && pnpm run api:script scripts/copy-openapi.mjs && docusaurus gen-api-docs all && pnpm run api:script scripts/finish-api-pages.mjs",
+    "api:clean": "pnpm run api:prepare --clean && docusaurus clean-api-docs all",
+    "api:prepare": "pnpm run api:script scripts/prepare-api-versions.mjs",
+    "api:script": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
     "fixtures:generate": "node scripts/generate-fixtures.mjs",
     "fixtures:clean": "node scripts/generate-fixtures.mjs --clean",
     "start": "pnpm run api:generate && pnpm run fixtures:generate && docusaurus start --port 3030",
@@ -14,7 +16,7 @@
     "serve": "docusaurus serve --port 3030",
     "clear": "docusaurus clear",
     "typecheck": "pnpm run api:generate && tsc --noEmit",
-    "lint": "eslint \"src/**/*.{ts,tsx}\" \"sidebars/**/*.ts\" \"scripts/**/*.mjs\" docusaurus.config.ts"
+    "lint": "eslint \"src/**/*.{ts,tsx}\" \"sidebars/**/*.ts\" \"scripts/**/*.mjs\" docusaurus.config.ts openapi-versions.ts"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.2",

@@ -21,7 +21,7 @@ as-built specification and the extension reference; the guides link to them.
 
 ## Context
 
-Decision 0010 made the engine's HTTP contract a committed OpenAPI document so a documentation site
+Decision 0015 made the engine's HTTP contract a committed OpenAPI document so a documentation site
 could render it. The design handoff for that site arrived as a Docusaurus theme: a stylesheet
 mapping the TSH tokens onto Infima, licensed fonts, a swizzle list and a home page specification.
 Three constraints decided the shape:
@@ -50,7 +50,8 @@ Three constraints decided the shape:
 - `pnpm build` and `pnpm typecheck` grow by the site's generation and build. The site build is the
   slowest step in the fan-out.
 - A change to the OpenAPI document or to a workflow file shows up in the site on the next build
-  with no further action. A broken link into a generated page fails the build, since
+  with no further action. Decision 0034 extends the same arrangement to the archived minor
+  versions of the document, each rendered as a Docusaurus version of the API reference. A broken link into a generated page fails the build, since
   `onBrokenLinks` throws.
 - The API reference's ids and sidebar come from the plugin, which assumes it writes into a subfolder
   of the default docs instance; `sidebars/api.ts` strips that prefix. A plugin upgrade that changes

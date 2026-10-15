@@ -1,12 +1,49 @@
 import type * as Preset from '@docusaurus/preset-classic';
 import type { Config } from '@docusaurus/types';
 import type * as OpenApiPlugin from 'docusaurus-plugin-openapi-docs';
+import {
+  CURRENT_DOWNLOAD_URL,
+  CURRENT_SPEC_PATH,
+  listArchivedVersions,
+  readCurrentMinorVersion,
+  readRegisteredApiVersions,
+} from './openapi-versions';
 import { tshDark, tshLight } from './src/prism/tsh';
 
 // Onboarding Conductor documentation, skinned with the TSH design system (see src/css/custom.css
 // and the theme notes in CLAUDE.md). Three docs instances: Guides (the default), the API reference
 // generated from the engine's OpenAPI document, and the Fixtures gallery generated from the
 // workflow files. Nothing generated is committed; `pnpm build` regenerates it first.
+//
+// The API reference is versioned: the current document is the `current` version at /api, and each
+// minor version archived under packages/shared/openapi/versions is a Docusaurus version at
+// /api/<major.minor>, generated from its frozen document by its own OpenAPI plugin entry below.
+// scripts/prepare-api-versions.mjs registers the versions before any `docusaurus` command runs.
+
+const archivedVersions = listArchivedVersions();
+
+// One generator entry per document, all written the same way; `showSchemas` stays off because
+// schema pages would add one entry per embedded workflow-schema definition, over a hundred of
+// them, and the response and request panels already render every shape inline.
+function openApiEntry(
+  specPath: string,
+  outputDir: string,
+  downloadUrl: string,
+): OpenApiPlugin.Options {
+  return {
+    specPath,
+    outputDir,
+    downloadUrl,
+    sidebarOptions: {
+      groupPathsBy: 'tag',
+      categoryLinkSource: 'tag',
+      sidebarCollapsible: false,
+      sidebarCollapsed: false,
+    },
+    showSchemas: false,
+    hideSendButton: true,
+  };
+}
 
 const repository = 'https://github.com/TheSoftwareHouse/tsh-onboarding-conductor';
 const editUrl = `${repository}/edit/main/packages/docs/`;
@@ -96,6 +133,23 @@ const config: Config = {
         routeBasePath: 'api',
         sidebarPath: './sidebars/api.ts',
         docItemComponent: '@theme/ApiItem',
+        // The current document keeps /api; without this the newest archive would take it and the
+        // current one would move to /api/next. The `versions` keys must be versions
+        // api_versions.json lists, so they come from that file rather than from the archive.
+        lastVersion: 'current',
+        versions: {
+          current: { label: `${readCurrentMinorVersion()} (current)` },
+          ...Object.fromEntries(
+            readRegisteredApiVersions().map((version) => [
+              version,
+              // Docusaurus' banner marks every page of the version, generated endpoint pages
+              // included; its stock "no longer maintained" wording is replaced in i18n/en/code.json,
+              // because a frozen contract is still the contract of that engine version. The info
+              // page already prints the exact version, so no badge.
+              { label: version, banner: 'unmaintained', badge: false },
+            ]),
+          ),
+        },
       },
     ],
     [
@@ -104,23 +158,16 @@ const config: Config = {
         id: 'openapi',
         docsPluginId: 'api',
         config: {
-          engine: {
-            // The committed document the engine's decorators generate; scripts/copy-openapi.mjs
-            // also publishes it under static/openapi for download.
-            specPath: '../shared/openapi/engine.openapi.json',
-            outputDir: 'docs/api',
-            downloadUrl: '/openapi/engine.openapi.json',
-            sidebarOptions: {
-              groupPathsBy: 'tag',
-              categoryLinkSource: 'tag',
-              sidebarCollapsible: false,
-              sidebarCollapsed: false,
-            },
-            // Schema pages would add one entry per embedded workflow-schema definition, over a
-            // hundred of them; the response and request panels already render every shape inline.
-            showSchemas: false,
-            hideSendButton: true,
-          } satisfies OpenApiPlugin.Options,
+          // The committed document the engine's decorators generate, and each archived minor
+          // version's frozen copy; scripts/copy-openapi.mjs publishes them all under static/openapi
+          // for download. Entry names must not be `all`, which the plugin's CLI reserves.
+          engine: openApiEntry(CURRENT_SPEC_PATH, 'docs/api', CURRENT_DOWNLOAD_URL),
+          ...Object.fromEntries(
+            archivedVersions.map(({ version, specPath, outputDir, downloadUrl }) => [
+              `engine-${version}`,
+              openApiEntry(specPath, outputDir, downloadUrl),
+            ]),
+          ),
         },
       },
     ],
@@ -141,8 +188,19 @@ const config: Config = {
       items: [
         { type: 'html', position: 'left', value: '<span class="tsh-navbar-eyebrow">Docs</span>' },
         { type: 'docSidebar', sidebarId: 'guides', position: 'left', label: 'Guides' },
-        { to: '/api', position: 'left', label: 'API', activeBaseRegex: '^/api' },
+        // A doc item rather than a link to /api: it opens the API version the reader last chose
+        // in the dropdown, where a plain link always lands on the current one and the dropdown's
+        // label flips between sections.
+        { type: 'doc', docId: 'index', docsPluginId: 'api', position: 'left', label: 'API' },
         { to: '/fixtures', position: 'left', label: 'Fixtures', activeBaseRegex: '^/fixtures' },
+        // The API reference's versions; a plain link while only the current document exists. Not
+        // highlighted as active, so it reads as a selector rather than a fourth section.
+        {
+          type: 'docsVersionDropdown',
+          docsPluginId: 'api',
+          position: 'right',
+          dropdownActiveClassDisabled: true,
+        },
         { type: 'search', position: 'right' },
         { href: repository, label: 'GitHub', position: 'right' },
       ],
