@@ -25,7 +25,6 @@ import { ConnectorNotConfiguredException } from '../connectors/errors/connector-
 import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
 import { ConnectorCallbackSupersededError } from '../connectors/errors/connector-callback-superseded.error';
 import { OtpDeliveryFailedException } from '../connectors/errors/otp-delivery-failed.exception';
-import { OtpSendLimitReachedException } from '../connectors/errors/otp-send-limit-reached.exception';
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
 import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
 import { VeriffUnavailableException } from '../connectors/errors/veriff-unavailable.exception';
@@ -121,7 +120,6 @@ export class WebhookController {
     OnboardingCompletedException,
     UnknownWorkflowEvaluationException,
     OtpDeliveryFailedException,
-    OtpSendLimitReachedException,
     SendgridEmailUnavailableException,
     SumsubUnavailableException,
     VeriffUnavailableException,

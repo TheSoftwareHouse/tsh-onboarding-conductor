@@ -764,16 +764,18 @@ export class AcmeSmsOtpConnector extends BaseOtpConnector {
   };
 
   constructor(
-    dataSource: DataSource,
+    connection: OtpChallengesConnection,
     challenges: OtpChallengesRepository,
     private readonly connectorSettingsService: ConnectorSettingsService,
   ) {
-    super(dataSource, challenges);
+    super(connection, challenges);
   }
 
-  protected async deliver(recipient: string, code: string): Promise<void> {
+  protected async deliver(recipient: string, code: string): Promise<OtpDeliveryOutcome> {
     const settings = await this.connectorSettingsService.resolve(this);
-    // Call the provider with settings.get('apiKey'); throw OtpDeliveryFailedException on failure.
+    // Call the provider with settings.get('apiKey'). Return OTP_DELIVERY_OUTCOMES.invalidRecipient
+    // when it refuses the number itself; throw OtpDeliveryFailedException on any other failure.
+    return OTP_DELIVERY_OUTCOMES.delivered;
   }
 }
 ```
@@ -782,12 +784,16 @@ export class AcmeSmsOtpConnector extends BaseOtpConnector {
    [twilio-sms-otp.connector.ts](../packages/engine/src/connectors/adapters/built-in/twilio-sms-otp.connector.ts)
    and
    [smtp-email-otp.connector.ts](../packages/engine/src/connectors/adapters/built-in/smtp-email-otp.connector.ts)
-   for a built-in one. Pass `DataSource` and `OtpChallengesRepository` to `super`, and inject
-   whatever `deliver` needs after them. `deliver` delivers `code` to `recipient` or throws:
-   `OtpDeliveryFailedException` (`500 OTP_DELIVERY_FAILED`) when the transport fails, and
-   `503 CONNECTOR_NOT_CONFIGURED`, naming the key, for a setting `settings.get` cannot resolve. A
-   throw stores nothing, so the declaration's error handler can retry or fall back. Do not store,
-   log or return the code.
+   for a built-in one. Pass `OtpChallengesConnection` and `OtpChallengesRepository` to `super`, and
+   inject whatever `deliver` needs after them. `deliver` delivers `code` to `recipient` and returns
+   `OTP_DELIVERY_OUTCOMES.delivered`, or returns `OTP_DELIVERY_OUTCOMES.invalidRecipient` when the
+   provider refuses the address or number itself — the submit then fails `400` on the recipient's
+   field, so the person can give another. Anything else throws: `OtpDeliveryFailedException`
+   (`500 OTP_DELIVERY_FAILED`) when the transport fails or the provider answers with an error, and
+   `503 CONNECTOR_NOT_CONFIGURED`, naming the key, for a setting `settings.get` cannot resolve. Only
+   `delivered` stores anything, so the declaration's error handler can retry or fall back. Read the
+   provider's response body to the end, so the connection returns to the pool. Do not store, log or
+   return the code.
 2. **Register it** like any other adapter: add the class to `USER_CONNECTOR_ADAPTER_PROVIDERS` (or
    `BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS`) in
    [connectors.module.ts](../packages/engine/src/connectors/connectors.module.ts). Its

@@ -16,8 +16,6 @@
 - `400 INVALID_DOCUMENT_UPLOAD` — re-render the upload control
 - `409 DOCUMENT_UPLOAD_CONFLICT` and `409 DOCUMENT_UPLOAD_EXPIRED` — re-reserve the upload rather
   than fail
-- `429 OTP_SEND_LIMIT_REACHED` — the BFF's own 429: the one-time code has been sent the maximum
-  number of times, so stop offering a resend
 
 **Neither** — the attempt ends or the resource is gone:
 

@@ -178,7 +178,7 @@ describe('OTP connector over email (e2e)', () => {
     expect(JSON.stringify(onboarding.context)).not.toContain(mailedCode);
   });
 
-  it('refuses the sixth send of one challenge with 429 OTP_SEND_LIMIT_REACHED', async () => {
+  it('rejects the onboarding on the sixth send of one challenge with ATTEMPTS_EXHAUSTED', async () => {
     const onboardingId = await startOnboarding();
 
     await submit(onboardingId, { email: EMAIL }).expect((response) =>
@@ -202,8 +202,14 @@ describe('OTP connector over email (e2e)', () => {
 
     await expireChallenge(onboardingId);
     await submit(onboardingId, { verificationCode: '123456' });
-    const refused = await submit(onboardingId, {}).expect(429);
-    expect(refused.body).toMatchObject({ code: 'OTP_SEND_LIMIT_REACHED' });
+    const refused = await submit(onboardingId, {});
+    expect([200, 201]).toContain(refused.status);
+    expect(refused.body).toEqual({
+      appliedStep: 'request_code_resend',
+      status: 'rejected',
+      currentStep: null,
+      rejectionReason: 'ATTEMPTS_EXHAUSTED',
+    });
     expect((await readChallenges(onboardingId))[0].send_count).toBe(OTP_MAX_SENDS);
   });
 

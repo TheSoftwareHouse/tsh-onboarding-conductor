@@ -17,7 +17,11 @@ import { ConnectorPayloadFieldNotFoundError } from './errors/connector-payload-f
 import { ConnectorTypeMismatchError } from './errors/connector-type-mismatch.error';
 import { OtpDeclarationInvalidError } from './errors/otp-declaration-invalid.error';
 import { OtpDeliveryFailedException } from './errors/otp-delivery-failed.exception';
-import { BaseOtpConnector } from './adapters/built-in/otp/base-otp.connector';
+import {
+  BaseOtpConnector,
+  OTP_DELIVERY_OUTCOMES,
+  type OtpDeliveryOutcome,
+} from './adapters/built-in/otp/base-otp.connector';
 import type { OtpChallengesConnection } from './otp-challenges.connection';
 import type {
   OtpChallengeRow,
@@ -162,7 +166,9 @@ const createInMemoryOtpChallenges = () => {
 /** A provider whose delivery the spec controls and observes. */
 class MockDeliveryOtpConnector extends BaseOtpConnector {
   readonly name: string;
-  readonly delivered = jest.fn<Promise<void>, [string, string]>().mockResolvedValue(undefined);
+  readonly delivered = jest
+    .fn<Promise<OtpDeliveryOutcome>, [string, string]>()
+    .mockResolvedValue(OTP_DELIVERY_OUTCOMES.delivered);
 
   constructor(
     challenges: OtpChallengesRepository,
@@ -173,7 +179,7 @@ class MockDeliveryOtpConnector extends BaseOtpConnector {
     this.name = id;
   }
 
-  protected deliver(recipient: string, code: string): Promise<void> {
+  protected deliver(recipient: string, code: string): Promise<OtpDeliveryOutcome> {
     return this.delivered(recipient, code);
   }
 }

@@ -9,7 +9,6 @@ import {
 import { OtpChallengesConnection } from '../../../otp-challenges.connection';
 import { OtpChallengesRepository } from '../../../otp-challenges.repository';
 import { OtpDeclarationInvalidError } from '../../../errors/otp-declaration-invalid.error';
-import { OtpSendLimitReachedException } from '../../../errors/otp-send-limit-reached.exception';
 import type {
   ConnectorAdapter,
   ConnectorExecutionInput,
@@ -28,6 +27,16 @@ const OTP_MAX_ATTEMPTS = 5;
 const OTP_MAX_SENDS = 5;
 const OTP_SALT_BYTES = 16;
 const DEFAULT_CODE_FIELD = 'code';
+const DEFAULT_RECIPIENT_FIELD = 'recipient';
+
+/** What a provider reports back from `deliver` when it did not throw. */
+export const OTP_DELIVERY_OUTCOMES = {
+  delivered: 'delivered',
+  /** The provider refused the address or number itself: the person has to supply another. */
+  invalidRecipient: 'invalid_recipient',
+} as const;
+
+export type OtpDeliveryOutcome = (typeof OTP_DELIVERY_OUTCOMES)[keyof typeof OTP_DELIVERY_OUTCOMES];
 
 const isOtpOperation = (value: unknown): value is OtpOperation =>
   typeof value === 'string' && Object.values<string>(OTP_OPERATIONS).includes(value);
@@ -63,12 +72,14 @@ export abstract class BaseOtpConnector implements ConnectorAdapter {
   ) {}
 
   /**
-   * Delivers `code` to `recipient`, or throws: `OtpDeliveryFailedException` when the provider
-   * cannot be reached or answers with an error, `ConnectorNotConfiguredException` for a missing
-   * setting. A throw stores nothing, so the declaration's error handler may retry or fall back.
-   * Never store, log or return the code.
+   * Delivers `code` to `recipient` and reports `delivered`, or `invalidRecipient` when the provider
+   * refuses the address or number itself — the submit then fails as invalid data on the recipient's
+   * field. Anything else throws: `OtpDeliveryFailedException` when the provider cannot be reached or
+   * answers with an error, `ConnectorNotConfiguredException` for an operator's configuration gap.
+   * Neither outcome but `delivered` stores anything, so the declaration's error handler may retry or
+   * fall back. Never store, log or return the code.
    */
-  protected abstract deliver(recipient: string, code: string): Promise<void>;
+  protected abstract deliver(recipient: string, code: string): Promise<OtpDeliveryOutcome>;
 
   validateDeclaration(declaration: NormalizedWorkflowConnectorFallback): void {
     const config = declaration.config ?? {};
@@ -91,7 +102,8 @@ export abstract class BaseOtpConnector implements ConnectorAdapter {
     }
 
     if (operation === OTP_OPERATIONS.send) {
-      return this.send(input.execution.onboardingId, recipient);
+      const recipientField = input.payloadFieldSources.recipient ?? DEFAULT_RECIPIENT_FIELD;
+      return this.send(input.execution.onboardingId, recipient, recipientField);
     }
 
     const code = nonEmptyString(input.payload.code);
@@ -108,19 +120,30 @@ export abstract class BaseOtpConnector implements ConnectorAdapter {
   }
 
   /**
-   * The send that would exceed OTP_MAX_SENDS is refused before the upsert, so a refused send
-   * neither rewrites the live code nor delivers anything. The code is stored only once `deliver`
-   * has returned, so a failed delivery spends no send and leaves the live code valid.
+   * The send that would exceed OTP_MAX_SENDS is rejected with `ATTEMPTS_EXHAUSTED` before the
+   * upsert, so it neither rewrites the live code nor delivers anything, and the workflow routes the
+   * onboarding to its refusal rather than leaving it on a step no submit can leave. The code is
+   * stored only once `deliver` has returned, so a failed delivery spends no send and leaves the
+   * live code valid.
    */
-  private async send(onboardingId: string, recipient: string): Promise<ConnectorExecutionResult> {
+  private async send(
+    onboardingId: string,
+    recipient: string,
+    recipientField: string,
+  ): Promise<ConnectorExecutionResult> {
     const manager = await this.connection.getManager();
     const existing = await this.challenges.find(manager, onboardingId, this.channel);
     if (existing && existing.sendCount >= OTP_MAX_SENDS) {
-      throw new OtpSendLimitReachedException();
+      return ConnectorExecutionResult.rejected('ATTEMPTS_EXHAUSTED');
     }
 
     const code = this.generateCode();
-    await this.deliver(recipient, code);
+    if ((await this.deliver(recipient, code)) === OTP_DELIVERY_OUTCOMES.invalidRecipient) {
+      return ConnectorExecutionResult.invalidData(
+        { [recipientField]: ['INVALID'] },
+        { [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true },
+      );
+    }
 
     const codeSalt = randomBytes(OTP_SALT_BYTES).toString('hex');
     await this.challenges.save(manager, {

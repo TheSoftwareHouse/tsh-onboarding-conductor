@@ -3278,31 +3278,6 @@
               }
             }
           },
-          "429": {
-            "description": "`OTP_SEND_LIMIT_REACHED`: The one-time code has already been sent the maximum number of times for this challenge.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "OTP_SEND_LIMIT_REACHED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
           "500": {
             "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`OTP_DELIVERY_FAILED`: The one-time code could not be delivered: the SMS provider or the mail transport could not be reached, or answered with an error.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
             "content": {
@@ -3775,31 +3750,6 @@
                           "type": "string",
                           "enum": [
                             "WORKFLOW_RETIRED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "`OTP_SEND_LIMIT_REACHED`: The one-time code has already been sent the maximum number of times for this challenge.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "OTP_SEND_LIMIT_REACHED"
                           ]
                         }
                       }
@@ -5102,31 +5052,6 @@
                           "type": "string",
                           "enum": [
                             "WORKFLOW_RETIRED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "`OTP_SEND_LIMIT_REACHED`: The one-time code has already been sent the maximum number of times for this challenge.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "OTP_SEND_LIMIT_REACHED"
                           ]
                         }
                       }

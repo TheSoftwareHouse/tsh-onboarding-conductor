@@ -1,11 +1,15 @@
 import { createHash } from 'node:crypto';
 import type { NormalizedWorkflowConnectorFallback, OtpChannelName } from '@tsh/ddl-schema';
 import { OtpDeclarationInvalidError } from '../../../errors/otp-declaration-invalid.error';
-import { OtpSendLimitReachedException } from '../../../errors/otp-send-limit-reached.exception';
 import type { OtpChallengesConnection } from '../../../otp-challenges.connection';
 import type { OtpChallengeRow, OtpChallengesRepository } from '../../../otp-challenges.repository';
 import type { ConnectorExecutionInput } from '../../../ports/connector-adapter.port';
-import { BaseOtpConnector } from './base-otp.connector';
+import { ConnectorExecutionMetadataFlag } from '../../../ports/connector-execution-result';
+import {
+  BaseOtpConnector,
+  OTP_DELIVERY_OUTCOMES,
+  type OtpDeliveryOutcome,
+} from './base-otp.connector';
 
 const ONBOARDING_ID = 'onb-1';
 const RECIPIENT = 'user@example.com';
@@ -18,7 +22,9 @@ const SALT = 'ab'.repeat(16);
 /** The smallest provider the base class allows: a delivery the spec observes. */
 class MockDeliveryOtpConnector extends BaseOtpConnector {
   readonly name: string;
-  readonly delivered = jest.fn<Promise<void>, [string, string]>().mockResolvedValue(undefined);
+  readonly delivered = jest
+    .fn<Promise<OtpDeliveryOutcome>, [string, string]>()
+    .mockResolvedValue(OTP_DELIVERY_OUTCOMES.delivered);
 
   constructor(
     connection: OtpChallengesConnection,
@@ -30,7 +36,7 @@ class MockDeliveryOtpConnector extends BaseOtpConnector {
     this.name = id;
   }
 
-  protected deliver(recipient: string, code: string): Promise<void> {
+  protected deliver(recipient: string, code: string): Promise<OtpDeliveryOutcome> {
     return this.delivered(recipient, code);
   }
 
@@ -152,13 +158,30 @@ describe('BaseOtpConnector', () => {
       expect((await connector.execute(send())).isAccepted()).toBe(true);
     });
 
-    it('refuses the send past MAX_SENDS before saving or delivering', async () => {
+    it('rejects the send past MAX_SENDS with ATTEMPTS_EXHAUSTED before saving or delivering', async () => {
       const { connector, repository } = setup();
       repository.find.mockResolvedValue(challengeRow({ sendCount: MAX_SENDS }));
 
-      await expect(connector.execute(send())).rejects.toBeInstanceOf(OtpSendLimitReachedException);
+      const result = await connector.execute(send());
+
+      expect(result.isRejected()).toBe(true);
+      expect(result.reason).toBe('ATTEMPTS_EXHAUSTED');
       expect(repository.save).not.toHaveBeenCalled();
       expect(connector.delivered).not.toHaveBeenCalled();
+    });
+
+    it('fails as retryable invalid data on the recipient field when the provider refuses the recipient', async () => {
+      const { connector, repository } = setup();
+      connector.delivered.mockResolvedValue(OTP_DELIVERY_OUTCOMES.invalidRecipient);
+
+      const result = await connector.execute(send());
+
+      expect(result.isInvalidData()).toBe(true);
+      expect(result.errors).toEqual({ email: ['INVALID'] });
+      expect(result.metadata).toEqual({
+        [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
+      });
+      expect(repository.save).not.toHaveBeenCalled();
     });
 
     it('propagates a delivery failure without storing the code or spending a send', async () => {

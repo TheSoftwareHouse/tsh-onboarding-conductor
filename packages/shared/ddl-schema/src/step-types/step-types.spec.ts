@@ -277,8 +277,21 @@ describe('otp-verify', () => {
   it('sends, checks and re-sends, wiring the two internal edges itself', () => {
     const [send, , resend] = compileOtp();
 
-    expect(send.transitions).toEqual([{ status: 'success', target: 'phone_verify' }]);
-    expect(resend.transitions).toEqual([{ status: 'success', target: 'phone_verify' }]);
+    expect(send.transitions).toEqual([
+      { status: 'success', target: 'phone_verify' },
+      { status: 'rejected', target: 'refused' },
+    ]);
+    expect(resend.transitions).toEqual([
+      { status: 'success', target: 'phone_verify' },
+      { status: 'rejected', target: 'refused' },
+    ]);
+  });
+
+  it('lets a send refuse, so a send past the budget routes to the refusal', () => {
+    const [send, , resend] = compileOtp();
+
+    expect(send.connectors?.[0].canReject).toBe(true);
+    expect(resend.connectors?.[0].canReject).toBe(true);
   });
 
   it('derives the operation and the channel onto every declaration of the challenge', () => {
@@ -343,7 +356,6 @@ describe('otp-verify', () => {
       },
       { status: 'rejected', target: 'refused' },
     ]);
-    // Only the check can refuse; a send either reaches the provider or fails as an integration error.
     expect(verify.connectors?.[0].canReject).toBe(true);
   });
 

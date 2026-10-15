@@ -6,6 +6,7 @@ import { ConnectorNotConfiguredException } from '../../errors/connector-not-conf
 import { OtpDeliveryFailedException } from '../../errors/otp-delivery-failed.exception';
 import type { OtpChallengesRepository } from '../../otp-challenges.repository';
 import type { ConnectorExecutionInput } from '../../ports/connector-adapter.port';
+import { ConnectorExecutionMetadataFlag } from '../../ports/connector-execution-result';
 import { OTP_SMS_BODY_PREFIX, TwilioSmsOtpConnector } from './twilio-sms-otp.connector';
 
 const CONNECTOR_ID = 'twilio_sms_otp';
@@ -15,6 +16,20 @@ const MESSAGING_SERVICE_SID = `MG${'b'.repeat(32)}`;
 const AUTH_TOKEN = 'auth-token';
 const RECIPIENT = '+15551234567';
 const TIMEOUT_MS = 1000;
+const HTTP_CREATED = 201;
+const HTTP_BAD_REQUEST = 400;
+const HTTP_SERVICE_UNAVAILABLE = 503;
+/** A Twilio error about the account, not the number: permission to send to that region. */
+const TWILIO_REGION_NOT_ENABLED = 21408;
+
+const twilioResponse = (status: number, body: Record<string, unknown>): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+const twilioError = (code: number): Response =>
+  twilioResponse(HTTP_BAD_REQUEST, { code, message: 'refused', status: HTTP_BAD_REQUEST });
 
 const createConfigService = () =>
   ({
@@ -105,7 +120,8 @@ describe('TwilioSmsOtpConnector', () => {
   });
 
   it('posts the message to the Twilio Messages API with basic auth', async () => {
-    fetchMock.mockResolvedValue({ ok: true, status: 201 });
+    const created = twilioResponse(HTTP_CREATED, { sid: 'SM1' });
+    fetchMock.mockResolvedValue(created);
     const { resolve, service } = createSettingsService();
     const { connector, repository } = createConnector(service);
 
@@ -126,10 +142,45 @@ describe('TwilioSmsOtpConnector', () => {
     expect(params.get('Body')).toBe(`${OTP_SMS_BODY_PREFIX} ${deliveredCode(fetchMock)}.`);
     expect(deliveredCode(fetchMock)).toMatch(/^\d{6}$/);
     expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(created.bodyUsed).toBe(true);
   });
 
-  it('throws OtpDeliveryFailedException on a non-2xx response', async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 400 });
+  it.each([
+    ['an invalid number', 21211],
+    ['an opted-out recipient', 21610],
+    ['a number SMS cannot reach', 21612],
+    ['a landline', 21614],
+  ])(
+    'fails as retryable invalid data on the recipient field for %s',
+    async (_label, twilioCode) => {
+      fetchMock.mockResolvedValue(twilioError(twilioCode));
+      const { connector, repository } = createConnector();
+
+      const result = await connector.execute(send());
+
+      expect(result.isInvalidData()).toBe(true);
+      expect(result.errors).toEqual({ phoneNumber: ['INVALID'] });
+      expect(result.metadata).toEqual({
+        [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
+      });
+      expect(repository.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('throws OtpDeliveryFailedException on a 4xx about the account, consuming the body', async () => {
+    const refused = twilioError(TWILIO_REGION_NOT_ENABLED);
+    fetchMock.mockResolvedValue(refused);
+    const { connector, repository } = createConnector();
+
+    await expect(connector.execute(send())).rejects.toBeInstanceOf(OtpDeliveryFailedException);
+    expect(refused.bodyUsed).toBe(true);
+    expect(repository.save).not.toHaveBeenCalled();
+  });
+
+  it('throws OtpDeliveryFailedException on a 5xx whose body is not JSON', async () => {
+    fetchMock.mockResolvedValue(
+      new Response('upstream down', { status: HTTP_SERVICE_UNAVAILABLE }),
+    );
     const { connector, repository } = createConnector();
 
     await expect(connector.execute(send())).rejects.toBeInstanceOf(OtpDeliveryFailedException);

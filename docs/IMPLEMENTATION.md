@@ -1171,6 +1171,9 @@ explicit and forcing the caller to handle each.
      transition whose status matches, whose `reason` covers the refusal, and whose `when` holds.
      Order in the JSON is the precedence. Since the unconditional fallback is optional (§2), a
      trigger whose arms all fail resolves to no transition, which ends the onboarding `invalid`.
+     A refusal's reason is kept in the next state's `rejectionReason` wherever it routes — a
+     terminal step, manual review — except to a step awaiting the user, such as an expired code's
+     re-send step, which carries none.
 8. Assign the next state, save, and write the `onboarding.state_transition` audit row **inside the
    same transaction**. A next state that parks is stamped first: `stampParkedAt` sets
    `pendingConnector.parkedAt` (ISO-8601) when the record has none, and leaves a re-park's stamp
@@ -1582,7 +1585,8 @@ Every `otp_verification` connector extends the abstract `BaseOtpConnector`
 id, settings row and audit trail. **The engine owns the code**: the base class generates it, stores
 it, checks it and expires it; a subclass names its `id` and its one `channel`, declares the
 `settingsSchema` it reads, and implements `deliver(recipient, code)` — the only provider-specific
-part. The declaration it serves carries the derived
+part. `deliver` returns `delivered`, or `invalid_recipient` when the provider refuses the address or
+number itself, and throws for everything else. The declaration it serves carries the derived
 `config: { operation: 'send' | 'check', channel: 'sms' | 'email' }` (§2.1), and its payload is
 `recipient` on a send and `recipient` plus `code` on a check. A declaration whose `operation` is
 neither value, or whose `channel` is not the connector's own, fails at startup through
@@ -1598,22 +1602,27 @@ connector of the same channel sent — the primary checks what its fallback deli
 Named constants in the base class, not configuration: a six-digit code, a ten-minute lifetime, five
 check attempts per code, five sends per challenge.
 
-| Call                             | Result                                                                                            |
-| -------------------------------- | ------------------------------------------------------------------------------------------------- |
-| send                             | `accepted`, after `deliver` returned                                                              |
-| send, past the fifth send        | throws `OtpSendLimitReachedException` (`429 OTP_SEND_LIMIT_REACHED`), nothing stored or delivered |
-| send, provider could not deliver | throws `OtpDeliveryFailedException` (`500 OTP_DELIVERY_FAILED`), nothing stored                   |
-| check, no challenge              | `rejected` with `CHALLENGE_NOT_FOUND`                                                             |
-| check, expired                   | `rejected` with `CHALLENGE_EXPIRED`                                                               |
-| check, wrong code, attempts left | `invalid_data` on the code field (`INVALID`), flagged retryable                                   |
-| check, wrong code, fifth attempt | `rejected` with `ATTEMPTS_EXHAUSTED`                                                              |
-| check, right code                | `accepted`; the challenge row is deleted                                                          |
-| missing recipient or code        | `invalid`                                                                                         |
-| declaration of another channel   | `invalid`, nothing delivered (startup refuses such a declaration first)                           |
+| Call                             | Result                                                                                    |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| send                             | `accepted`, after `deliver` returned                                                      |
+| send, past the fifth send        | `rejected` with `ATTEMPTS_EXHAUSTED`, nothing stored or delivered                         |
+| send, recipient refused          | `invalid_data` on the recipient field (`INVALID`), flagged retryable, nothing stored      |
+| send, provider not configured    | throws `ConnectorNotConfiguredException` (`503 CONNECTOR_NOT_CONFIGURED`), nothing stored |
+| send, provider could not deliver | throws `OtpDeliveryFailedException` (`500 OTP_DELIVERY_FAILED`), nothing stored           |
+| check, no challenge              | `rejected` with `CHALLENGE_NOT_FOUND`                                                     |
+| check, expired                   | `rejected` with `CHALLENGE_EXPIRED`                                                       |
+| check, wrong code, attempts left | `invalid_data` on the code field (`INVALID`), flagged retryable                           |
+| check, wrong code, fifth attempt | `rejected` with `ATTEMPTS_EXHAUSTED`                                                      |
+| check, right code                | `accepted`; the challenge row is deleted                                                  |
+| missing recipient or code        | `invalid`                                                                                 |
+| declaration of another channel   | `invalid`, nothing delivered (startup refuses such a declaration first)                   |
 
-The code field named in the `INVALID` error is the source field of the `code` payload key, so a
-renamed `codeField` reports under its own name. `otp-verify` routes `CHALLENGE_EXPIRED` and
-`CHALLENGE_NOT_FOUND` to its re-send step and every other refusal to `refused` (§2.1).
+The field named in an `INVALID` error is the source field of the `code` or `recipient` payload
+key, so a renamed `codeField` reports under its own name. `otp-verify` routes `CHALLENGE_EXPIRED` and
+`CHALLENGE_NOT_FOUND` to its re-send step and every other refusal to `refused` (§2.1). Its send and
+re-send declare `canReject` and route `rejected` to `refused` too, so the send past the budget ends
+the onboarding instead of leaving it on a step no submit can leave; the hand-written v1 revisions
+route their sends the same way.
 
 **What is stored.** One `otp_challenges` row per onboarding and channel (§9): a salted SHA-256 of
 the code, the salt, the expiry, the check attempts used and how many times the code was sent. The
@@ -1639,14 +1648,22 @@ like any other adapter; a new provider is one class there (`docs/EXTENDING.md`).
   `Body` ("Your verification code is NNNNNN.") to Twilio Programmable Messaging,
   `…/Accounts/{accountSid}/Messages.json`, with Basic authentication from the stored `accountSid`
   and `authToken`. All three settings are required; a missing one raises
-  `503 CONNECTOR_NOT_CONFIGURED` naming the key, and a non-2xx answer, a network failure or a
-  timeout (`OTP_SMS_TIMEOUT_MS`, §10) raises `OtpDeliveryFailedException`. Operators store them on
+  `503 CONNECTOR_NOT_CONFIGURED` naming the key. A non-2xx answer whose Twilio error `code`
+  refuses the `To` number itself — 21211 invalid, 21610 opted out, 21612 unreachable by SMS, 21614
+  a landline — is `invalid_recipient`; any other non-2xx answer, a network failure or a timeout
+  (`OTP_SMS_TIMEOUT_MS`, §10) raises `OtpDeliveryFailedException`. The response body is read to the
+  end either way, so the connection goes back to undici's pool. Operators store the settings on
   the `twilio_sms_otp` connector in the admin panel's Connectors tab.
-- `smtp_email_otp` (`SmtpEmailOtpConnector`, channel `email`) hands the message to `SmtpConnector`
-  with the subject "Your verification code" and the built-in template
-  `email-templates/built-in/otp-code.html`, so it needs SMTP to be enabled and configured (§10). It
-  declares no settings of its own and so is not listed by `/v1/admin/connectors`. Any result but
-  `accepted` raises `OtpDeliveryFailedException`.
+- `smtp_email_otp` (`SmtpEmailOtpConnector`, channel `email`) renders the built-in template
+  `email-templates/built-in/otp-code.html` with `SmtpConnector.renderBody` and sends it with the
+  subject "Your verification code" through `SmtpConnector.sendMail`, so it needs SMTP to be enabled
+  and configured (§10). It declares no settings of its own and so is not listed by
+  `/v1/admin/connectors`. `sendMail` reports a typed outcome, which it maps: an address that is not
+  a valid, header-safe email is `invalid_recipient`; `SMTP_ENABLED=false` or an invalid
+  `SMTP_FROM`, `SMTP_HOST`, `SMTP_PORT` or `SMTP_TIMEOUT_MS` raises `503 CONNECTOR_NOT_CONFIGURED`
+  with `connectorId: 'smtp'` and that key; a transport failure, or a server refusing the recipient,
+  raises `OtpDeliveryFailedException`. `SmtpConnector.execute` maps the same outcomes onto its
+  connector results for workflow email steps exactly as before.
 
 ### The generic HTTP connector
 
@@ -2963,7 +2980,6 @@ enum:
 | `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 401 / 503 |
 | `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 410       |
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                                                                                                                                                                                                                                                                                    | 503       |
-| `OTP_SEND_LIMIT_REACHED` — the sixth send of one OTP challenge (§4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 429       |
 | `OTP_DELIVERY_FAILED`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a

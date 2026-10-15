@@ -61,6 +61,7 @@
             "name": "twilio_sms_otp",
             "id": "twilio_sms_otp",
             "type": "otp_verification",
+            "canReject": true,
             "order": 1,
             "fieldMapping": {
               "recipient": "phoneNumber"
@@ -75,6 +76,10 @@
           {
             "status": "success",
             "target": "verify_phone_code"
+          },
+          {
+            "status": "rejected",
+            "target": "rejected"
           }
         ]
       }
@@ -139,6 +144,7 @@
             "name": "twilio_sms_otp",
             "id": "twilio_sms_otp",
             "type": "otp_verification",
+            "canReject": true,
             "order": 1,
             "fieldMapping": {
               "recipient": "phoneNumber"
@@ -153,6 +159,10 @@
           {
             "status": "success",
             "target": "verify_phone_code"
+          },
+          {
+            "status": "rejected",
+            "target": "rejected"
           }
         ]
       }

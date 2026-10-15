@@ -2270,6 +2270,70 @@ describe('Workflow', () => {
     });
   });
 
+  it('keeps rejectionReason in the next state when a rejection routes to manual review', async () => {
+    const reviewWorkflow = new Workflow(
+      normalizeUntypedSteps({
+        id: 'kyc-review',
+        version: 1,
+        initial: 'collect_document',
+        steps: [
+          {
+            name: 'collect_document',
+            status: 'awaiting_user',
+            data: { email: { type: 'text', required: true } },
+            connectors: [
+              {
+                name: 'mock_kyc',
+                id: 'mock_kyc_1',
+                type: 'kyc',
+                canReject: true,
+                order: 1,
+                fieldMapping: { email: 'email' },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'manual_review', reason: ['CONNECTOR_REJECTED'] },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          {
+            name: 'manual_review',
+            status: 'awaiting_manual_review',
+            data: {},
+            transitions: [
+              { status: 'manual.approve', target: 'approved' },
+              { status: 'manual.reject', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest
+          .fn()
+          .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
+        resume: jest.fn(),
+      },
+    );
+
+    const result = await reviewWorkflow.evaluate({
+      currentStep: 'collect_document',
+      submittedData: { email: 'person@example.com' },
+      onboardingContext: {},
+      onboardingId: 'onboarding-123',
+      onboardingScores: {},
+    });
+
+    expect(result.getNextState()).toMatchObject({
+      status: 'awaiting_manual_review',
+      currentStep: 'manual_review',
+      completedAt: null,
+      rejectionReason: 'CONNECTOR_REJECTED',
+    });
+  });
+
   it('routes rejected non-verifyCode connector outcome through rejected transition with accepted data persisted in context', async () => {
     const genericRejectingWorkflow = new Workflow(
       normalizeUntypedSteps({

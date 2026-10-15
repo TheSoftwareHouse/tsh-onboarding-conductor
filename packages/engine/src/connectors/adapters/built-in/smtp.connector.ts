@@ -22,6 +22,33 @@ const TEMPLATE_VARIABLE_PATTERN = /{{\s*([A-Za-z][A-Za-z0-9_]*)\s*}}/g;
 const MAX_SUBJECT_LENGTH = 998;
 const MAX_BODY_LENGTH = 100000;
 
+/** The environment keys `sendMail` reports as the configuration gap that stopped it. */
+export const SMTP_CONFIG_KEYS = {
+  from: 'SMTP_FROM',
+  enabled: 'SMTP_ENABLED',
+  host: 'SMTP_HOST',
+  port: 'SMTP_PORT',
+  timeout: 'SMTP_TIMEOUT_MS',
+} as const;
+
+export type SmtpConfigKey = (typeof SMTP_CONFIG_KEYS)[keyof typeof SMTP_CONFIG_KEYS];
+
+export type SmtpMessage = {
+  readonly recipient: string;
+  readonly subject: string;
+  readonly html: string;
+};
+
+/**
+ * How one `sendMail` ended: sent, refused for the recipient address, stopped by the operator's
+ * configuration (naming the key), or failed in the transport.
+ */
+export type SmtpSendOutcome =
+  | { readonly status: 'sent' }
+  | { readonly status: 'invalid_recipient' }
+  | { readonly status: 'not_configured'; readonly key: SmtpConfigKey }
+  | { readonly status: 'failed' };
+
 @Injectable()
 export class SmtpConnector implements ConnectorAdapter {
   readonly name = 'smtp';
@@ -66,34 +93,61 @@ export class SmtpConnector implements ConnectorAdapter {
       });
     }
 
-    const sender = this.getRequiredString(this.configService.get<string>('SMTP_FROM'));
+    const outcome = await this.sendMail({ recipient, subject, html: body });
+    switch (outcome.status) {
+      case 'sent':
+        return ConnectorExecutionResult.accepted();
+      case 'not_configured':
+        if (outcome.key === SMTP_CONFIG_KEYS.enabled) {
+          return ConnectorExecutionResult.rejected('CONNECTOR_REJECTED');
+        }
+        return ConnectorExecutionResult.invalidData(
+          { [outcome.key === SMTP_CONFIG_KEYS.from ? 'sender' : 'smtp']: ['INVALID'] },
+          { [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true },
+        );
+      default:
+        return ConnectorExecutionResult.rejected('CONNECTOR_REJECTED');
+    }
+  }
+
+  /**
+   * Sends one HTML message through the configured transport. A caller that is not a workflow email
+   * step — the `smtp_email_otp` connector — uses it to tell a bad address, the operator's gap and a
+   * transport failure apart, which `execute`'s connector result cannot.
+   */
+  async sendMail(message: SmtpMessage): Promise<SmtpSendOutcome> {
+    if (
+      !this.isValidHeaderSafeValue(message.recipient) ||
+      !this.isValidEmailValue(message.recipient)
+    ) {
+      return { status: 'invalid_recipient' };
+    }
+
+    const sender = this.getRequiredString(this.configService.get<string>(SMTP_CONFIG_KEYS.from));
     if (!this.isValidHeaderSafeValue(sender) || !this.isValidEmailValue(sender)) {
-      return ConnectorExecutionResult.invalidData(
-        { sender: ['INVALID'] },
-        {
-          [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
-        },
-      );
+      return { status: 'not_configured', key: SMTP_CONFIG_KEYS.from };
     }
 
-    const enabled = this.configService.get<boolean>('SMTP_ENABLED');
-    if (!enabled) {
-      return ConnectorExecutionResult.rejected('CONNECTOR_REJECTED');
+    if (!this.configService.get<boolean>(SMTP_CONFIG_KEYS.enabled)) {
+      return { status: 'not_configured', key: SMTP_CONFIG_KEYS.enabled };
     }
 
-    const host = this.getRequiredString(this.configService.get<string>('SMTP_HOST'));
-    const port = this.getRequiredNumber(this.configService.get<number>('SMTP_PORT'));
+    const host = this.getRequiredString(this.configService.get<string>(SMTP_CONFIG_KEYS.host));
+    const port = this.getRequiredNumber(this.configService.get<number>(SMTP_CONFIG_KEYS.port));
     const secure = this.configService.get<boolean>('SMTP_SECURE');
     const startTls = this.configService.get<boolean>('SMTP_STARTTLS');
-    const timeout = this.getRequiredNumber(this.configService.get<number>('SMTP_TIMEOUT_MS'));
+    const timeout = this.getRequiredNumber(
+      this.configService.get<number>(SMTP_CONFIG_KEYS.timeout),
+    );
 
-    if (!host || !port || timeout <= 0) {
-      return ConnectorExecutionResult.invalidData(
-        { smtp: ['INVALID'] },
-        {
-          [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
-        },
-      );
+    if (!host) {
+      return { status: 'not_configured', key: SMTP_CONFIG_KEYS.host };
+    }
+    if (!port) {
+      return { status: 'not_configured', key: SMTP_CONFIG_KEYS.port };
+    }
+    if (!timeout || timeout <= 0) {
+      return { status: 'not_configured', key: SMTP_CONFIG_KEYS.timeout };
     }
 
     const settings = await this.connectorSettingsService.resolve(this);
@@ -102,18 +156,16 @@ export class SmtpConnector implements ConnectorAdapter {
     try {
       const outcome = await transport.sendMail({
         from: sender,
-        to: recipient,
-        subject,
-        html: body,
+        to: message.recipient,
+        subject: message.subject,
+        html: message.html,
       });
 
-      if (Array.isArray(outcome.rejected) && outcome.rejected.length > 0) {
-        return ConnectorExecutionResult.rejected('CONNECTOR_REJECTED');
-      }
-
-      return ConnectorExecutionResult.accepted();
+      return Array.isArray(outcome.rejected) && outcome.rejected.length > 0
+        ? { status: 'failed' }
+        : { status: 'sent' };
     } catch {
-      return ConnectorExecutionResult.rejected('CONNECTOR_REJECTED');
+      return { status: 'failed' };
     }
   }
 
@@ -189,7 +241,12 @@ export class SmtpConnector implements ConnectorAdapter {
     return typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_BODY_LENGTH;
   }
 
-  private renderBody(
+  /**
+   * Renders a body from a declaration's `templatePath` or inline `body.html`, filling its
+   * `{{variables}}` from `payload` with HTML escaping; undefined when the template is missing,
+   * malformed or names a variable the payload lacks.
+   */
+  renderBody(
     config: Readonly<Record<string, unknown>>,
     payload: Readonly<Record<string, unknown>>,
   ): string | undefined {

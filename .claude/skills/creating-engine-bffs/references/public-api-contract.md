@@ -192,7 +192,6 @@ nothing here changes because of it. There is no problem+json — the skeleton's
 | `CONNECTOR_NOT_CONFIGURED`                                                               | 503    | 502 — an operator has not supplied a credential                                   |
 | `AGREEMENT_NOT_PUBLISHED`                                                                | 503    | 502 — a step declares an agreement family with no published version; hit at start |
 | `OTP_DELIVERY_FAILED`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`                | 500    | 502                                                                               |
-| `OTP_SEND_LIMIT_REACHED`                                                                 | 429    | 429, terminal for sending — the code was sent the maximum number of times         |
 
 `errors` maps a field name to codes: `UNKNOWN` (not declared on the step, or declared but
 inactive), `REQUIRED` (active, required, absent) and `INVALID` (failed its schema). One bad submit

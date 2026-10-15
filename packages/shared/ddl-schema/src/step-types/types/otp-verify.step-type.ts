@@ -144,8 +144,8 @@ const buildConnector = (
     name: connector.name,
     id: connector.id,
     type: connector.type,
-    // Only the check can refuse: a send either reaches the provider or fails as an integration error.
-    ...(operation === OTP_OPERATIONS.check ? { canReject: true } : {}),
+    // A send refuses too: past the send budget it rejects with `ATTEMPTS_EXHAUSTED`.
+    canReject: true,
     order: 1,
     fieldMapping: mergeDerivedWithExtras(derived, connector.fieldMapping, fail),
     config: adapterConfig,
@@ -241,7 +241,10 @@ export const otpVerifyStepTypeDefinition = {
         status: 'awaiting_user',
         data: context.fields,
         connectors: [buildConnector(config, recipientField, OTP_OPERATIONS.send, fail)],
-        transitions: [buildSuccessTransition(verifyStep)],
+        transitions: [
+          buildSuccessTransition(verifyStep),
+          { status: 'rejected', target: context.targets[OTP_REFUSED_PORT] },
+        ],
       },
       {
         name: verifyStep,
@@ -267,7 +270,10 @@ export const otpVerifyStepTypeDefinition = {
         status: 'awaiting_user',
         data: {},
         connectors: [buildConnector(config, recipientField, OTP_OPERATIONS.send, fail)],
-        transitions: [buildSuccessTransition(verifyStep)],
+        transitions: [
+          buildSuccessTransition(verifyStep),
+          { status: 'rejected', target: context.targets[OTP_REFUSED_PORT] },
+        ],
       },
     ];
   },

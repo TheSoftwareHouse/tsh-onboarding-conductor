@@ -31,7 +31,6 @@ import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure
 import { PendingConnectorReconcileUnsupportedException } from '../connectors/errors/pending-connector-reconcile-unsupported.exception';
 import { ConnectorNotConfiguredException } from '../connectors/errors/connector-not-configured.exception';
 import { OtpDeliveryFailedException } from '../connectors/errors/otp-delivery-failed.exception';
-import { OtpSendLimitReachedException } from '../connectors/errors/otp-send-limit-reached.exception';
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
 import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
 import { VeriffUnavailableException } from '../connectors/errors/veriff-unavailable.exception';
@@ -108,7 +107,6 @@ const WORKFLOW_RESOLUTION_ERRORS = [WorkflowNotFoundException, WorkflowRetiredEx
 const CONNECTOR_EXECUTION_ERRORS = [
   ConnectorNotConfiguredException,
   OtpDeliveryFailedException,
-  OtpSendLimitReachedException,
   SendgridEmailUnavailableException,
   SumsubUnavailableException,
   VeriffUnavailableException,
