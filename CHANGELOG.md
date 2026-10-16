@@ -9,6 +9,31 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ## Unreleased
 
+## 0.2.0 — 2026-10-16
+
+### Added
+
+- OTP providers — The engine now generates, hashes and checks one-time codes itself; SMS and
+  email providers only deliver them. Two built-in `otp_verification` connectors ship:
+  `twilio_sms_otp` (Twilio Programmable Messaging) and `smtp_email_otp` (through the SMTP
+  connector). A workflow's `otp-verify` step picks one by id and can fail over to another through
+  its `fallback` chain.
+- `OTP_DATABASE_POOL_SIZE` — Size of the connection pool the one-time-code checks use, opened
+  beside the main pool (default `5`).
+
+### Changed
+
+- **Breaking:** `TWILIO_VERIFY_TIMEOUT_MS` is renamed `OTP_SMS_TIMEOUT_MS`.
+- **Breaking:** Connector mocks — `mock_phone_verification` and `mock_email_verification` are
+  replaced by one `mock_otp`; update `CONNECTOR_MOCKS` to name `twilio_sms_otp` and
+  `smtp_email_otp`, as `.env.dist` does.
+
+### Removed
+
+- **Breaking:** Twilio Verify — The `twilio_verify` connector and its fraud tooling are gone; a
+  workflow that names it must switch to `twilio_sms_otp` or `smtp_email_otp`. Per-number
+  throttling is not yet replaced.
+
 ## 0.1.1 — 2026-10-16
 
 ### Added
