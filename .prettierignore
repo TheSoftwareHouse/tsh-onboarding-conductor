@@ -6,3 +6,4 @@ packages/shared/openapi/versions/**/engine.openapi.json
 # pnpm owns this file's layout and rewrites it on every install; Prettier would turn its flow
 # mappings into block style and the two would fight forever.
 pnpm-lock.yaml
+

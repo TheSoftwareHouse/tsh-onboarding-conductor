@@ -26,6 +26,32 @@ permissions:
   contents: read
 
 jobs:
+  # Every pull request adds its line under `## Unreleased` in CHANGELOG.md. A job of its own, so a
+  # missing entry fails in seconds instead of after the whole pipeline.
+  changelog:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      # The check uses Node built-ins only; stop pnpm installing the workspace before running it.
+      pnpm_config_verify_deps_before_run: false
+    steps:
+      # The pull request's merge commit and its first parent, the base branch's tip.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check the changelog
+        run: pnpm changelog:check HEAD^1
+
   verify:
     runs-on: ubuntu-latest
 

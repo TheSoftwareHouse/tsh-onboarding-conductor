@@ -1,5 +1,5 @@
 import { QueryRunner, getMetadataArgsStorage } from 'typeorm';
-import { CreateAgreements0022 } from '../../database/migrations/0022_create_agreements';
+import { InitialSchema0001 } from '../../database/migrations/0001_initial_schema';
 import { OnboardingAgreementStatusView } from './onboarding-agreement-status.view';
 
 /**
@@ -19,7 +19,7 @@ describe('OnboardingAgreementStatusView', () => {
       },
     } as unknown as QueryRunner;
 
-    await new CreateAgreements0022().up(queryRunner);
+    await new InitialSchema0001().up(queryRunner);
 
     return statements;
   };

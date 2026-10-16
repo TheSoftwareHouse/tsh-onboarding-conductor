@@ -21,8 +21,8 @@ Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT
 
 Follow the [README quick start](README.md#getting-started): Node 24, pnpm 11, Docker, then
 `cp .env.dist .env`, `pnpm bootstrap`, `pnpm stack:up`. A fresh copy of `.env.dist` runs without any
-third-party account. A stack you created before the migration set was folded in September 2026
-cannot boot the current engine — its `migrations` table already lists the folded numbers — so run
+third-party account. A stack you created before the migrations were folded into one in October 2026
+cannot boot the current engine — its `migrations` table lists the old migration names — so run
 `pnpm stack:reset` once, which throws the local databases away, before `pnpm stack:up`.
 
 Use the root-level commands rather than calling `docker compose`, `jest`, `tsc` or `playwright`
@@ -56,7 +56,47 @@ tool by hand produces confusing failures.
      major: it archives the previous document under `packages/shared/openapi/versions/` before
      regenerating, and that archive is committed with the bump.
    - `README.md` only if the change affects what the project is or where to start.
-6. **Add a changeset** for user-facing changes: `pnpm changeset`.
+
+## Versioning
+
+One product version covers the whole monorepo: the root `package.json`, every workspace's and the
+OpenAPI document's `info.version` ([decision 0046](docs/decisions/0046-manual-versioning.md)). A
+merge does not change it; a maintainer bumps it in a pull request of its own.
+
+### Changelog
+
+Every pull request adds a line to `CHANGELOG.md`, under `## Unreleased`, in the
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) group it belongs to:
+
+```markdown
+## Unreleased
+
+### Added
+
+- Engine — Postal code field type.
+```
+
+- **Added** for a new feature, **Changed** for a change to existing behaviour, **Fixed** for a bug
+  fix, **Removed** for a removed feature. Create the group if `## Unreleased` does not have it yet.
+- One line per change, `Area — What changed`, written for someone who reads the changelog and not
+  the code. Mark a breaking change `**Breaking:**` at the start of the line.
+- CI fails a pull request that leaves `CHANGELOG.md` unchanged (`pnpm changelog:check` runs the same
+  check locally).
+
+### Bump the version
+
+On an up-to-date branch off `main`:
+
+```bash
+pnpm version:bump patch    # or minor, major, or an explicit version such as 1.0.0
+```
+
+The script turns `## Unreleased` into `## X.Y.Z — <today>` above the entries collected so far and
+opens a new, empty `## Unreleased`, writes `X.Y.Z` into every `package.json`, and regenerates the
+OpenAPI document and the documentation site's API pages. It refuses when `## Unreleased` lists no
+change. It does not commit: review the diff and open a pull request titled `chore: release vX.Y.Z`.
+
+While the version is `0.x`, a breaking change bumps the minor; from `1.0.0` on, the major.
 
 ## Checks
 

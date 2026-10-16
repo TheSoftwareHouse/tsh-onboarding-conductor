@@ -7,7 +7,7 @@ import {
 } from './agreement.types';
 
 const migrationSource = readFileSync(
-  join(__dirname, '..', 'database', 'migrations', '0022_create_agreements.ts'),
+  join(__dirname, '..', 'database', 'migrations', '0001_initial_schema.ts'),
   'utf8',
 );
 
@@ -20,7 +20,9 @@ describe('agreement domain constants', () => {
   it('states a link as pending or accepted, matching what the link table accepts', () => {
     expect(AGREEMENT_LINK_STATUSES).toEqual(['pending', 'accepted']);
 
-    const statusCheck = /CHECK \(status IN \(([^)]*)\)\)/.exec(migrationSource);
+    const statusCheck = /ck_onboarding_agreements_status CHECK \(status IN \(([^)]*)\)\)/.exec(
+      migrationSource,
+    );
 
     expect(statusCheck).not.toBeNull();
 

@@ -1059,8 +1059,8 @@ describe('Audit transaction slice (e2e)', () => {
       { column_name: 'metadata', udt_name: 'jsonb', is_nullable: 'NO' },
       { column_name: 'hash_prev', udt_name: 'varchar', is_nullable: 'YES' },
       { column_name: 'hash_self', udt_name: 'varchar', is_nullable: 'YES' },
-      // `0010_create_audit_log` declares `entry_type` last, after the shape it classifies —
-      // folding migration 0021 into it preserved that physical order deliberately.
+      // The migration declares `entry_type` last, after the shape it classifies — a physical
+      // order every fold of the history has preserved deliberately.
       { column_name: 'entry_type', udt_name: 'varchar', is_nullable: 'NO' },
     ]);
 

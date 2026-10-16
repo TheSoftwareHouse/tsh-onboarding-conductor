@@ -14,7 +14,7 @@ import { type OnboardingAgreementStatus } from '../../agreements/agreement.types
  * An onboarding with no links at all produces no row here; readers coalesce that to
  * `not_accepted`.
  *
- * The expression below mirrors the view created by migration `0022_create_agreements`, which is
+ * The expression below mirrors the view created by migration `0001_initial_schema`, which is
  * the only thing that ever creates or drops it. `synchronize: false` keeps both schema sync and
  * TypeORM's own migration generation away from it.
  *
