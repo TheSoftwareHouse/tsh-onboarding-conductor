@@ -658,10 +658,9 @@ describe('NewDraftDialog fork', () => {
     renderDialog();
     await openDialog(user);
 
-    await user.type(
-      screen.getByRole('combobox', { name: 'Source workflow' }),
-      ` ${'a'.repeat(120)} `,
-    );
+    // Pasted, not typed: 122 keystrokes each re-render the combobox and overran the 5 s budget on CI.
+    await user.click(screen.getByRole('combobox', { name: 'Source workflow' }));
+    await user.paste(` ${'a'.repeat(120)} `);
 
     await waitFor(() =>
       expect(mockedList).toHaveBeenCalledWith(expect.objectContaining({ search: 'a'.repeat(100) })),
