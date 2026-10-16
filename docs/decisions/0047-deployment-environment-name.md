@@ -26,10 +26,11 @@ pre-prod and prod run `production`.
 `/config.js` beside `VITE_NODE_ENV`; the sidebar's `EnvironmentBadge` prints the name under the
 brand, outlined red under `NODE_ENV=production` whatever it is called.
 
-**Compose takes both from `.env`.** The engine and worker services forward `NODE_ENV` and
-`ENVIRONMENT_NAME` with empty defaults rather than pinning `NODE_ENV: development`, so one Compose
-file serves any environment and an `.env` missing either stops the start. The image keeps
-`NODE_ENV=production`, so a container run without one gets production's rules.
+**Compose demands both from `.env`.** The engine and worker services take `NODE_ENV` and
+`ENVIRONMENT_NAME` as `${VAR:?…}` rather than pinning `NODE_ENV: development`, so one Compose
+file serves any environment and Compose itself refuses to start when `.env` is missing either. The
+image bakes in neither, and the engine never falls back to `.env.dist`, so a container or process
+run without them refuses to start instead of picking up production's or the sample's rules.
 
 Out of scope: environments are not a dimension inside one deployment. Connector credentials,
 connector selections, workflows and onboardings are not partitioned by environment, and the public

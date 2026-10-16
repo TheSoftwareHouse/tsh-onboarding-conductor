@@ -297,7 +297,7 @@ describe('WorkflowRegistryService', () => {
         { provide: DataSource, useValue: { manager: {} } },
         {
           provide: ConfigService,
-          useValue: { get: jest.fn().mockReturnValue(options.nodeEnv ?? 'test') },
+          useValue: { getOrThrow: jest.fn().mockReturnValue(options.nodeEnv ?? 'test') },
         },
         {
           provide: WorkflowFileLoaderService,

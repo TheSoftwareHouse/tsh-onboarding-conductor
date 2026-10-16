@@ -357,7 +357,7 @@ describe('WorkflowsPage', () => {
   });
 
   it('hides fixtures and ignores ?scope=fixtures when the engine runs in production', async () => {
-    window.__ENV__ = { VITE_NODE_ENV: 'production' };
+    window.__ENV__ = { VITE_ENVIRONMENT_NAME: 'prod', VITE_NODE_ENV: 'production' };
     mockedFetchAdminWorkflows.mockResolvedValueOnce(page([RECORD_ONE]));
     renderPage(undefined, '/workflows?scope=fixtures');
 

@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { NodeEnv } from '../../config/environment.config';
 
 export const validateClientWebhookUrl = (
   url: string | undefined,
@@ -33,14 +34,14 @@ export const validateClientWebhookUrl = (
   }
 
   const normalizedNodeEnv = nodeEnv.toLowerCase();
-  if (normalizedNodeEnv === 'production' && parsedUrl.protocol !== 'https:') {
+  if (normalizedNodeEnv === NodeEnv.PRODUCTION && parsedUrl.protocol !== 'https:') {
     throw new Error('CLIENT_WEBHOOK_BASE_URL must use HTTPS in production');
   }
 
   if (
     parsedUrl.protocol === 'http:' &&
-    normalizedNodeEnv !== 'development' &&
-    normalizedNodeEnv !== 'test'
+    normalizedNodeEnv !== NodeEnv.DEVELOPMENT &&
+    normalizedNodeEnv !== NodeEnv.TEST
   ) {
     throw new Error('CLIENT_WEBHOOK_BASE_URL over HTTP is allowed only in development and test');
   }

@@ -58,8 +58,8 @@ function readRuntimeConfig(configService: ConfigService): AdminPanelRuntimeConfi
   // Derived, not configurable: the panel must see the environment the engine actually runs in.
   return {
     ...config,
-    VITE_NODE_ENV: configService.get<string>('NODE_ENV'),
-    VITE_ENVIRONMENT_NAME: configService.get<string>('ENVIRONMENT_NAME'),
+    VITE_NODE_ENV: configService.getOrThrow<string>('NODE_ENV'),
+    VITE_ENVIRONMENT_NAME: configService.getOrThrow<string>('ENVIRONMENT_NAME'),
   };
 }
 

@@ -45,6 +45,9 @@ describe('CallbackSignatureVerifier', () => {
           return unsignedTypes;
         }
 
+        throw new Error(`Unexpected config key: ${key}`);
+      }),
+      getOrThrow: jest.fn().mockImplementation((key: string) => {
         if (key === 'NODE_ENV') {
           return nodeEnv;
         }

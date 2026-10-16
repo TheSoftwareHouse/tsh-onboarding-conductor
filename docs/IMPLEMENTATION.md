@@ -2619,8 +2619,8 @@ zero rows is a deliberate follow-up, not something this version does.
 
 One `AppConfig` class (`config/app.config.ts`), validated by `validateConfig` at bootstrap via
 `ConfigModule.forRoot({ validate })`. Nothing reads `process.env` directly in feature code.
-`.env.dist` is the documented sample; `ConfigModule` reads `.env` (with `.env.dist` last on the
-search path).
+`.env.dist` is the documented sample; `ConfigModule` reads `.env` only (the package's, then the
+repository root's) and never falls back to `.env.dist`, so a start without `.env` fails validation.
 
 **Every deployment names its environment.** `ENVIRONMENT_NAME` is a required lowercase slug
 (`^[a-z0-9][a-z0-9-]{0,62}$`) — `dev`, `staging`, `pre-prod`, `prod` or whatever a promotion path

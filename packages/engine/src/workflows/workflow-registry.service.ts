@@ -13,6 +13,7 @@ import {
   type ConnectorAdapterSummary,
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
+import { NodeEnv } from '../config/environment.config';
 import { toPaginatedMeta } from '../pagination';
 import {
   ConnectorSelectionRules,
@@ -42,8 +43,6 @@ import {
   RETIRED_WORKFLOW_STATUS,
 } from './workflow-status';
 import { WorkflowsRepository } from './workflows.repository';
-
-const PRODUCTION_NODE_ENV = 'production';
 
 type SourceKeyDeclaration = { readonly workflowId: string; readonly sourceKey: string };
 
@@ -569,7 +568,7 @@ export class WorkflowRegistryService implements OnModuleInit {
 
   /** Fixture workflows are development and CI scaffolding and never ship to production. */
   getActiveScopes(): readonly WorkflowScope[] {
-    if (this.configService.get<string>('NODE_ENV') === PRODUCTION_NODE_ENV) {
+    if (this.configService.getOrThrow<NodeEnv>('NODE_ENV') === NodeEnv.PRODUCTION) {
       return WORKFLOW_SCOPES.filter((scope) => scope !== 'fixtures');
     }
 

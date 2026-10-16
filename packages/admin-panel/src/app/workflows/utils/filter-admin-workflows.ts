@@ -1,4 +1,4 @@
-import { readRuntimeEnv } from '@/config/runtime-env';
+import { findEnvironment } from '@/config/environment';
 import { countActiveFilters } from '@/lib/count-active-filters';
 import type { WorkflowScope } from '@/api/workflows/admin-workflows';
 import type { AdminWorkflowsSearchValues } from './admin-workflows-search-params';
@@ -39,7 +39,7 @@ const WORKFLOW_SCOPE_DISPLAY_ORDER: readonly WorkflowScope[] = ['built-in', 'use
 
 /** Scopes an operator can filter by: a production engine never loads `fixtures`, so it is not offered there. */
 export function listSelectableWorkflowScopes(): readonly WorkflowScope[] {
-  if (readRuntimeEnv().VITE_NODE_ENV === 'production') {
+  if (findEnvironment()?.isProduction) {
     return WORKFLOW_SCOPE_DISPLAY_ORDER.filter((scope) => scope !== 'fixtures');
   }
   return WORKFLOW_SCOPE_DISPLAY_ORDER;

@@ -667,9 +667,8 @@ export function validateConfig(config: Record<string, unknown>) {
     validatedConfig.ADMIN_REQUIRED_ROLES = requiredRoles.join(',');
   } else if (validatedConfig.NODE_ENV === NodeEnv.PRODUCTION) {
     // The flag is a local escape hatch, and `.env.dist` ships it as false so a fresh clone runs
-    // without an Entra tenant. That file sits on the engine's env search path, so a deployment
-    // started without explicit environment variables would silently pick it up and serve
-    // onboarding data with no credential demanded. Refusing to start makes that omission loud
+    // without an Entra tenant. A production `.env` copied from that sample would silently carry it
+    // over and serve onboarding data with no credential demanded. Refusing to start makes that omission loud
     // rather than leaving an `auth.access_unauthenticated` row as the only trace.
     throw new Error(
       'ADMIN_AUTH_ENABLED=false is a local-only escape hatch and cannot be used when NODE_ENV=production',

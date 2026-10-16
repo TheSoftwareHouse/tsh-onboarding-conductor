@@ -70,6 +70,9 @@ describe('WebhookController', () => {
             return '';
           }
 
+          throw new Error(`Unexpected config key: ${key}`);
+        }),
+        getOrThrow: jest.fn().mockImplementation((key: string) => {
           if (key === 'NODE_ENV') {
             return 'test';
           }
