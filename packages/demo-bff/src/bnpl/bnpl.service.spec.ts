@@ -69,6 +69,8 @@ describe('BnplService', () => {
       pusher as unknown as BankDataPusher,
     );
     engine.startOnboarding.mockResolvedValue({ onboardingId: 'o1' });
+    // Every submit reads the step first; the applicant step is submittable.
+    engine.getState.mockResolvedValue(state());
     ({ token } = await service.createSession('sherlock_holmes'));
   });
 
@@ -322,6 +324,37 @@ describe('BnplService', () => {
     });
   });
 
+  describe('submit of a BFF-owned step', () => {
+    const atStep = (name: string) => state({ currentStep: name, step: { ...state().step!, name } });
+
+    it.each([
+      ['bank_connection', 'bank-login'],
+      ['credit_check', 'run'],
+    ])(
+      'refuses %s with 409 SESSION_STEP_NOT_SUBMITTABLE naming the %s route',
+      async (step, route) => {
+        engine.getState.mockResolvedValue(atStep(step));
+
+        await expect(service.submit(token, { bankProfile: 'high' })).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'SESSION_STEP_NOT_SUBMITTABLE', step, route },
+        });
+        expect(engine.submit).not.toHaveBeenCalled();
+      },
+    );
+
+    it('forwards every other step, and a finished session with no step, to the engine', async () => {
+      engine.submit.mockResolvedValue({});
+      engine.getState.mockResolvedValue(atStep('bank_access_consent'));
+      await service.submit(token, { bankDataAccessConsent: true });
+
+      engine.getState.mockResolvedValue(state({ step: null, terminal: true, status: 'approved' }));
+      await service.submit(token, {});
+
+      expect(engine.submit).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('submit of account_selection', () => {
     it('rejects a selection without the checking account before the engine sees it', async () => {
       await expect(
@@ -481,6 +514,19 @@ describe('BnplService', () => {
         response: { code: 'STEP_NOT_READY' },
       });
     });
+
+    it.each(['CREDIT_PROVIDER_CREDENTIALS_REJECTED', 'CREDIT_PROVIDER_REJECTED'])(
+      'answers 503 CREDIT_CHECK_UNAVAILABLE when the engine reports %s',
+      async (code) => {
+        engine.getState.mockResolvedValue(selected());
+        pusher.push.mockRejectedValue(new EngineError(503, code, 'refused'));
+
+        await expect(service.run(token)).rejects.toMatchObject({
+          status: 503,
+          response: { code: 'CREDIT_CHECK_UNAVAILABLE' },
+        });
+      },
+    );
   });
 
   describe('engine error table', () => {
@@ -499,6 +545,8 @@ describe('BnplService', () => {
       'WORKFLOW_RETIRED',
       'CONNECTOR_NOT_CONFIGURED',
       'AGREEMENT_NOT_PUBLISHED',
+      'CREDIT_PROVIDER_CREDENTIALS_REJECTED',
+      'CREDIT_PROVIDER_REJECTED',
     ];
 
     it.each(documentedCodes)('maps %s deliberately', (code) => {

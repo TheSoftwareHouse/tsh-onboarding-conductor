@@ -156,10 +156,11 @@ describe('Workflow compile (e2e)', () => {
   it('serves the palette and the workflow schema a builder validates against', async () => {
     const palette = await request(app.getHttpServer()).get('/v1/admin/step-types').expect(200);
 
-    expect(palette.body.stepTypes).toHaveLength(20);
+    expect(palette.body.stepTypes).toHaveLength(21);
     expect(palette.body.stepTypes.map((stepType: { type: string }) => stepType.type)).toEqual(
       expect.arrayContaining([
         'kyc-identity-verification',
+        'credit-assessment',
         'otp-verify',
         'connector-call',
         'custom',
@@ -184,6 +185,6 @@ describe('Workflow compile (e2e)', () => {
       .expect(200);
 
     expect(schema.body).toMatchObject({ title: 'Onboarding workflow' });
-    expect(schema.body.definitions.step.properties.type.enum).toHaveLength(20);
+    expect(schema.body.definitions.step.properties.type.enum).toHaveLength(21);
   });
 });

@@ -12,7 +12,7 @@ Build and extend it with the `creating-engine-bffs` skill, and read its
 ## Running it
 
 `pnpm demo:dev` at the root (`scripts/demo-dev.cjs`) starts this BFF (`start:dev`, nest watch)
-and the web app from the repository's `.env` against `ENGINE_BASE_URL`; `--tunnel` also opens a
+and the web app from the repository's `.env` against `ENGINE_BASE_URL`; `pnpm demo:dev:tunnel` (the same runner with `--tunnel`) also opens a
 cloudflared tunnel and recreates the Algoan subscriptions. `ConfigModule` reads `./.env` and
 `../../.env`, so a `pnpm --filter @tsh/demo-bff start:dev` from the package works the same way.
 A relative `PERSONAS_DIR` resolves against the repository root (`findRepoRoot`, the nearest
@@ -34,16 +34,23 @@ A relative `PERSONAS_DIR` resolves against the repository root (`findRepoRoot`, 
   failure is this BFF's `502`. Map every engine code deliberately and fail a test on an unmapped one.
 - Routes are versioned `@Controller('v1/bnpl/…')` and are this BFF's own contract, not a proxy.
 - Routes: `GET personas`; `POST sessions` (`persona` optional, `null` until the bank login);
-  `GET sessions/:token` (`?wait=`); `POST sessions/:token/submit`; `POST sessions/:token/bank-login`
+  `GET sessions/:token` (`?wait=`); `POST sessions/:token/submit` (reads `/state` first and refuses
+  the two steps this BFF records itself, `bank_connection` and `credit_check`, with
+  `409 SESSION_STEP_NOT_SUBMITTABLE` naming the owning route); `POST sessions/:token/bank-login`
   (`{ persona, method: 'qr' | 'device' }`: sets the persona, submits an opaque
   `bankConnectionReference`, the method and the persona's `bankProfile`; `409 SESSION_HAS_NO_BANK`
-  off the `bank_connection` step, the only place a step name is read); `POST sessions/:token/run`.
-- Accounts are opaque positions in the persona file (`account-01`, `account-02`); no IBAN, balance
-  or bank data reaches the engine. `submit` rejects an `account_selection` without the `CHECKING`
-  account (`400 INVALID_STEP_DATA`, `CHECKING_ACCOUNT_REQUIRED`); `run` pushes only the accounts in
-  `/state.data.selectedAccounts` (`409 ACCOUNTS_NOT_SELECTED` when absent, `409 STEP_NOT_READY` when
-  the engine refuses the `bankData` document because the onboarding is not on the credit step yet,
-  the engine's `INVALID_DOCUMENT_UPLOAD`); a result lists only those accounts.
+  off the `bank_connection` step); `POST sessions/:token/run`. Those two guards are the only
+  places a step name is read.
+- The account selection sends opaque positions in the persona file (`account-01`, `account-02`),
+  never an IBAN or a balance; the persona's accounts and transactions do reach the engine, as the
+  `bankData` document `run` uploads for the credit step. `submit` rejects an `account_selection`
+  without the `CHECKING` account (`400 INVALID_STEP_DATA`, `CHECKING_ACCOUNT_REQUIRED`); `run`
+  pushes only the accounts in `/state.data.selectedAccounts` (`409 ACCOUNTS_NOT_SELECTED` when
+  absent, `409 STEP_NOT_READY` when the engine refuses the `bankData` document because the
+  onboarding is not on the credit step yet, the engine's `INVALID_DOCUMENT_UPLOAD`,
+  `503 CREDIT_CHECK_UNAVAILABLE` when the provider refuses the engine's credentials or the
+  assessment, the engine's `CREDIT_PROVIDER_CREDENTIALS_REJECTED` / `CREDIT_PROVIDER_REJECTED`);
+  a result lists only those accounts.
 - `GET /v1/bnpl/sessions/:token/onboarding` is **test-only**: it returns the engine onboarding id the
   e2e suites need to post the `mock_credit` callback, and answers `404 SESSION_NOT_FOUND` unless
   `NODE_ENV=test` (optional in `AppConfig`, default `development`; the Compose service never sets

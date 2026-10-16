@@ -20,7 +20,10 @@ import {
   CallbackSignatureVerifier,
 } from './callback-signature/callback-signature.verifier';
 import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
+import { ConnectorCallbackPayloadInvalidError } from '../connectors/errors/connector-callback-payload-invalid.error';
 import { ConnectorCallbackSupersededError } from '../connectors/errors/connector-callback-superseded.error';
+import { ConnectorCallbackUnresolvedError } from '../connectors/errors/connector-callback-unresolved.error';
+import { AsyncCallbackPayloadInvalidException } from './errors/async-callback-payload-invalid.exception';
 import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
@@ -338,6 +341,62 @@ describe('WebhookController', () => {
         resourceType: 'provider_callback',
         resourceId: 'unresolved',
         metadata: { reason: 'callback_already_applied' },
+      }),
+    );
+    expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges a callback naming a provider resource that resolves to no onboarding with 204 and an unresolved reason', async () => {
+    const controller = createController();
+
+    webhookServiceMock.process.mockRejectedValueOnce(
+      new ConnectorCallbackUnresolvedError('algoan_credit', 'no such customer'),
+    );
+
+    await expect(
+      controller.receive('algoan_credit', {
+        body: Buffer.from('valid-callback'),
+        headers: { 'x-hub-signature': 'sha256=deadbeef' },
+      } as never),
+    ).resolves.toBeUndefined();
+
+    expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_rejected',
+        resourceType: 'provider_callback',
+        resourceId: 'unresolved',
+        metadata: { reason: 'callback_unresolved' },
+      }),
+    );
+    expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
+  });
+
+  it('answers 400 CALLBACK_PAYLOAD_INVALID with a payload_invalid reason for a callback the adapter cannot read', async () => {
+    const controller = createController();
+
+    webhookServiceMock.process.mockRejectedValueOnce(
+      new ConnectorCallbackPayloadInvalidError('algoan_credit', 'not JSON'),
+    );
+
+    const error: unknown = await controller
+      .receive('algoan_credit', {
+        body: Buffer.from('nope'),
+        headers: { 'x-hub-signature': 'sha256=deadbeef' },
+      } as never)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(AsyncCallbackPayloadInvalidException);
+    expect((error as AsyncCallbackPayloadInvalidException).getResponse()).toEqual({
+      code: 'CALLBACK_PAYLOAD_INVALID',
+      message: 'CALLBACK_PAYLOAD_INVALID',
+    });
+    expect(isAuditRecorded(error)).toBe(true);
+    expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_rejected',
+        metadata: { reason: 'payload_invalid' },
       }),
     );
     expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();

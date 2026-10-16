@@ -1,8 +1,13 @@
 import { AlgoanRequestRejectedError } from '../../../errors/algoan-request-rejected.error';
 import { AlgoanUnavailableException } from '../../../errors/algoan-unavailable.exception';
+import { ConnectorCallbackPayloadInvalidError } from '../../../errors/connector-callback-payload-invalid.error';
+import { ConnectorCallbackUnresolvedError } from '../../../errors/connector-callback-unresolved.error';
 import { parseCreditConfig } from '../credit/credit-config';
 import {
   CreditBankDataInvalidError,
+  CreditPendingReferenceMalformedError,
+  CreditProviderCredentialsRejectedError,
+  CreditProviderRejectedError,
   type CreditBankData,
   type CreditCallbackContext,
   type CreditSubmission,
@@ -208,7 +213,7 @@ describe('AlgoanCreditProvider', () => {
     it('does not mask another rejection or an outage as a reused customer', async () => {
       client.createCustomer.mockRejectedValueOnce(new AlgoanRequestRejectedError(400, 'BAD', 'x'));
       await expect(provider.startAssessment(settings, submission(), config())).rejects.toThrow(
-        AlgoanRequestRejectedError,
+        CreditProviderRejectedError,
       );
 
       client.createCustomer.mockRejectedValueOnce(new AlgoanUnavailableException());
@@ -216,6 +221,59 @@ describe('AlgoanCreditProvider', () => {
         AlgoanUnavailableException,
       );
       expect(client.findCustomerByIdentifier).not.toHaveBeenCalled();
+    });
+
+    it.each([401, 403])(
+      'classifies a %s from the token or the API as rejected credentials',
+      async (status) => {
+        client.createCustomer.mockRejectedValue(
+          new AlgoanRequestRejectedError(status, undefined, undefined),
+        );
+
+        await expect(provider.startAssessment(settings, submission(), config())).rejects.toThrow(
+          CreditProviderCredentialsRejectedError,
+        );
+      },
+    );
+
+    it.each([400, 422])(
+      "classifies a %s on the analysis as invalid bank data named by Algoan's code, not its message",
+      async (status) => {
+        client.createAnalysis.mockRejectedValue(
+          new AlgoanRequestRejectedError(status, 'INVALID_ACCOUNTS', 'balance of account 1 is…'),
+        );
+
+        const error: unknown = await provider
+          .startAssessment(settings, submission(), config())
+          .catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(CreditBankDataInvalidError);
+        expect((error as CreditBankDataInvalidError).reason).toBe('INVALID_ACCOUNTS');
+        expect((error as Error).message).not.toContain('balance');
+      },
+    );
+
+    it('names a refused analysis without a code ANALYSIS_REJECTED', async () => {
+      client.createAnalysis.mockRejectedValue(new AlgoanRequestRejectedError(400, undefined, 'x'));
+
+      const error: unknown = await provider
+        .startAssessment(settings, submission(), config())
+        .catch((caught: unknown) => caught);
+
+      expect((error as CreditBankDataInvalidError).reason).toBe('ANALYSIS_REJECTED');
+    });
+
+    it('classifies any other 4xx as a provider rejection carrying the status and code', async () => {
+      client.createAnalysis.mockRejectedValue(
+        new AlgoanRequestRejectedError(429, 'TOO_MANY_REQUESTS', 'slow down'),
+      );
+
+      const error: unknown = await provider
+        .startAssessment(settings, submission(), config())
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(CreditProviderRejectedError);
+      expect(error).toMatchObject({ providerStatus: 429, providerCode: 'TOO_MANY_REQUESTS' });
     });
 
     it('fails when the reused customer cannot be found', async () => {
@@ -254,16 +312,38 @@ describe('AlgoanCreditProvider', () => {
       expect(client.getCustomer).not.toHaveBeenCalled();
     });
 
-    it('refuses an actionable event without ids and a body that is not JSON', async () => {
+    it.each([
+      ['an actionable event without ids', callbackInput('analysis_completed', {})],
+      ['a body that is not JSON', { rawBody: new TextEncoder().encode('nope'), headers: {} }],
+      [
+        'a JSON body that is not an object',
+        { rawBody: new TextEncoder().encode('[]'), headers: {} },
+      ],
+    ])('refuses %s as an invalid payload without a lookup', async (_label, input) => {
+      await expect(provider.parseCallback(input, settings)).rejects.toBeInstanceOf(
+        ConnectorCallbackPayloadInvalidError,
+      );
+      expect(client.getCustomer).not.toHaveBeenCalled();
+    });
+
+    it('treats a customer Algoan answers 404 for as unresolved', async () => {
+      client.getCustomer.mockRejectedValue(
+        new AlgoanRequestRejectedError(404, 'NOT_FOUND', 'no such customer'),
+      );
+
       await expect(
-        provider.parseCallback(callbackInput('analysis_completed', {}), settings),
-      ).rejects.toThrow(/customerId/);
+        provider.parseCallback(callbackInput('analysis_completed'), settings),
+      ).rejects.toBeInstanceOf(ConnectorCallbackUnresolvedError);
+    });
+
+    it('classifies a refused credential on the read-back like on the start', async () => {
+      client.getCustomer.mockRejectedValue(
+        new AlgoanRequestRejectedError(401, undefined, undefined),
+      );
+
       await expect(
-        provider.parseCallback(
-          { rawBody: new TextEncoder().encode('nope'), headers: {} },
-          settings,
-        ),
-      ).rejects.toThrow(/valid UTF-8 JSON/);
+        provider.parseCallback(callbackInput('analysis_completed'), settings),
+      ).rejects.toBeInstanceOf(CreditProviderCredentialsRejectedError);
     });
 
     it('propagates an Algoan outage so the webhook answers 5xx', async () => {
@@ -368,7 +448,7 @@ describe('AlgoanCreditProvider', () => {
     it('refuses a malformed reference and propagates an outage', async () => {
       await expect(
         provider.fetchResult(settings, { ...event, providerReference: 'only-one' }, context()),
-      ).rejects.toThrow(/malformed/);
+      ).rejects.toBeInstanceOf(CreditPendingReferenceMalformedError);
 
       client.getAnalysis.mockRejectedValue(new AlgoanUnavailableException());
       await expect(provider.fetchResult(settings, event, context())).rejects.toThrow(

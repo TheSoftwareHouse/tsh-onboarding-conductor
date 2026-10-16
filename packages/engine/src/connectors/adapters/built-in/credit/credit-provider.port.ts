@@ -62,6 +62,49 @@ export class CreditBankDataInvalidError extends Error {
 }
 
 /**
+ * Thrown by `CreditProvider.startAssessment` when the provider refuses the credentials it was
+ * given (a token or API call answered 401 or 403). An operator's to fix in the connector settings;
+ * the kernel answers it as `CREDIT_PROVIDER_CREDENTIALS_REJECTED` and never logs a secret.
+ */
+export class CreditProviderCredentialsRejectedError extends Error {
+  constructor(readonly providerId: string) {
+    super(`${providerId} rejected the connector credentials`);
+    this.name = 'CreditProviderCredentialsRejectedError';
+  }
+}
+
+/**
+ * Thrown by `CreditProvider.startAssessment` for any other provider refusal (a 4xx that is neither
+ * a credentials problem nor a document problem). `providerCode` is the provider's own code, never
+ * its message, which may echo the document.
+ */
+export class CreditProviderRejectedError extends Error {
+  constructor(
+    readonly providerId: string,
+    readonly providerStatus: number,
+    readonly providerCode: string | undefined,
+  ) {
+    super(
+      `${providerId} rejected the assessment: status=${providerStatus} ` +
+        `code=${providerCode ?? 'unknown'}`,
+    );
+    this.name = 'CreditProviderRejectedError';
+  }
+}
+
+/**
+ * Thrown by `CreditProvider.buildReconcileEvent` or `fetchResult` when the parked reference is not
+ * one the provider wrote. The kernel answers an operator's reconcile with
+ * `PENDING_CONNECTOR_RECONCILE_UNSUPPORTED`, reason `reference_malformed`.
+ */
+export class CreditPendingReferenceMalformedError extends Error {
+  constructor(readonly providerId: string) {
+    super(`${providerId} provider reference is malformed`);
+    this.name = 'CreditPendingReferenceMalformedError';
+  }
+}
+
+/**
  * A provider webhook, reduced to what the kernel acts on. `actionable: false` re-parks the step
  * without reading a result.
  */

@@ -13,7 +13,7 @@ describe('session routes', () => {
     ['applicant', 'details'],
     ['credit_consent', 'consent'],
     ['bank_selection', 'bank'],
-    ['bank_connection', 'bank/auth'],
+    ['bank_connection', 'bank/login'],
     ['account_selection', 'accounts'],
     ['bank_access_consent', 'bank/consent'],
     ['credit_check', 'bank/consent'],
@@ -32,7 +32,7 @@ describe('session routes', () => {
   });
 
   it('should allow every bank connection page while connecting', () => {
-    for (const page of ['bank/auth', 'bank/login', 'bank/transfer'] as const) {
+    for (const page of ['bank/login', 'bank/transfer'] as const) {
       expect(isPageFor(view({ step: 'bank_connection' }), page)).toBe(true);
     }
     expect(isPageFor(view({ step: 'bank_connection' }), 'accounts')).toBe(false);

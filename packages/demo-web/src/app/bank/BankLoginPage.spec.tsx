@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { PersonaSummary } from '@/api/bnpl/bnpl.client';
 
-import { profileCards, toMethod } from './BankLoginPage';
+import { isPasswordAccepted, profileCards } from './BankLoginPage';
 
 function persona(id: string, profile: PersonaSummary['profile'], hidden?: true): PersonaSummary {
   return {
@@ -37,11 +37,13 @@ describe('profile cards', () => {
     expect(profileCards(PERSONAE, 'fail_case').map((card) => card.id)).toContain('fail_case');
     expect(profileCards(PERSONAE, 'sherlock').map((card) => card.id)).not.toContain('fail_case');
   });
+});
 
-  it('should read the login method from the query and default to the device', () => {
-    expect(toMethod('qr')).toBe('qr');
-    expect(toMethod('device')).toBe('device');
-    expect(toMethod(null)).toBe('device');
-    expect(toMethod('other')).toBe('device');
+describe('bank password', () => {
+  it('should accept any non-blank value and refuse an empty or blank one', () => {
+    expect(isPasswordAccepted('hunter2')).toBe(true);
+    expect(isPasswordAccepted(' x ')).toBe(true);
+    expect(isPasswordAccepted('')).toBe(false);
+    expect(isPasswordAccepted('   ')).toBe(false);
   });
 });

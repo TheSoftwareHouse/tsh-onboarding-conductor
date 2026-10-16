@@ -2,7 +2,6 @@ import type { ObjectStoragePort } from '../../../../storage/object-storage.port'
 import type { ConnectorExecutionInput } from '../../../ports/connector-adapter.port';
 import type { CompletedOnboardingDocumentResolver } from '../../../resolvers/completed-onboarding-document.resolver';
 import { readCompletedDocument } from '../shared/read-completed-document';
-import type { CreditConfig } from './credit-config';
 import { CREDIT_BANK_DATA_CONTENT_TYPE, CREDIT_BANK_DATA_FIELD } from './credit-contract';
 import {
   CreditBankDataInvalidError,
@@ -10,27 +9,28 @@ import {
   type CreditSubmission,
 } from './credit-provider.port';
 
+const CREDIT_APPLICANT_ROLES = ['firstName', 'lastName', 'email'] as const;
+
 const readOptionalString = (
   payload: Readonly<Record<string, unknown>>,
-  key: string | undefined,
+  key: string,
 ): string | undefined => {
-  const value = key === undefined ? undefined : payload[key];
+  const value = payload[key];
 
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
 };
 
 /**
  * The roles the workflow bound, read from the payload. The step type maps each opted-in role as a
- * `fieldMapping` key of the same name; `config.applicant` may rename the payload key. A role with
- * no answer stays absent.
+ * `fieldMapping` key of the same name, so the payload carries the role under its own name. A role
+ * with no answer stays absent.
  */
 function buildCreditApplicant(
-  config: CreditConfig,
   payload: Readonly<Record<string, unknown>>,
 ): CreditApplicant | undefined {
   const applicant = Object.fromEntries(
-    (['firstName', 'lastName', 'email'] as const).flatMap((role) => {
-      const value = readOptionalString(payload, config.applicant?.[role] ?? role);
+    CREDIT_APPLICANT_ROLES.flatMap((role) => {
+      const value = readOptionalString(payload, role);
 
       return value === undefined ? [] : [[role, value]];
     }),
@@ -48,7 +48,6 @@ function buildCreditApplicant(
  */
 export async function buildCreditSubmission(
   connectorId: string,
-  config: CreditConfig,
   input: ConnectorExecutionInput,
   attempt: number,
   documentResolver: CompletedOnboardingDocumentResolver,
@@ -83,7 +82,7 @@ export async function buildCreditSubmission(
   return {
     onboardingId: input.execution.onboardingId,
     attempt,
-    applicant: buildCreditApplicant(config, input.payload),
+    applicant: buildCreditApplicant(input.payload),
     bankData: { format: 'json', document: content, contentType: resolved.contentType },
   };
 }

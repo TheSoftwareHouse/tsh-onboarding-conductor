@@ -747,8 +747,8 @@ or `retry` means, which is the problem the kernel exists to prevent.
 
 Credit assessment follows the KYC split: `CreditConnector`, the kernel in
 `connectors/adapters/built-in/credit/`, owns the engine-facing half, and a provider is its wire half
-([decision 0045](decisions/0045-credit-assessment-kernel-algoan-first-provider.md), status Proposed).
-The one provider built so far is the fixture `mock_credit`; the `credit-assessment` step type
+([decision 0045](decisions/0045-credit-assessment-kernel-algoan-first-provider.md), accepted 2026-10-16).
+The providers built so far are `algoan_credit` and the fixture `mock_credit`; the `credit-assessment` step type
 ([decision 0047](decisions/0047-credit-assessment-step-bank-data-document-and-bands.md)) binds any
 adapter of type `credit`, so a third provider needs no step-type or DDL change.
 
@@ -769,11 +769,22 @@ adapter of type `credit`, so a third provider needs no step-type or DDL change.
      `INVALID_BANK_DATA` error on the `bankData` field, so the applicant uploads again;
    - `startAssessment(settings, submission) → {providerReference}` — the applicant roles the workflow
      bound, the document bytes (`bankData.document`, format `json`) and the 1-based `attempt` arrive
-     built. Start one provider analysis per attempt and return the reference to park on;
+     built. Start one provider analysis per attempt and return the reference to park on. Classify
+     what the provider refuses with the port's errors rather than letting a transport error through:
+     `CreditProviderCredentialsRejectedError` for refused credentials (the kernel answers
+     `503 CREDIT_PROVIDER_CREDENTIALS_REJECTED` and logs the connector, never a secret),
+     `CreditBankDataInvalidError` with the provider's own code for a refused document (the same
+     retryable field error as above) and `CreditProviderRejectedError` with the status and code for
+     anything else (`503 CREDIT_PROVIDER_REJECTED`); an outage stays your `<NAME>_UNAVAILABLE`;
    - `parseCallback(input, settings)`, reducing the webhook to `{onboardingId, providerReference?,
-actionable, hint?}`; `actionable: false` re-parks without reading a result;
+actionable, hint?}`; `actionable: false` re-parks without reading a result. Throw
+     `ConnectorCallbackPayloadInvalidError` for a body you cannot read as the provider's payload
+     (answered `400 CALLBACK_PAYLOAD_INVALID`, not retried) and `ConnectorCallbackUnresolvedError`
+     for a well-formed one naming a resource that resolves to no onboarding (acknowledged with
+     `204`, reason `callback_unresolved`), so a provider never redelivers an event that cannot apply;
    - `buildReconcileEvent({onboardingId, providerReference})`, the event the operator reconcile reads
-     with, no webhook involved;
+     with, no webhook involved; a reference you cannot read is `CreditPendingReferenceMalformedError`,
+     which the kernel answers as the reconcile's `409`, reason `reference_malformed`;
    - `fetchResult(settings, event, context) → CreditResult`, which **reads the result back from the
      provider** rather than trusting the webhook body: `pending` while the provider is still
      computing, `failed` with codes, or `scored` with a `CreditScore` (`value` and `scale`,

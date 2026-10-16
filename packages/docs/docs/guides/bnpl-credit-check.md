@@ -2,7 +2,7 @@
 id: bnpl-credit-check
 title: UK BNPL credit check
 sidebar_label: UK BNPL credit check
-description: Score a UK customer's open-banking data through the engine with Algoan - the API flow, the connector settings, the three demo personae, the webhook setup and what to check when it stalls.
+description: Score a UK customer's open-banking data through the engine with Algoan - the API flow, the connector settings, the demo personae, the webhook setup and what to check when it stalls.
 ---
 
 → The `uk-bnpl-credit-check-algoan` workflow takes a customer's bank data, has [Algoan](https://docs.algoan.com) score it and routes the onboarding on the result: approved, manual review or declined. The engine talks to Algoan; the client never does. This guide covers the client flow, the settings, the demo data, the one webhook that needs a public address, and the failures worth knowing.
@@ -88,15 +88,17 @@ $ curl -X PUT localhost:3000/v1/admin/connectors/algoan_credit \
 
 Secrets come back masked and are never read from the environment by the engine. `ALGOAN_API_BASE_URL` (default `https://api.algoan.com`) and `ALGOAN_TIMEOUT_MS` (default 10000) are deployment settings in `.env`, only worth changing for a proxy or a slow network.
 
-## The three demo personae
+## The demo personae
 
-The repository ships three bank-data files for the Algoan sandbox, in `packages/demo-bff/personas/en/`. Each is one `{ accounts: [...] }` document with two `PERSONAL` GBP accounts at "Algoan Demo": a `CHECKING` account and a `SAVINGS` account (two to five transactions, a 90-day window cannot hold more monthly lines). The demo's account-selection step lets the customer pick which are analysed; the analysis needs the `CHECKING` one. Scores measured against the sandbox on 2026-10-15 (credit score version `1.0.0`, payment score `1.1.0`); the same data pushed twice returns the same score, and the savings account leaves every score unchanged, so the numbers hold with both accounts and with the checking account alone.
+The repository ships four bank-data files in `packages/demo-bff/personas/en/`: three personae for the Algoan sandbox, and a hidden fourth, `fail_case.json`, for the retry path. Each of the three is one `{ accounts: [...] }` document with two `PERSONAL` GBP accounts at "Algoan Demo": a `CHECKING` account and a `SAVINGS` account (two to five transactions, a 90-day window cannot hold more monthly lines). The demo's account-selection step lets the customer pick which are analysed; the analysis needs the `CHECKING` one. Scores measured against the sandbox on 2026-10-15 (credit score version `1.0.0`, payment score `1.1.0`); the same data pushed twice returns the same score, and the savings account leaves every score unchanged, so the numbers hold with both accounts and with the checking account alone.
 
 | File                   | Accounts             | Credit score | Payment score | Band                      | Outcome         |
 | ---------------------- | -------------------- | ------------ | ------------- | ------------------------- | --------------- |
 | `sherlock_holmes.json` | Checking and savings | 965          | 10            | `approve` (700 and above) | `approved`      |
 | `james_watson.json`    | Checking and savings | 598          | 3             | `review` (400 to 699)     | `manual_review` |
 | `james_moriarty.json`  | Checking and savings | 362          | 2             | `decline` (below 400)     | `declined`      |
+
+`fail_case.json` ("Fail Case", one current account with two transactions) is test-only: it is not offered at the bank's login and was not measured against the sandbox. The `mock_credit` provider fails its analysis by the owner's name, which is what the end-to-end suite uses to walk the `retry` loop; the web app reaches it through the unlinked `/start/fail_case` link.
 
 Sherlock and Watson are the MIT-licensed samples from [algoan/fake-open-banking-data](https://github.com/algoan/fake-open-banking-data); the upstream README calls Watson "below 100", but the sandbox model scores him 598. Moriarty was derived from Watson's file in this repository and calibrated to land below 400. Scores drift slowly as the 90-day window moves; the bands stay well apart.
 
@@ -151,26 +153,25 @@ To run the whole journey from a terminal, `TUNNEL=https://<random>.trycloudflare
 The demo (`packages/demo-bff` and `packages/demo-web`) runs on the host from the repository's `.env`, whose BNPL demo block names the engine (`ENGINE_BASE_URL`), the storage origin a browser can reach (`UPLOAD_PUBLIC_HOST`), the workflow (`BNPL_WORKFLOW_ID`) and the persona directory (`PERSONAS_DIR`, relative to the repository root). With the stack up and the connector settings stored:
 
 ```bash
-$ pnpm demo:dev --tunnel
+$ pnpm demo:dev:tunnel
 ```
 
-That replaces terminals B and C above: it opens the cloudflared tunnel to `ENGINE_BASE_URL`, recreates the two Algoan subscriptions for it, then starts the BFF on `DEMO_BFF_PORT` and the web app on `DEMO_WEB_ORIGIN`, and deletes the subscriptions again on Ctrl+C. Without `--tunnel` only the BFF and the web app start, which is enough for a workflow whose credit step runs on `mock_credit`. The script refuses to start when the engine does not answer or does not know the workflow.
+That replaces terminals B and C above: it opens the cloudflared tunnel to `ENGINE_BASE_URL`, recreates the two Algoan subscriptions for it, then starts the BFF on `DEMO_BFF_PORT` and the web app on `DEMO_WEB_ORIGIN`, and deletes the subscriptions again on Ctrl+C. Without the tunnel (`pnpm demo:dev`) only the BFF and the web app start, which is enough for a workflow whose credit step runs on `mock_credit`. The script refuses to start when the engine does not answer or does not know the workflow.
 
 The customer's path through the web app, one page per step (the page follows the engine's current step, so a reload or a pasted link lands where the session is):
 
-| Page                       | Step                                    | What the customer sees                                                                                                                                                                                |
-| -------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`                        |                                         | Persona cards (shortcuts that prefill the details and preselect the profile) and a generic "Start a credit check".                                                                                    |
-| `/s/<token>/details`       | `applicant`                             | Name and email, prefilled when the session has a persona.                                                                                                                                             |
-| `/s/<token>/consent`       | `credit_consent`                        | "Share your bank data": the Algoan privacy consent.                                                                                                                                                   |
-| `/s/<token>/bank`          | `bank_selection`                        | "Select your bank": search, the test bank "Algoan Demo Bank" and a grid of UK banks.                                                                                                                  |
-| `/s/<token>/bank/auth`     | `bank_connection`                       | "Authenticate with the bank app": a QR code, or "Continue on this device".                                                                                                                            |
-| `/s/<token>/bank/login`    | `bank_connection`                       | The bank's page: a profile card (High, Medium, Low score: the three personae) and a password that is never sent. "Connect bank" calls `POST /v1/bnpl/sessions/<token>/bank-login`.                    |
-| `/s/<token>/bank/transfer` | `account_selection`                     | "Transmission in progress" for about two seconds, then the account list.                                                                                                                              |
-| `/s/<token>/accounts`      | `account_selection`                     | "Select accounts for analysis": a row per account. A selection without the current account is refused with `CHECKING_ACCOUNT_REQUIRED`. A failed analysis lands here again, with the attempt notice.  |
-| `/s/<token>/bank/consent`  | `bank_access_consent`, `credit_check`   | The bank's authorisation page. "Authorise access" submits the consent and starts the check; "Refuse" ends the session with a link to `/`, because the engine cannot step back to `account_selection`. |
-| `/s/<token>/processing`    | `credit_check`                          | Waits for the result.                                                                                                                                                                                 |
-| `/s/<token>/result`        | `approved`, `manual_review`, `declined` | The decision and the score tabs; the Accounts tab lists only the selected accounts.                                                                                                                   |
+| Page                       | Step                                    | What the customer sees                                                                                                                                                                                                     |
+| -------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                        |                                         | One "Start a credit check"; no scenario is chosen here.                                                                                                                                                                    |
+| `/s/<token>/details`       | `applicant`                             | Name and email, typed by the customer.                                                                                                                                                                                     |
+| `/s/<token>/consent`       | `credit_consent`                        | "Share your bank data": the Algoan privacy consent.                                                                                                                                                                        |
+| `/s/<token>/bank`          | `bank_selection`                        | "Select your bank": search, the test bank "Algoan Demo Bank" and a grid of UK banks.                                                                                                                                       |
+| `/s/<token>/bank/login`    | `bank_connection`                       | The bank's page: a profile (High, Medium or Low score: the three visible personae) that decides the outcome, and a required password that is never sent. "Connect bank" calls `POST /v1/bnpl/sessions/<token>/bank-login`. |
+| `/s/<token>/bank/transfer` | `account_selection`                     | "Transmission in progress" for about two seconds, then the account list.                                                                                                                                                   |
+| `/s/<token>/accounts`      | `account_selection`                     | "Select accounts for analysis": a row per account. A selection without the current account is refused with `CHECKING_ACCOUNT_REQUIRED`. A failed analysis lands here again, with the attempt notice.                       |
+| `/s/<token>/bank/consent`  | `bank_access_consent`, `credit_check`   | The bank's authorisation page. "Authorise access" submits the consent and starts the check; "Refuse" ends the session with a link to `/`, because the engine cannot step back to `account_selection`.                      |
+| `/s/<token>/processing`    | `credit_check`                          | Waits for the result.                                                                                                                                                                                                      |
+| `/s/<token>/result`        | `approved`, `manual_review`, `declined` | The decision and the score tabs; the Accounts tab lists only the selected accounts.                                                                                                                                        |
 
 The BFF records the bank login for the customer. Its calls, with the bodies a run returned:
 
@@ -219,8 +220,11 @@ The engine reads the analysis back from Algoan and finishes the step. The answer
 - **`400 INVALID_STEP_DATA` on the `bankData` field with reason `INVALID_BANK_DATA`.** The document is not accepted as bank data (wrong content type, a missing `balance` or `balanceDate`, no matching account). Fix the file and upload again.
 - **`ALREADY_EXISTS` in the engine's logs.** The same onboarding was pushed again, a retry. Expected: the customer is looked up by `customIdentifier` and reused.
 - **A score far from the table.** Dates were not re-based, or the persona file was edited. Check the window in `creditReport.metadata.creditInsights`, and re-run.
-- **`401` from Algoan.** Wrong `clientId` or `clientSecret`, or the sandbox credentials were rotated. Re-enter them in the Connectors page.
+- **`503 CREDIT_PROVIDER_CREDENTIALS_REJECTED` on the submit.** Algoan answered 401 or 403: wrong `clientId` or `clientSecret`, rotated sandbox credentials, or a product the project lacks. Re-enter them in the Connectors page; the engine log line names the connector and never a secret. The onboarding stays on the step.
+- **`503 CREDIT_PROVIDER_REJECTED` on the submit.** Algoan refused the request for another reason; the payload carries its `providerStatus` and `providerCode`. A refused analysis (400 or 422) is instead the `bankData` field error above, with Algoan's code as the reason.
 - **`503 ALGOAN_UNAVAILABLE`.** Algoan did not answer, timed out or failed. Retry later; `ALGOAN_TIMEOUT_MS` raises the timeout.
+- **Callbacks rejected with `payload_invalid` or acknowledged with `callback_unresolved`** (audit event `webhook.inbound_callback_rejected`). The first is a verified body the adapter cannot read (answered `400 CALLBACK_PAYLOAD_INVALID`); the second a `customerId` Algoan answers 404 for, typically another project's event on the same subscription. Neither is redelivered; nothing is parked on them.
+- **`409 PENDING_CONNECTOR_RECONCILE_UNSUPPORTED` with `reason: reference_malformed`.** The park records a reference that is not `customerId/analysisId`; the onboarding was parked by something other than this adapter. Review it by hand.
 - **The engine refuses to boot after editing a workflow file.** A stored version differs from the file. Bump the version or fork under a new id rather than resetting the volume.
 
 ## Where to go next

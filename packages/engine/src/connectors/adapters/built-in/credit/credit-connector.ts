@@ -7,6 +7,8 @@ import type {
   ResolvedConnectorSettings,
 } from '../../../connector-settings.service';
 import { ConnectorCallbackAlreadyAppliedError } from '../../../errors/connector-callback-already-applied.error';
+import { CreditProviderCredentialsRejectedException } from '../../../errors/credit-provider-credentials-rejected.exception';
+import { CreditProviderRejectedException } from '../../../errors/credit-provider-rejected.exception';
 import { PendingConnectorReconcileUnsupportedException } from '../../../errors/pending-connector-reconcile-unsupported.exception';
 import type {
   ConnectorAdapter,
@@ -46,7 +48,11 @@ import {
 import { buildCreditSubmittedData, evaluateCreditOutcome } from './credit-outcome';
 import {
   CreditBankDataInvalidError,
+  CreditPendingReferenceMalformedError,
+  CreditProviderCredentialsRejectedError,
+  CreditProviderRejectedError,
   type CreditCallbackEvent,
+  type CreditPendingReference,
   type CreditProvider,
 } from './credit-provider.port';
 import { buildCreditSubmission } from './credit-submission';
@@ -111,7 +117,6 @@ export abstract class CreditConnector<
     try {
       const submission = await buildCreditSubmission(
         this.id,
-        config,
         input,
         this.nextAttempt(input.context),
         this.documentResolver,
@@ -129,20 +134,41 @@ export abstract class CreditConnector<
       // The executor copies the reference into the persisted pending connector.
       return ConnectorExecutionResult.accepted({ providerReference: receipt.providerReference });
     } catch (error: unknown) {
-      if (!(error instanceof CreditBankDataInvalidError)) {
-        throw error;
+      if (error instanceof CreditBankDataInvalidError) {
+        // The client's to fix: the step stays, the field names the document to upload again.
+        this.logger.log(
+          `CREDIT_BANK_DATA_INVALID connectorId=${this.id} ` +
+            `onboardingId=${input.execution.onboardingId}`,
+        );
+
+        return ConnectorExecutionResult.invalidData(
+          { [CREDIT_BANK_DATA_FIELD]: [CREDIT_BANK_DATA_INVALID_ERROR] },
+          { [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true },
+        );
       }
 
-      // The client's to fix: the step stays, the field names the document to upload again.
-      this.logger.log(
-        `CREDIT_BANK_DATA_INVALID connectorId=${this.id} ` +
-          `onboardingId=${input.execution.onboardingId}`,
-      );
+      // An operator's to fix in the connector settings; the line names the connector, never a secret.
+      if (error instanceof CreditProviderCredentialsRejectedError) {
+        this.logger.error(`CREDIT_PROVIDER_CREDENTIALS_REJECTED connectorId=${this.id}`);
 
-      return ConnectorExecutionResult.invalidData(
-        { [CREDIT_BANK_DATA_FIELD]: [CREDIT_BANK_DATA_INVALID_ERROR] },
-        { [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true },
-      );
+        throw new CreditProviderCredentialsRejectedException(this.id);
+      }
+
+      if (error instanceof CreditProviderRejectedError) {
+        this.logger.warn(
+          `CREDIT_PROVIDER_REJECTED connectorId=${this.id} ` +
+            `onboardingId=${input.execution.onboardingId} status=${error.providerStatus} ` +
+            `code=${error.providerCode ?? 'none'}`,
+        );
+
+        throw new CreditProviderRejectedException(
+          this.id,
+          error.providerStatus,
+          error.providerCode,
+        );
+      }
+
+      throw error;
     }
   }
 
@@ -215,11 +241,11 @@ export abstract class CreditConnector<
     }
 
     const settings = await this.connectorSettingsService.resolve(this);
-    const event = this.provider.buildReconcileEvent({
-      onboardingId: input.onboardingId,
-      providerReference,
-    });
-    const callback = await this.decide(event, resolvedConnector, settings);
+    const callback = await this.decideParked(
+      { onboardingId: input.onboardingId, providerReference },
+      resolvedConnector,
+      settings,
+    );
     const outcome = callback.result.isPending() ? 'still_pending' : 'resolved';
 
     this.logger.log(
@@ -227,6 +253,28 @@ export abstract class CreditConnector<
     );
 
     return outcome === 'still_pending' ? { outcome } : { outcome, callback };
+  }
+
+  /**
+   * The reconcile's read: the provider builds the event from the park and reads with it. A
+   * reference the provider cannot read is the operator's 409, not a 500.
+   */
+  private async decideParked(
+    reference: CreditPendingReference,
+    resolvedConnector: AwaitingCallbackConnectorResolution,
+    settings: ResolvedConnectorSettings,
+  ): Promise<ConnectorCallbackResult> {
+    try {
+      const event = this.provider.buildReconcileEvent(reference);
+
+      return await this.decide(event, resolvedConnector, settings);
+    } catch (error: unknown) {
+      if (error instanceof CreditPendingReferenceMalformedError) {
+        throw new PendingConnectorReconcileUnsupportedException(this.id, 'reference_malformed');
+      }
+
+      throw error;
+    }
   }
 
   /** Reads the result the provider holds and turns it into the step's outcome, or re-parks. */

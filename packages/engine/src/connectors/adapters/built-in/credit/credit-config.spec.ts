@@ -15,10 +15,8 @@ describe('parseCreditConfig', () => {
     expect(parse(VALID_CONFIG)).toEqual({
       bands: { approveFrom: 700, reviewFrom: 400 },
       maxAttempts: 3,
-      applicant: undefined,
       products: ['creditScore', 'paymentScore'],
       report: 'full',
-      bankDataMaxSizeBytes: undefined,
       providerConfig: {},
     });
   });
@@ -26,18 +24,29 @@ describe('parseCreditConfig', () => {
   it('parses every kernel key and leaves every other key to the provider', () => {
     const parsed = parse({
       ...VALID_CONFIG,
-      applicant: { firstName: 'first', email: 'mail' },
       products: ['creditScore'],
       report: 'summary',
-      bankDataMaxSizeBytes: 2048,
       region: 'uk',
     });
 
-    expect(parsed.applicant).toEqual({ firstName: 'first', email: 'mail' });
     expect(parsed.products).toEqual(['creditScore']);
     expect(parsed.report).toBe('summary');
-    expect(parsed.bankDataMaxSizeBytes).toBe(2048);
     expect(parsed.providerConfig).toEqual({ region: 'uk' });
+  });
+
+  it("consumes exactly the four keys the step type compiles; a step-level key is the provider's", () => {
+    const parsed = parse({
+      ...VALID_CONFIG,
+      applicant: { firstName: true },
+      bankDataMaxSizeBytes: 1,
+    });
+
+    expect(parsed).not.toHaveProperty('applicant');
+    expect(parsed).not.toHaveProperty('bankDataMaxSizeBytes');
+    expect(parsed.providerConfig).toEqual({
+      applicant: { firstName: true },
+      bankDataMaxSizeBytes: 1,
+    });
   });
 
   it.each([
@@ -59,15 +68,8 @@ describe('parseCreditConfig', () => {
     ],
     ['maxAttempts missing', { bands: VALID_CONFIG.bands }, 'maxAttempts'],
     ['maxAttempts zero', { ...VALID_CONFIG, maxAttempts: 0 }, 'maxAttempts'],
-    ['unknown applicant role', { ...VALID_CONFIG, applicant: { age: 'x' } }, 'applicant.age'],
-    ['empty applicant binding', { ...VALID_CONFIG, applicant: { email: ' ' } }, 'applicant.email'],
     ['empty products', { ...VALID_CONFIG, products: [] }, 'products'],
     ['unknown report mode', { ...VALID_CONFIG, report: 'huge' }, 'report'],
-    [
-      'bankDataMaxSizeBytes negative',
-      { ...VALID_CONFIG, bankDataMaxSizeBytes: -1 },
-      'bankDataMaxSizeBytes',
-    ],
   ])('rejects %s naming the key', (_label, config, key) => {
     expect(() => parse(config)).toThrow(CreditConfigInvalidError);
     expect(() => parse(config)).toThrow(`"${key}"`);

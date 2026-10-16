@@ -1,13 +1,6 @@
 /** Bands on the provider's own score scale. */
 export type CreditBands = Readonly<{ approveFrom: number; reviewFrom: number }>;
 
-/** Payload keys the applicant roles are read from; every role is optional. */
-export type CreditApplicantRoles = Readonly<{
-  firstName?: string;
-  lastName?: string;
-  email?: string;
-}>;
-
 export const CREDIT_REPORT_MODES = ['full', 'summary', 'none'] as const;
 
 export type CreditReportMode = (typeof CREDIT_REPORT_MODES)[number];
@@ -15,17 +8,18 @@ export type CreditReportMode = (typeof CREDIT_REPORT_MODES)[number];
 export const DEFAULT_CREDIT_PRODUCTS: readonly string[] = ['creditScore', 'paymentScore'];
 
 /**
- * The workflow declaration's `config`, parsed. `providerConfig` is every key no kernel rule
- * consumed, so a provider's own keys reach it wherever they were authored. `maxAttempts` carries
- * no code default: an operator who omits it gets a parse failure naming the key.
+ * The workflow declaration's `config`, parsed: exactly the four keys the `credit-assessment` step
+ * type compiles into the connector declaration (the step's `applicant` roles become its
+ * `fieldMapping`, its `bankDataMaxSizeBytes` the upload's validation; neither reaches here).
+ * `providerConfig` is every key no kernel rule consumed, so a provider's own keys reach it wherever
+ * they were authored. `maxAttempts` carries no code default: an operator who omits it gets a parse
+ * failure naming the key.
  */
 export type CreditConfig = {
   readonly bands: CreditBands;
   readonly maxAttempts: number;
-  readonly applicant?: CreditApplicantRoles;
   readonly products: readonly string[];
   readonly report: CreditReportMode;
-  readonly bankDataMaxSizeBytes?: number;
   readonly providerConfig: Readonly<Record<string, unknown>>;
 };
 
@@ -40,16 +34,7 @@ export class CreditConfigInvalidError extends Error {
   }
 }
 
-const KERNEL_CONFIG_KEYS = [
-  'bands',
-  'maxAttempts',
-  'applicant',
-  'products',
-  'report',
-  'bankDataMaxSizeBytes',
-] as const;
-
-const APPLICANT_ROLES = ['firstName', 'lastName', 'email'] as const;
+const KERNEL_CONFIG_KEYS = ['bands', 'maxAttempts', 'products', 'report'] as const;
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -94,32 +79,6 @@ const parseBands = (connectorId: string, value: unknown): CreditBands => {
   }
 
   return { approveFrom, reviewFrom };
-};
-
-const parseApplicant = (connectorId: string, value: unknown): CreditApplicantRoles | undefined => {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!isPlainObject(value)) {
-    throw new CreditConfigInvalidError(connectorId, 'applicant', 'must be an object');
-  }
-
-  const roles: Record<string, string> = {};
-
-  for (const [role, payloadField] of Object.entries(value)) {
-    if (!(APPLICANT_ROLES as readonly string[]).includes(role)) {
-      throw new CreditConfigInvalidError(
-        connectorId,
-        `applicant.${role}`,
-        `is not a role; expected one of ${APPLICANT_ROLES.join(', ')}`,
-      );
-    }
-
-    roles[role] = parseNonEmptyString(connectorId, payloadField, `applicant.${role}`);
-  }
-
-  return Object.keys(roles).length === 0 ? undefined : roles;
 };
 
 const parseProducts = (connectorId: string, value: unknown): readonly string[] => {
@@ -169,13 +128,8 @@ export function parseCreditConfig(
   return {
     bands: parseBands(connectorId, config.bands),
     maxAttempts: parsePositiveInteger(connectorId, config.maxAttempts, 'maxAttempts'),
-    applicant: parseApplicant(connectorId, config.applicant),
     products: parseProducts(connectorId, config.products),
     report: parseReportMode(connectorId, config.report),
-    bankDataMaxSizeBytes:
-      config.bankDataMaxSizeBytes === undefined
-        ? undefined
-        : parsePositiveInteger(connectorId, config.bankDataMaxSizeBytes, 'bankDataMaxSizeBytes'),
     providerConfig,
   };
 }

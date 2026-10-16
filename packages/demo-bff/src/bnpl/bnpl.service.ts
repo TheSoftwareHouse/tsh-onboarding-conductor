@@ -16,11 +16,13 @@ import { BnplSession, BnplSessionStore } from './bnpl-session.store';
 import { BankConnectionMethod } from './dto/bank-login.dto';
 import { CreatedSession, Decision, ProcessingView, SessionView } from './dto/session-view';
 import { AccountsNotSelectedException } from './errors/accounts-not-selected.exception';
+import { CreditCheckUnavailableException } from './errors/credit-check-unavailable.exception';
 import { EngineUnavailableException } from './errors/engine-unavailable.exception';
 import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import { SessionConflictException } from './errors/session-conflict.exception';
 import { SessionHasNoBankException } from './errors/session-has-no-bank.exception';
 import { SessionNotFoundException } from './errors/session-not-found.exception';
+import { SessionStepNotSubmittableException } from './errors/session-step-not-submittable.exception';
 import { StepNotReadyException } from './errors/step-not-ready.exception';
 import { UnknownPersonaException } from './errors/unknown-persona.exception';
 import { StateWaiter } from './state-waiter';
@@ -34,6 +36,12 @@ const CREDIT_OUTCOME_FIELD = 'creditOutcome';
 const CREDIT_ATTEMPT_COUNT_FIELD = 'creditAttemptCount';
 const CREDIT_OUTCOME_RETRY = 'retry';
 const BANK_CONNECTION_STEP = 'bank_connection';
+const CREDIT_CHECK_STEP = 'credit_check';
+/** The steps this BFF records through a route of its own; `submit` refuses them. */
+const BFF_OWNED_STEPS: Readonly<Record<string, string>> = {
+  [BANK_CONNECTION_STEP]: 'bank-login',
+  [CREDIT_CHECK_STEP]: 'run',
+};
 const SELECTED_ACCOUNTS_FIELD = 'selectedAccounts';
 const CHECKING_ACCOUNT_REQUIRED = 'CHECKING_ACCOUNT_REQUIRED';
 const DECISIONS: readonly Decision[] = ['approved', 'review', 'declined'];
@@ -61,6 +69,9 @@ export const ENGINE_ERROR_MAP: Record<string, (error: EngineError) => HttpExcept
   DOCUMENT_UPLOAD_NOT_FOUND: () => new EngineUnavailableException(),
   DOCUMENT_UPLOAD_CONFLICT: () => new EngineUnavailableException(),
   DOCUMENT_UPLOAD_EXPIRED: () => new EngineUnavailableException(),
+  // The provider refused the engine's credentials or the assessment: not the customer's to fix.
+  CREDIT_PROVIDER_CREDENTIALS_REJECTED: () => new CreditCheckUnavailableException(),
+  CREDIT_PROVIDER_REJECTED: () => new CreditCheckUnavailableException(),
 };
 
 @Injectable()
@@ -107,11 +118,23 @@ export class BnplService {
     return this.view(session, state);
   }
 
+  /**
+   * Pushes the current step's values. The two steps this BFF records itself are refused first, so
+   * a caller cannot set the bank profile behind the session's persona or run the credit check
+   * without the persona's bank data.
+   */
   async submit(
     token: string,
     values: Record<string, unknown>,
   ): Promise<SessionView | ProcessingView> {
     const session = this.requireSession(token);
+    const state = await this.guarded(() => this.engine.getState(session.onboardingId));
+    const step = state.step?.name;
+    const owningRoute = step === undefined ? undefined : BFF_OWNED_STEPS[step];
+
+    if (step !== undefined && owningRoute !== undefined) {
+      throw new SessionStepNotSubmittableException(step, owningRoute);
+    }
 
     this.requireCheckingAccount(session, values);
 

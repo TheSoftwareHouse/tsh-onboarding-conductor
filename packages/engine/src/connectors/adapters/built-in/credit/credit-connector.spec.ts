@@ -1,5 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { ConnectorCallbackAlreadyAppliedError } from '../../../errors/connector-callback-already-applied.error';
+import { CreditProviderCredentialsRejectedException } from '../../../errors/credit-provider-credentials-rejected.exception';
+import { CreditProviderRejectedException } from '../../../errors/credit-provider-rejected.exception';
+import { PendingConnectorReconcileUnsupportedException } from '../../../errors/pending-connector-reconcile-unsupported.exception';
 import type {
   ConnectorCallbackMappingInput,
   ConnectorExecutionInput,
@@ -11,6 +14,9 @@ import {
 import { CreditConnector } from './credit-connector';
 import {
   CreditBankDataInvalidError,
+  CreditPendingReferenceMalformedError,
+  CreditProviderCredentialsRejectedError,
+  CreditProviderRejectedError,
   type CreditCallbackEvent,
   type CreditProvider,
   type CreditResult,
@@ -219,6 +225,64 @@ describe('CreditConnector', () => {
       expect(deps.provider.startAssessment).not.toHaveBeenCalled();
     });
 
+    it('answers 503 CREDIT_PROVIDER_CREDENTIALS_REJECTED when the provider refuses the credentials, naming the connector and no secret', async () => {
+      const deps = createDeps();
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      deps.provider.startAssessment.mockRejectedValue(
+        new CreditProviderCredentialsRejectedError(CONNECTOR_ID),
+      );
+
+      const error: unknown = await createConnector(deps)
+        .execute(createInput())
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(CreditProviderCredentialsRejectedException);
+      expect((error as CreditProviderCredentialsRejectedException).getResponse()).toEqual({
+        code: 'CREDIT_PROVIDER_CREDENTIALS_REJECTED',
+        message: 'CREDIT_PROVIDER_CREDENTIALS_REJECTED',
+        connectorId: CONNECTOR_ID,
+      });
+      expect(logged).toHaveBeenCalledWith(
+        `CREDIT_PROVIDER_CREDENTIALS_REJECTED connectorId=${CONNECTOR_ID}`,
+      );
+    });
+
+    it('answers 503 CREDIT_PROVIDER_REJECTED with the provider status and code for any other refusal', async () => {
+      const deps = createDeps();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      deps.provider.startAssessment.mockRejectedValue(
+        new CreditProviderRejectedError(CONNECTOR_ID, 429, 'RATE_LIMITED'),
+      );
+
+      const error: unknown = await createConnector(deps)
+        .execute(createInput())
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(CreditProviderRejectedException);
+      expect((error as CreditProviderRejectedException).getResponse()).toEqual({
+        code: 'CREDIT_PROVIDER_REJECTED',
+        message: 'CREDIT_PROVIDER_REJECTED',
+        connectorId: CONNECTOR_ID,
+        providerStatus: 429,
+        providerCode: 'RATE_LIMITED',
+      });
+    });
+
+    it('answers retryable invalid-data when the provider rejects the bank data at the start', async () => {
+      const deps = createDeps();
+      jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      deps.provider.startAssessment.mockRejectedValue(
+        new CreditBankDataInvalidError(CONNECTOR_ID, 'INVALID_ACCOUNTS'),
+      );
+
+      expect(await createConnector(deps).execute(createInput())).toEqual(
+        ConnectorExecutionResult.invalidData(
+          { bankData: ['INVALID_BANK_DATA'] },
+          { [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true },
+        ),
+      );
+    });
+
     it('lets any other provider error through', async () => {
       const deps = createDeps();
       deps.provider.startAssessment.mockRejectedValue(new Error('boom'));
@@ -336,6 +400,35 @@ describe('CreditConnector', () => {
         outcome: 'resolved',
         callback: { submittedData: { creditOutcome: 'approved' } },
       });
+    });
+
+    it('refuses a park whose reference the provider cannot read with reason reference_malformed', async () => {
+      const deps = createDeps();
+      deps.provider.buildReconcileEvent.mockImplementation(() => {
+        throw new CreditPendingReferenceMalformedError(CONNECTOR_ID);
+      });
+
+      const error: unknown = await createConnector(deps)
+        .reconcilePending({ onboardingId: ONBOARDING_ID })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(PendingConnectorReconcileUnsupportedException);
+      expect((error as PendingConnectorReconcileUnsupportedException).getResponse()).toMatchObject({
+        connectorId: CONNECTOR_ID,
+        reason: 'reference_malformed',
+      });
+      expect(deps.provider.fetchResult).not.toHaveBeenCalled();
+    });
+
+    it('maps the same malformed reference raised by the read itself', async () => {
+      const deps = createDeps();
+      deps.provider.fetchResult.mockRejectedValue(
+        new CreditPendingReferenceMalformedError(CONNECTOR_ID),
+      );
+
+      await expect(
+        createConnector(deps).reconcilePending({ onboardingId: ONBOARDING_ID }),
+      ).rejects.toBeInstanceOf(PendingConnectorReconcileUnsupportedException);
     });
   });
 });

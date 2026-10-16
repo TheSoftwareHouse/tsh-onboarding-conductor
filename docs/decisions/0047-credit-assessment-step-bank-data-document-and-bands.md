@@ -1,6 +1,6 @@
 # 0047. The `credit-assessment` step takes bank data as an uploaded document and bands the score from its config
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-15
 - **Tags:** step-types, workflows, documents, credit, bnpl, authoring
 - **Supersedes:** —
@@ -21,6 +21,13 @@ a `fieldMapping` carrying `bankData` and any applicant roles, and `when: { field
 'creditOutcome', equals: … }` arms with `review` last and unconditional. The bands are authored
 in the workflow document, so a workflow moves the thresholds without a code change, and the
 kernel of [0045](./0045-credit-assessment-kernel-algoan-first-provider.md) applies them.
+`applicant` and `bankDataMaxSizeBytes` are consumed by the step type alone: each opted-in role
+becomes a `fieldMapping` entry from the role to the canonical field an earlier step collected
+(an authoring error when none does), and the size becomes the `bankData` field's upload
+validation, enforced at reserve. The compiled connector config carries exactly `bands`,
+`maxAttempts`, `products` and `report`, and the kernel's config parser accepts exactly those
+(amended 2026-10-16: until then the parser also accepted an `applicant` rename map and a
+`bankDataMaxSizeBytes` that no compile emitted; both branches are removed).
 
 The provider-shaped results the step declares as callback-only fields — `creditIndicators`,
 `creditSecondaryScores` and `creditReport` — have no fixed shape, so the DDL gains one built-in

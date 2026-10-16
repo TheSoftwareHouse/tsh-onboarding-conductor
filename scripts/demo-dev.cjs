@@ -8,7 +8,8 @@
  *
  *   pnpm demo:dev            start the BFF and the web app
  *   pnpm demo:dev --tunnel   also open a cloudflared tunnel to the engine and point the Algoan
- *                            webhook subscriptions at it (real-sandbox runs need that)
+ *                            webhook subscriptions at it (real-sandbox runs need that);
+ *                            `pnpm demo:dev:tunnel` is the same command with the flag
  *   pnpm demo:dev --help
  *
  * Ctrl+C stops everything; with --tunnel the subscriptions created for this tunnel are deleted
@@ -44,7 +45,7 @@ const RESET = '\x1b[0m';
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) {
   console.log(
-    'Usage: pnpm demo:dev [--tunnel]\n\n' +
+    'Usage: pnpm demo:dev [--tunnel]   (pnpm demo:dev:tunnel is the same with the flag)\n\n' +
       'Starts the demo BFF and the demo web app from .env against ENGINE_BASE_URL.\n' +
       '--tunnel also runs `cloudflared tunnel --url <ENGINE_BASE_URL>` and recreates the Algoan\n' +
       `webhook subscriptions for https://<tunnel-host>${CALLBACK_PATH}.`,

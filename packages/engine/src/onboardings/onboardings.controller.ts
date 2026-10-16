@@ -33,6 +33,8 @@ import { ConnectorNotConfiguredException } from '../connectors/errors/connector-
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
 import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
 import { AlgoanUnavailableException } from '../connectors/errors/algoan-unavailable.exception';
+import { CreditProviderCredentialsRejectedException } from '../connectors/errors/credit-provider-credentials-rejected.exception';
+import { CreditProviderRejectedException } from '../connectors/errors/credit-provider-rejected.exception';
 import { VeriffUnavailableException } from '../connectors/errors/veriff-unavailable.exception';
 import { TwilioVerifyUnavailableException } from '../connectors/errors/twilio-verify-unavailable.exception';
 import {
@@ -100,7 +102,9 @@ const WORKFLOW_RESOLUTION_ERRORS = [WorkflowNotFoundException, WorkflowRetiredEx
 
 /**
  * What a connector call made on the submit path can surface: a required credential resolving
- * nowhere, or the provider itself failing in a way the adapter does not map to an outcome. The
+ * nowhere, the provider itself failing in a way the adapter does not map to an outcome, or a
+ * credit provider refusing the credentials or the assessment (the document itself is the step's
+ * own `INVALID_STEP_DATA`). The
  * framework `500` is documented beside the coded ones because an adapter is not obliged to raise
  * an `HttpException`: `WorkflowConnectorExecutorService` re-throws whatever it caught on
  * `propagate`, and the built-in `http_request` and Sumsub adapters raise plain `Error` subclasses.
@@ -112,6 +116,8 @@ const CONNECTOR_EXECUTION_ERRORS = [
   SumsubUnavailableException,
   VeriffUnavailableException,
   AlgoanUnavailableException,
+  { exception: CreditProviderCredentialsRejectedException, args: ['algoan_credit'] },
+  { exception: CreditProviderRejectedException, args: ['algoan_credit', 429, 'TOO_MANY_REQUESTS'] },
   frameworkError(
     HttpStatus.INTERNAL_SERVER_ERROR,
     'A connector failed in a way its adapter raises as a plain error rather than one of the codes ' +

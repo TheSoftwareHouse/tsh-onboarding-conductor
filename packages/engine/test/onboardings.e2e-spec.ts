@@ -4208,6 +4208,8 @@ describe('OnboardingsController (e2e)', () => {
       currentStep: 'collect_country',
       terminal: false,
       rejectionReason: null,
+      pending: null,
+      data: {},
       step: {
         name: 'collect_country',
         status: 'awaiting_user',
@@ -4342,6 +4344,8 @@ describe('OnboardingsController (e2e)', () => {
       currentStep: null,
       terminal: true,
       rejectionReason: null,
+      pending: null,
+      data: {},
       step: null,
     });
   });

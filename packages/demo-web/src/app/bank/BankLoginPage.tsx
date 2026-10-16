@@ -1,13 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useNavigate } from 'react-router';
 
-import {
-  bankLogin,
-  listPersonas,
-  type BankLoginMethod,
-  type PersonaSummary,
-} from '@/api/bnpl/bnpl.client';
+import { bankLogin, listPersonas, type PersonaSummary } from '@/api/bnpl/bnpl.client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -44,19 +39,20 @@ export function profileCards(
     .sort((a, b) => PROFILE_ORDER.indexOf(a.profile) - PROFILE_ORDER.indexOf(b.profile));
 }
 
-export function toMethod(value: string | null): BankLoginMethod {
-  return value === 'qr' ? 'qr' : 'device';
+/** The simulated bank wants a password, any password; it never leaves the browser. */
+export function isPasswordAccepted(password: string): boolean {
+  return password.trim() !== '';
 }
 
 export function BankLoginPage() {
   const state = useSessionView('bank/login');
   const navigate = useNavigate();
-  const [params] = useSearchParams();
   const personas = useQuery({
     queryKey: ['personas'],
     queryFn: ({ signal }) => listPersonas(signal),
   });
   const [chosen, setChosen] = useState<string | null>(null);
+  const [password, setPassword] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,15 +64,16 @@ export function BankLoginPage() {
   const bankName = typeof view.data.bankName === 'string' ? view.data.bankName : 'Your bank';
   const cards = profileCards(personas.data ?? [], view.persona);
   const selected = chosen ?? view.persona;
+  const ready = selected !== null && isPasswordAccepted(password);
 
   async function onConnect() {
-    if (selected === null) {
+    if (selected === null || !isPasswordAccepted(password)) {
       return;
     }
     setConnecting(true);
     setError(null);
     try {
-      await bankLogin(token, { persona: selected, method: toMethod(params.get('method')) });
+      await bankLogin(token, { persona: selected, method: 'device' });
       void navigate(sessionPath(token, 'bank/transfer'));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not connect to the bank.');
@@ -89,7 +86,9 @@ export function BankLoginPage() {
       <CardHeader>
         <p className="text-2xl font-semibold tracking-tight text-primary">{bankName}</p>
         <CardTitle>Sign in to connect your accounts</CardTitle>
-        <CardDescription>Choose a profile to sign in as. This bank is simulated.</CardDescription>
+        <CardDescription>
+          This bank is simulated: the profile you sign in with decides the outcome.
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {personas.isError ? (
@@ -119,9 +118,7 @@ export function BankLoginPage() {
                 className={cn('mt-1.5 size-3 shrink-0 rounded-full', PROFILE_DOT[persona.profile])}
               />
               <span className="flex flex-col">
-                <span className="text-sm font-medium">
-                  {PROFILE_TITLE[persona.profile]} · {persona.name}
-                </span>
+                <span className="text-sm font-medium">{PROFILE_TITLE[persona.profile]}</span>
                 <span className="text-xs text-muted-foreground">{persona.profileLabel}</span>
               </span>
             </label>
@@ -133,16 +130,19 @@ export function BankLoginPage() {
             id="bank-password"
             type="password"
             autoComplete="off"
+            required
             placeholder="Any value works"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
           />
-          <p className="text-xs text-muted-foreground">Never sent anywhere.</p>
+          <p className="text-xs text-muted-foreground">Required, never sent anywhere.</p>
         </div>
         {error === null ? null : (
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         )}
-        <Button disabled={selected === null || connecting} onClick={() => void onConnect()}>
+        <Button disabled={!ready || connecting} onClick={() => void onConnect()}>
           {connecting ? 'Connecting…' : 'Connect bank'}
         </Button>
       </CardContent>

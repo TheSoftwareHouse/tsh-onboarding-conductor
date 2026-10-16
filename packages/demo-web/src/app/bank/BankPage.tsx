@@ -65,7 +65,7 @@ export function BankPage() {
     setError(null);
     try {
       await submitSession(token, { bankId: bank.id, bankName: bank.name });
-      void navigate(sessionPath(token, 'bank/auth'));
+      void navigate(sessionPath(token, 'bank/login'));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not select the bank.');
       setChoosing(null);

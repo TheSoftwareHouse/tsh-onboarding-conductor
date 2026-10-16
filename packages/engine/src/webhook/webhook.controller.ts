@@ -23,7 +23,11 @@ import { AuditService } from '../audit/audit.service';
 import { markAuditRecorded } from '../audit/audit-recorded.marker';
 import { ConnectorNotConfiguredException } from '../connectors/errors/connector-not-configured.exception';
 import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
+import { ConnectorCallbackPayloadInvalidError } from '../connectors/errors/connector-callback-payload-invalid.error';
 import { ConnectorCallbackSupersededError } from '../connectors/errors/connector-callback-superseded.error';
+import { ConnectorCallbackUnresolvedError } from '../connectors/errors/connector-callback-unresolved.error';
+import { CreditProviderCredentialsRejectedException } from '../connectors/errors/credit-provider-credentials-rejected.exception';
+import { CreditProviderRejectedException } from '../connectors/errors/credit-provider-rejected.exception';
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
 import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
 import { AlgoanUnavailableException } from '../connectors/errors/algoan-unavailable.exception';
@@ -39,6 +43,7 @@ import { API_TAGS } from '../openapi/openapi.constants';
 import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from '../workflows/errors/workflow-retired.exception';
 import { AsyncCallbackAuthenticationFailedException } from './errors/async-callback-authentication-failed.exception';
+import { AsyncCallbackPayloadInvalidException } from './errors/async-callback-payload-invalid.exception';
 import { AsyncCallbackProviderKeyInvalidException } from './errors/async-callback-provider-key-invalid.exception';
 import { AsyncCallbackRawBodyRequiredException } from './errors/async-callback-raw-body-required.exception';
 import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
@@ -91,13 +96,15 @@ export class WebhookController {
   @ApiNoContentResponse({
     description:
       'The result was applied to the onboarding, had already been applied by an earlier ' +
-      'delivery of the same callback, or named a park the onboarding has since left and was ' +
-      'dropped.',
+      'delivery of the same callback, named a park the onboarding has since left and was ' +
+      'dropped, or named a provider resource that resolves to no onboarding of this engine ' +
+      'and was dropped.',
   })
   @ApiErrorResponses(
     AsyncCallbackRawBodyRequiredException,
     AsyncCallbackProviderKeyInvalidException,
     AsyncCallbackAuthenticationFailedException,
+    AsyncCallbackPayloadInvalidException,
     InvalidStepDataException,
     {
       exception: CallbackSignatureInvalidException,
@@ -125,6 +132,11 @@ export class WebhookController {
     SumsubUnavailableException,
     VeriffUnavailableException,
     AlgoanUnavailableException,
+    { exception: CreditProviderCredentialsRejectedException, args: ['algoan_credit'] },
+    {
+      exception: CreditProviderRejectedException,
+      args: ['algoan_credit', 429, 'TOO_MANY_REQUESTS'],
+    },
     WebhookDeliveryFailedException,
     // The callback is applied through the same submit path, so the same connector chain runs here
     // and the same plain-error propagation reaches the client: an adapter that raises an `Error`
@@ -173,6 +185,25 @@ export class WebhookController {
           reason: 'callback_already_applied',
         });
         return;
+      }
+
+      // Names a provider resource this engine never parked on: acknowledged so the provider stops
+      // redelivering, recorded so the drop is visible.
+      if (error instanceof ConnectorCallbackUnresolvedError) {
+        await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {
+          reason: 'callback_unresolved',
+        });
+        return;
+      }
+
+      // Verified but unreadable: the provider's defect, answered as the client's 400 so it is not
+      // retried, and recorded.
+      if (error instanceof ConnectorCallbackPayloadInvalidError) {
+        const rejection = new AsyncCallbackPayloadInvalidException();
+        const recorded = await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {
+          reason: 'payload_invalid',
+        });
+        throw recorded ? markAuditRecorded(rejection) : rejection;
       }
 
       const reason = this.getRejectionReason(error);

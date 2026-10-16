@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { ResolvedConnectorSettings } from '../../../connector-settings.service';
 import { AlgoanRequestRejectedError } from '../../../errors/algoan-request-rejected.error';
+import { ConnectorCallbackPayloadInvalidError } from '../../../errors/connector-callback-payload-invalid.error';
+import { ConnectorCallbackUnresolvedError } from '../../../errors/connector-callback-unresolved.error';
 import type {
   ConnectorCallbackHmacAuth,
   ConnectorCallbackMappingInput,
@@ -9,6 +11,9 @@ import type {
 import type { CreditConfig } from '../credit/credit-config';
 import {
   CreditBankDataInvalidError,
+  CreditPendingReferenceMalformedError,
+  CreditProviderCredentialsRejectedError,
+  CreditProviderRejectedError,
   type CreditAssessmentReceipt,
   type CreditBankData,
   type CreditCallbackContext,
@@ -42,6 +47,13 @@ const ANALYSIS_FORMAT = 'ALGOAN';
 const ANALYSIS_DATA_ORIGIN = 'OPEN_BANKING';
 const PRODUCT_INSIGHTS = 'insights';
 const ERROR_CODE_NO_CREDIT_SCORE = 'NO_CREDIT_SCORE';
+const HTTP_BAD_REQUEST = 400;
+const HTTP_UNAUTHORIZED = 401;
+const HTTP_FORBIDDEN = 403;
+const HTTP_NOT_FOUND = 404;
+const HTTP_UNPROCESSABLE = 422;
+/** A reason for an analysis Algoan refused without a code of its own. */
+const ANALYSIS_REJECTED_REASON = 'ANALYSIS_REJECTED';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -61,7 +73,7 @@ const splitReference = (reference: string | undefined): [string, string] => {
   const [customerId, analysisId, ...rest] = (reference ?? '').split(REFERENCE_SEPARATOR);
 
   if (!customerId || !analysisId || rest.length > 0) {
-    throw new Error(`${ALGOAN_CREDIT_CONNECTOR_ID} provider reference is malformed`);
+    throw new CreditPendingReferenceMalformedError(ALGOAN_CREDIT_CONNECTOR_ID);
   }
 
   return [customerId, analysisId];
@@ -69,6 +81,26 @@ const splitReference = (reference: string | undefined): [string, string] => {
 
 const invalid = (reason: string): CreditBankDataInvalidError =>
   new CreditBankDataInvalidError(ALGOAN_CREDIT_CONNECTOR_ID, reason);
+
+const isCredentialsRejection = (error: AlgoanRequestRejectedError): boolean =>
+  error.status === HTTP_UNAUTHORIZED || error.status === HTTP_FORBIDDEN;
+
+/**
+ * Classifies a 4xx from any call `startAssessment` makes. A refused token or API call is the
+ * credentials; a refused analysis is the document, named by Algoan's own code (never its
+ * message, which may echo the document); anything else is the provider's refusal as such.
+ */
+const classifyRejection = (error: AlgoanRequestRejectedError, analysis: boolean): Error => {
+  if (isCredentialsRejection(error)) {
+    return new CreditProviderCredentialsRejectedError(ALGOAN_CREDIT_CONNECTOR_ID);
+  }
+
+  if (analysis && (error.status === HTTP_BAD_REQUEST || error.status === HTTP_UNPROCESSABLE)) {
+    return invalid(error.code ?? ANALYSIS_REJECTED_REASON);
+  }
+
+  return new CreditProviderRejectedError(ALGOAN_CREDIT_CONNECTOR_ID, error.status, error.code);
+};
 
 const readNumber = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined;
@@ -154,17 +186,24 @@ export class AlgoanCreditProvider implements CreditProvider {
   ): Promise<CreditAssessmentReceipt> {
     const credentials = resolveAlgoanCredentials(settings);
     const { accounts } = this.parseBankData(submission.bankData);
-    const customer = await this.getOrCreateCustomer(credentials, submission.onboardingId);
+    const customer = await this.rejectionClassified(
+      () => this.getOrCreateCustomer(credentials, submission.onboardingId),
+      false,
+    );
 
-    const analysis = await this.algoanClient.createAnalysis(credentials, customer.id, {
-      accounts,
-      format: ANALYSIS_FORMAT,
-      dataOrigin: ANALYSIS_DATA_ORIGIN,
-      parameters: {
-        disableScores: false,
-        disableCreditInsights: !config.products.includes(PRODUCT_INSIGHTS),
-      },
-    });
+    const analysis = await this.rejectionClassified(
+      () =>
+        this.algoanClient.createAnalysis(credentials, customer.id, {
+          accounts,
+          format: ANALYSIS_FORMAT,
+          dataOrigin: ANALYSIS_DATA_ORIGIN,
+          parameters: {
+            disableScores: false,
+            disableCreditInsights: !config.products.includes(PRODUCT_INSIGHTS),
+          },
+        }),
+      true,
+    );
 
     this.logger.log(
       `ALGOAN_ANALYSIS_CREATED onboardingId=${submission.onboardingId} ` +
@@ -197,15 +236,13 @@ export class AlgoanCreditProvider implements CreditProvider {
     const { customerId, analysisId } = payload;
 
     if (!isNonEmptyString(customerId) || !isNonEmptyString(analysisId)) {
-      throw new Error(
-        `${ALGOAN_CREDIT_CONNECTOR_ID} callback payload missing customerId or analysisId`,
+      throw new ConnectorCallbackPayloadInvalidError(
+        ALGOAN_CREDIT_CONNECTOR_ID,
+        'payload is missing customerId or analysisId',
       );
     }
 
-    const customer = await this.algoanClient.getCustomer(
-      resolveAlgoanCredentials(settings),
-      customerId,
-    );
+    const customer = await this.resolveCallbackCustomer(settings, customerId);
 
     return {
       onboardingId: customer.customIdentifier,
@@ -261,6 +298,41 @@ export class AlgoanCreditProvider implements CreditProvider {
     );
 
     return { status: 'scored', score, report: report ?? {} };
+  }
+
+  /** Runs one `startAssessment` call, turning Algoan's 4xx into the port's errors. */
+  private async rejectionClassified<T>(call: () => Promise<T>, analysis: boolean): Promise<T> {
+    try {
+      return await call();
+    } catch (error: unknown) {
+      throw error instanceof AlgoanRequestRejectedError
+        ? classifyRejection(error, analysis)
+        : error;
+    }
+  }
+
+  /**
+   * A customer Algoan answers 404 for belongs to another project on the same subscription or was
+   * deleted: the event can never apply here. A refused credential on the read-back is the same
+   * configuration gap as on the start.
+   */
+  private async resolveCallbackCustomer(settings: ResolvedConnectorSettings, customerId: string) {
+    try {
+      return await this.algoanClient.getCustomer(resolveAlgoanCredentials(settings), customerId);
+    } catch (error: unknown) {
+      if (!(error instanceof AlgoanRequestRejectedError)) {
+        throw error;
+      }
+
+      if (error.status === HTTP_NOT_FOUND) {
+        throw new ConnectorCallbackUnresolvedError(
+          ALGOAN_CREDIT_CONNECTOR_ID,
+          'Algoan has no customer with the id the callback names',
+        );
+      }
+
+      throw classifyRejection(error, false);
+    }
   }
 
   private async getOrCreateCustomer(
@@ -354,11 +426,17 @@ export class AlgoanCreditProvider implements CreditProvider {
     try {
       parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(rawBody));
     } catch {
-      throw new Error(`${ALGOAN_CREDIT_CONNECTOR_ID} callback body must be valid UTF-8 JSON`);
+      throw new ConnectorCallbackPayloadInvalidError(
+        ALGOAN_CREDIT_CONNECTOR_ID,
+        'body must be valid UTF-8 JSON',
+      );
     }
 
     if (!isRecord(parsed)) {
-      throw new Error(`${ALGOAN_CREDIT_CONNECTOR_ID} callback JSON body must be an object`);
+      throw new ConnectorCallbackPayloadInvalidError(
+        ALGOAN_CREDIT_CONNECTOR_ID,
+        'JSON body must be an object',
+      );
     }
 
     return parsed;

@@ -4,7 +4,6 @@ export type JourneyPage =
   | 'details'
   | 'consent'
   | 'bank'
-  | 'bank/auth'
   | 'bank/login'
   | 'bank/transfer'
   | 'accounts'
@@ -22,7 +21,7 @@ const STEP_PAGES: Record<string, readonly JourneyPage[]> = {
   applicant: ['details'],
   credit_consent: ['consent'],
   bank_selection: ['bank'],
-  bank_connection: ['bank/auth', 'bank/login', 'bank/transfer'],
+  bank_connection: ['bank/login', 'bank/transfer'],
   account_selection: ['accounts', 'bank/transfer'],
   bank_access_consent: ['bank/consent'],
   credit_check: ['bank/consent'],

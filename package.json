@@ -28,6 +28,7 @@
     "workflow:compile": "pnpm --filter @tsh/ddl-schema build && node scripts/compile-workflow.cjs",
     "openapi:generate": "pnpm --filter @tsh/ddl-schema build && pnpm --filter @tsh/engine openapi:generate",
     "demo:dev": "node scripts/demo-dev.cjs",
+    "demo:dev:tunnel": "node scripts/demo-dev.cjs --tunnel",
     "docs:dev": "pnpm --filter @tsh/ddl-schema build && pnpm --filter @tsh/docs start",
     "docs:build": "pnpm --filter @tsh/ddl-schema build && pnpm --filter @tsh/docs build",
     "stack:integration:up": "node scripts/compose.cjs stop engine-worker || true && node scripts/compose.cjs up -d --build --wait engine",

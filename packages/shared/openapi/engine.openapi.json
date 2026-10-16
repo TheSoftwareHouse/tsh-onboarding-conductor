@@ -3146,10 +3146,10 @@
         },
         "responses": {
           "204": {
-            "description": "The result was applied to the onboarding, had already been applied by an earlier delivery of the same callback, or named a park the onboarding has since left and was dropped."
+            "description": "The result was applied to the onboarding, had already been applied by an earlier delivery of the same callback, named a park the onboarding has since left and was dropped, or named a provider resource that resolves to no onboarding of this engine and was dropped."
           },
           "400": {
-            "description": "`ASYNC_CALLBACK_RAW_BODY_REQUIRED`: The callback arrived without a body the signature could be verified over.\n\n`ASYNC_CALLBACK_PROVIDER_KEY_INVALID`: The provider key is not made of lower-case letters, digits and underscores.\n\n`ASYNC_CALLBACK_AUTHENTICATION_FAILED`: No connector adapter that accepts callbacks is registered under this provider key.\n\n`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons (`UNKNOWN`, `REQUIRED`, `INVALID`, `CALLBACK_ONLY`, or a connector's own), and the onboarding stays where it was.",
+            "description": "`ASYNC_CALLBACK_RAW_BODY_REQUIRED`: The callback arrived without a body the signature could be verified over.\n\n`ASYNC_CALLBACK_PROVIDER_KEY_INVALID`: The provider key is not made of lower-case letters, digits and underscores.\n\n`ASYNC_CALLBACK_AUTHENTICATION_FAILED`: No connector adapter that accepts callbacks is registered under this provider key.\n\n`CALLBACK_PAYLOAD_INVALID`: The callback verified but the adapter could not read it as its provider's payload: not JSON, not an object, or missing the identifiers that correlate it to an onboarding. It can never apply, so it is not retried; the drop is in the audit trail.\n\n`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons (`UNKNOWN`, `REQUIRED`, `INVALID`, `CALLBACK_ONLY`, or a connector's own), and the onboarding stays where it was.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3166,6 +3166,7 @@
                             "ASYNC_CALLBACK_RAW_BODY_REQUIRED",
                             "ASYNC_CALLBACK_PROVIDER_KEY_INVALID",
                             "ASYNC_CALLBACK_AUTHENTICATION_FAILED",
+                            "CALLBACK_PAYLOAD_INVALID",
                             "INVALID_STEP_DATA"
                           ]
                         }
@@ -3315,7 +3316,7 @@
             }
           },
           "503": {
-            "description": "`ASYNC_CALLBACK_SIGNATURE_INVALID`: A configuration gap on the engine side: the adapter declares no `callbackAuth`, or its signing secret is not configured. Retry once the connector settings are fixed.\n\n`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\n`ALGOAN_UNAVAILABLE`: Algoan could not be reached, timed out, or answered with a server error or a body the adapter does not map to an outcome.",
+            "description": "`ASYNC_CALLBACK_SIGNATURE_INVALID`: A configuration gap on the engine side: the adapter declares no `callbackAuth`, or its signing secret is not configured. Retry once the connector settings are fixed.\n\n`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\n`ALGOAN_UNAVAILABLE`: Algoan could not be reached, timed out, or answered with a server error or a body the adapter does not map to an outcome.\n\n`CREDIT_PROVIDER_CREDENTIALS_REJECTED`: The credit provider refused the credentials stored for the connector (wrong client id or secret, or a product the account lacks). An operator fixes the connector settings; the onboarding stays where it was. Carries `connectorId`.\n\n`CREDIT_PROVIDER_REJECTED`: The credit provider refused to start the assessment for a reason that is neither the credentials nor the bank-data document. Carries `connectorId`, the provider's HTTP `providerStatus` and, when it sent one, its own `providerCode`; the onboarding stays where it was.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3331,7 +3332,9 @@
                           "enum": [
                             "ASYNC_CALLBACK_SIGNATURE_INVALID",
                             "CONNECTOR_NOT_CONFIGURED",
-                            "ALGOAN_UNAVAILABLE"
+                            "ALGOAN_UNAVAILABLE",
+                            "CREDIT_PROVIDER_CREDENTIALS_REJECTED",
+                            "CREDIT_PROVIDER_REJECTED"
                           ]
                         }
                       }
@@ -3797,7 +3800,7 @@
             }
           },
           "503": {
-            "description": "`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\n`ALGOAN_UNAVAILABLE`: Algoan could not be reached, timed out, or answered with a server error or a body the adapter does not map to an outcome.\n\n`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.",
+            "description": "`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\n`ALGOAN_UNAVAILABLE`: Algoan could not be reached, timed out, or answered with a server error or a body the adapter does not map to an outcome.\n\n`CREDIT_PROVIDER_CREDENTIALS_REJECTED`: The credit provider refused the credentials stored for the connector (wrong client id or secret, or a product the account lacks). An operator fixes the connector settings; the onboarding stays where it was. Carries `connectorId`.\n\n`CREDIT_PROVIDER_REJECTED`: The credit provider refused to start the assessment for a reason that is neither the credentials nor the bank-data document. Carries `connectorId`, the provider's HTTP `providerStatus` and, when it sent one, its own `providerCode`; the onboarding stays where it was.\n\n`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3813,6 +3816,8 @@
                           "enum": [
                             "CONNECTOR_NOT_CONFIGURED",
                             "ALGOAN_UNAVAILABLE",
+                            "CREDIT_PROVIDER_CREDENTIALS_REJECTED",
+                            "CREDIT_PROVIDER_REJECTED",
                             "AGREEMENT_NOT_PUBLISHED"
                           ]
                         }
@@ -5011,7 +5016,7 @@
             }
           },
           "409": {
-            "description": "`ONBOARDING_NOT_AWAITING_CONNECTOR`: The onboarding is not parked on a connector, so there is no provider attempt to read back.\n\n`PENDING_CONNECTOR_RECONCILE_UNSUPPORTED`: The parked connector cannot be reconciled: its adapter offers no read-back from the provider (`reason: adapter`), or the park records no provider attempt to read (`reason: reference_missing`). Wait for the callback, or review the onboarding by hand.\n\n`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
+            "description": "`ONBOARDING_NOT_AWAITING_CONNECTOR`: The onboarding is not parked on a connector, so there is no provider attempt to read back.\n\n`PENDING_CONNECTOR_RECONCILE_UNSUPPORTED`: The parked connector cannot be reconciled: its adapter offers no read-back from the provider (`reason: adapter`), the park records no provider attempt to read (`reason: reference_missing`), or it records one the adapter cannot read (`reason: reference_malformed`). Wait for the callback, or review the onboarding by hand.\n\n`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5100,7 +5105,7 @@
             }
           },
           "503": {
-            "description": "`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.\n\n`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\n`ALGOAN_UNAVAILABLE`: Algoan could not be reached, timed out, or answered with a server error or a body the adapter does not map to an outcome.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.\n\n`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\n`ALGOAN_UNAVAILABLE`: Algoan could not be reached, timed out, or answered with a server error or a body the adapter does not map to an outcome.\n\n`CREDIT_PROVIDER_CREDENTIALS_REJECTED`: The credit provider refused the credentials stored for the connector (wrong client id or secret, or a product the account lacks). An operator fixes the connector settings; the onboarding stays where it was. Carries `connectorId`.\n\n`CREDIT_PROVIDER_REJECTED`: The credit provider refused to start the assessment for a reason that is neither the credentials nor the bank-data document. Carries `connectorId`, the provider's HTTP `providerStatus` and, when it sent one, its own `providerCode`; the onboarding stays where it was.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
