@@ -9,13 +9,24 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ## Unreleased
 
+## 0.1.1 — 2026-10-16
+
 ### Added
 
-- Deployment environment name — Every deployment sets a required `ENVIRONMENT_NAME` slug and a
-  required `NODE_ENV`; the admin panel shows the name in its sidebar.
+- Deployment environment name — Every deployment names itself with a required `ENVIRONMENT_NAME`, a
+  lowercase slug such as `dev`, `staging`, `pre-prod` or `prod`; the admin panel shows it in its
+  sidebar. The name is a label only and changes no behaviour.
 
 ### Changed
 
+- `NODE_ENV` is required — It no longer defaults to `development` and must be `development`,
+  `production` or `test`; the engine refuses to start otherwise.
+- `.env` only — The engine no longer falls back to `.env.dist`; a start without a `.env` fails
+  validation instead of booting on the sample's values. Copy it with `cp .env.dist .env`.
+- Engine image — The Docker image no longer sets `NODE_ENV=production`; whatever runs it must pass
+  `NODE_ENV` and `ENVIRONMENT_NAME`.
+- Docker Compose — The engine and worker take `NODE_ENV` and `ENVIRONMENT_NAME` from `.env` and
+  refuse to start when either is missing, instead of hard-coding `NODE_ENV=development`.
 - Versioning — The version is bumped by hand with `pnpm version:bump`, which also regenerates the
   OpenAPI document and the API reference, instead of on every merge into `main`; every pull request
   adds its own line to this changelog.
