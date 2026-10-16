@@ -275,6 +275,7 @@ services:
       dockerfile: packages/engine/Dockerfile
     environment:
       NODE_ENV: test
+      ENVIRONMENT_NAME: test
       JEST_E2E_SPEC: '{smtp,otp-email}.e2e-spec.ts'
       DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
       REDIS_URL: redis://redis:6379/0
