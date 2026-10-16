@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../config/app.config';
+import { NodeEnv } from '../../config/environment.config';
 import { parseConnectorCallbackUnsignedTypes } from '../../config/connector-callback-unsigned-types.config';
 import { ConnectorSettingsService } from '../../connectors/connector-settings.service';
 import type {
@@ -49,8 +50,7 @@ export class CallbackSignatureVerifier {
       configService.get<string>('CONNECTOR_CALLBACK_UNSIGNED_TYPES', { infer: true }),
     );
     this.isProduction =
-      (configService.get<string>('NODE_ENV', { infer: true }) ?? '').trim().toLowerCase() ===
-      'production';
+      configService.getOrThrow('NODE_ENV', { infer: true }) === NodeEnv.PRODUCTION;
   }
 
   async verify(

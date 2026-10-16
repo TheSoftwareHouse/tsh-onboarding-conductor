@@ -19,6 +19,10 @@ Copy `.env` before anything else: `cp .env.dist .env`. `ConfigModule` reads `.en
 only — `.env.dist` is the sample, never a fallback — so a missing `.env` fails at
 bootstrap rather than defaulting.
 
+Every `.env` sets `ENVIRONMENT_NAME` (any slug: `dev`, `staging`, `pre-prod`, `prod`) and
+`NODE_ENV` (`development`, `production` or `test`); both are required. `NODE_ENV` decides the
+production-only rules; the name is only a label (ADR 0047).
+
 If host port 5432 or 6379 is taken, set `POSTGRES_PORT` / `REDIS_PORT` in `.env`. That
 remaps the host side only; inside the Compose network the engine still reaches
 `postgres:5432` and `redis:6379`, so those URLs do not change.

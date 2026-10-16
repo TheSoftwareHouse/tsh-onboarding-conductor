@@ -119,11 +119,14 @@ describe('Admin panel served by the engine (e2e)', () => {
     expect(response.text).toContain('"VITE_ENGINE_API_BASE_URL": "/"');
   });
 
-  it("reports the engine's own NODE_ENV", async () => {
+  it("reports the engine's own NODE_ENV and environment name", async () => {
     const response = await request(app!.getHttpServer()).get('/config.js').expect(200);
-    const nodeEnv = app!.get(ConfigService).get<string>('NODE_ENV');
+    const configService = app!.get(ConfigService);
 
-    expect(response.text).toContain(`"VITE_NODE_ENV": "${nodeEnv}"`);
+    expect(response.text).toContain(
+      `"VITE_ENVIRONMENT_NAME": "${configService.get<string>('ENVIRONMENT_NAME')}"`,
+    );
+    expect(response.text).toContain(`"VITE_NODE_ENV": "${configService.get<string>('NODE_ENV')}"`);
   });
 
   it('leaves non-GET requests to the API, which owns every write', async () => {

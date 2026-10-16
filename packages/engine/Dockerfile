@@ -44,7 +44,8 @@ RUN pnpm --filter @tsh/ddl-schema build \
   && pnpm --filter @tsh/admin-panel build
 
 FROM node:24-alpine AS runtime
-ENV NODE_ENV=production
+# No NODE_ENV or ENVIRONMENT_NAME default: whatever runs the image must name both, and a container
+# started without them refuses to boot rather than silently getting production's rules.
 RUN apk add --no-cache curl
 RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app

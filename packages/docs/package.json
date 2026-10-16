@@ -1,6 +1,6 @@
 {
   "name": "@tsh/docs",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Onboarding Conductor documentation site: guides, API reference and workflow fixtures",
   "scripts": {

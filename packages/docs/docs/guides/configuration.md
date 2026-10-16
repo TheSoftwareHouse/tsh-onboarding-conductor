@@ -24,7 +24,8 @@ Published ports follow one rule throughout: a `*_PORT` variable changes only wha
 
 | Area                       | Variables                                                                                                                                                                    | Notes                                                                                                                                                                                                                                                                             |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Engine                     | `MODE`, `PORT`, `ENGINE_PORT`, `NODE_ENV`, `ADMIN_PANEL_ORIGIN`                                                                                                              | `MODE` matters only for direct starts; Compose pins the engine to `api-only` and the worker to `worker-only`. `ADMIN_PANEL_ORIGIN` is the one origin the CORS check lets through, for the Vite dev server.                                                                        |
+| Environment                | `ENVIRONMENT_NAME`, `NODE_ENV`                                                                                                                                               | Which environment this deployment is, and whether it runs as `development`, `production` or `test`. Both are required. See [Environments](#environments).                                                                                                                         |
+| Engine                     | `MODE`, `PORT`, `ENGINE_PORT`, `ADMIN_PANEL_ORIGIN`                                                                                                                          | `MODE` matters only for direct starts; Compose pins the engine to `api-only` and the worker to `worker-only`. `ADMIN_PANEL_ORIGIN` is the one origin the CORS check lets through, for the Vite dev server.                                                                        |
 | Workflows and templates    | `WORKFLOWS_USERS_DIR`, `EMAIL_TEMPLATES_USERS_DIR`                                                                                                                           | Where your own workflows and email templates live. `built-in/` and `fixtures/` ship with the engine; fixtures are skipped when `NODE_ENV=production`.                                                                                                                             |
 | Data                       | `DATABASE_URL`, `POSTGRES_PORT`, `REDIS_URL`, `REDIS_PORT`                                                                                                                   | Postgres holds everything; Redis carries the client-webhook queue.                                                                                                                                                                                                                |
 | Documents                  | `STORAGE_DRIVER`, `STORAGE_S3_*`                                                                                                                                             | S3-compatible object storage for uploaded documents. Garage stands in locally and in CI; it publishes an S3 API on `STORAGE_S3_PORT` and no web console.                                                                                                                          |
@@ -36,6 +37,45 @@ Published ports follow one rule throughout: a `*_PORT` variable changes only wha
 | Admin sign-in, panel side  | `VITE_AUTH_ENABLED`, `VITE_SSO_PROVIDER`, `VITE_AZURE_CLIENT_ID`, `VITE_AZURE_TENANT_ID`, `VITE_AZURE_API_SCOPE`, `VITE_AZURE_REDIRECT_URI`, `VITE_ENGINE_API_BASE_URL`      | Public identifiers only; the panel uses a browser authorization-code flow with PKCE, so no secret belongs anywhere in it.                                                                                                                                                         |
 | Local inbox                | `MAILHOG_HTTP_PORT`                                                                                                                                                          | The MailHog UI. SMTP is never published to the host.                                                                                                                                                                                                                              |
 | Data encryption            | `ENCRYPTION_KEY`, `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS`, `ENCRYPTION_SWEEP_POLL_INTERVAL_MS`, `ENCRYPTION_SWEEP_BATCH_SIZE`, `ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS` | Turned on and off from the admin panel, not here. See [Encrypting data at rest](#encrypting-data-at-rest) for the key you must configure first.                                                                                                                                   |
+
+## Environments
+
+Every deployment declares the environment it is with two variables, and refuses to start without either:
+
+- `ENVIRONMENT_NAME` is the label operators see in the admin panel's sidebar. Use any lowercase slug — `dev`, `staging`, `pre-prod`, `prod`, `prod-eu`. It never changes behaviour.
+- `NODE_ENV` is `development`, `production` or `test`, and is what the engine acts on. `test` is for automated test runs; deployments use the other two.
+
+| Behaviour                                                    | `development`               | `production`                                                  |
+| ------------------------------------------------------------ | --------------------------- | ------------------------------------------------------------- |
+| Fixture workflows and fixture connectors                     | Loaded                      | Skipped                                                       |
+| `CLIENT_WEBHOOK_BASE_URL`                                    | HTTPS, or HTTP to localhost | HTTPS only                                                    |
+| Callbacks from a connector whose provider does not sign them | Accepted                    | Accepted only if `CONNECTOR_CALLBACK_UNSIGNED_TYPES` names it |
+| `ADMIN_AUTH_ENABLED=false`                                   | Allowed                     | Refused at start                                              |
+| Environment name in the admin panel                          | Grey                        | Red                                                           |
+
+`CONNECTOR_MOCKS` applies under neither: only a `NODE_ENV=test` run puts a mock in a real connector's place.
+
+A typical promotion path runs the environments you test against as `development` and the ones that hold real applicants' data as `production`:
+
+```bash
+# dev
+ENVIRONMENT_NAME=dev
+NODE_ENV=development
+
+# staging
+ENVIRONMENT_NAME=staging
+NODE_ENV=development
+
+# pre-prod
+ENVIRONMENT_NAME=pre-prod
+NODE_ENV=production
+
+# prod
+ENVIRONMENT_NAME=prod
+NODE_ENV=production
+```
+
+Each environment is its own deployment, with its own database, so connector credentials, workflow connector selections and onboardings never cross between them. Give pre-prod the providers' sandbox credentials and prod the live ones through each environment's own Connectors tab.
 
 ## Before you deploy
 

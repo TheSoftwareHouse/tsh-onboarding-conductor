@@ -1,11 +1,14 @@
 import 'reflect-metadata';
 import { AppConfig, validateConfig } from './app.config';
+import { NodeEnv } from './environment.config';
 
 describe('validateConfig', () => {
   const baseConfig = {
     DATABASE_URL: 'postgres://user:pass@localhost:5432/db',
     REDIS_URL: 'redis://localhost:6379',
     ADMIN_PANEL_ORIGIN: 'http://localhost:5173',
+    NODE_ENV: 'development',
+    ENVIRONMENT_NAME: 'dev',
     STORAGE_S3_ACCESS_KEY_ID: 'access-key',
     STORAGE_S3_SECRET_ACCESS_KEY: 'secret-key',
     // Off for the cases below, which are about other settings. The admin-auth rules have their
@@ -783,9 +786,8 @@ describe('validateConfig', () => {
 
     describe('the escape hatch outside local development', () => {
       it('refuses to start when the flag is off in production', () => {
-        // `.env.dist` ships the flag as false and sits on the engine's env search path, so a
-        // deployment started with no explicit environment would otherwise serve admin data with
-        // no credential demanded and only an audit row to show for it.
+        // `.env.dist` ships the flag as false, so a production `.env` copied from it would otherwise
+        // serve admin data with no credential demanded and only an audit row to show for it.
         expect(() =>
           validateConfig({ ...baseConfig, NODE_ENV: 'production', ADMIN_AUTH_ENABLED: 'false' }),
         ).toThrow(/ADMIN_AUTH_ENABLED=false is a local-only escape hatch/);
@@ -808,6 +810,40 @@ describe('validateConfig', () => {
 
         expect(config.ADMIN_AUTH_ENABLED).toBe(true);
       });
+    });
+  });
+  describe('environment', () => {
+    it.each(['dev', 'staging', 'pre-prod', 'prod'])('accepts %s as a name', (name) => {
+      expect(validateConfig({ ...baseConfig, ENVIRONMENT_NAME: name }).ENVIRONMENT_NAME).toBe(name);
+    });
+
+    it('trims the name', () => {
+      expect(
+        validateConfig({ ...baseConfig, ENVIRONMENT_NAME: '  staging ' }).ENVIRONMENT_NAME,
+      ).toBe('staging');
+    });
+
+    it.each([undefined, '', 'Pre Prod', '-prod', 'prod_eu'])('refuses %p as a name', (name) => {
+      expect(() => validateConfig({ ...baseConfig, ENVIRONMENT_NAME: name })).toThrow(
+        /ENVIRONMENT_NAME/,
+      );
+    });
+
+    it.each([undefined, '', 'staging', 'Production'])('refuses %p as NODE_ENV', (nodeEnv) => {
+      expect(() => validateConfig({ ...baseConfig, NODE_ENV: nodeEnv })).toThrow(/NODE_ENV/);
+    });
+
+    it('lets any name run in production', () => {
+      const config = validateConfig({
+        ...baseConfig,
+        ...azureConfig,
+        ADMIN_AUTH_ENABLED: 'true',
+        ENVIRONMENT_NAME: 'pre-prod',
+        NODE_ENV: NodeEnv.PRODUCTION,
+      });
+
+      expect(config.ENVIRONMENT_NAME).toBe('pre-prod');
+      expect(config.NODE_ENV).toBe(NodeEnv.PRODUCTION);
     });
   });
 });

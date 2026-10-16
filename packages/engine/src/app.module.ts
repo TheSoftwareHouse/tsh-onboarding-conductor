@@ -14,11 +14,9 @@ import { OnboardingsModule } from './onboardings/onboardings.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [
-        join(process.cwd(), '.env'),
-        join(process.cwd(), '../../.env'),
-        join(process.cwd(), '../../.env.dist'),
-      ],
+      // `.env` only: `.env.dist` is the sample, never a fallback, so a start without a `.env` fails
+      // validation instead of booting on the sample's values.
+      envFilePath: [join(process.cwd(), '.env'), join(process.cwd(), '../../.env')],
       validate: validateConfig,
     }),
     // EncryptionModule must initialise before any module that touches `OnboardingEntity`, so the
