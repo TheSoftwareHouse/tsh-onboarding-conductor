@@ -9,7 +9,7 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ## Unreleased
 
-## 0.2.0 — 2026-10-16
+## 0.1.2 — 2026-10-16
 
 ### Added
 

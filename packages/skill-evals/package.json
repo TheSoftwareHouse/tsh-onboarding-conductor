@@ -1,6 +1,6 @@
 {
   "name": "@tsh/skill-evals",
-  "version": "0.2.0",
+  "version": "0.1.2",
   "private": true,
   "description": "Golden-set evaluation of the skills under .claude/skills: each prompt runs through headless Claude Code and the result is graded by the repository's oracles and a Claude judge.",
   "scripts": {
