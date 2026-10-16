@@ -37,7 +37,7 @@ export type ConnectorSettingView = Readonly<{
 }>;
 
 export type ConnectorSettingsView = Readonly<{
-  /** The connector's own identifier, e.g. `twilio_verify`. */
+  /** The connector's own identifier, e.g. `twilio_sms_otp`. */
   id: string;
   /** The class it belongs to, e.g. `messaging` — the axis operators group connectors along. */
   type: ConnectorType;

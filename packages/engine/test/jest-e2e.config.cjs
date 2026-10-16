@@ -27,7 +27,11 @@ module.exports = {
       ? `<rootDir>/test/${process.env.JEST_E2E_SPEC}`
       : '<rootDir>/test/**/*.e2e-spec.ts',
   ],
-  testPathIgnorePatterns: process.env.JEST_E2E_SPEC ? [] : ['<rootDir>/test/smtp.e2e-spec.ts'],
+  // Both need MailHog's SMTP port, which only the Compose network reaches, so they run in the
+  // `pnpm test:mailhog:integration` flow rather than in the default run.
+  testPathIgnorePatterns: process.env.JEST_E2E_SPEC
+    ? []
+    : ['<rootDir>/test/smtp.e2e-spec.ts', '<rootDir>/test/otp-email.e2e-spec.ts'],
   transform: {
     '^.+\\.ts$': [
       'ts-jest',

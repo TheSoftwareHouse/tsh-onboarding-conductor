@@ -632,12 +632,15 @@ export class Workflow {
     const resolvedRejectionReason: ConnectorRejectionReason | null =
       trigger === 'rejected' ? (rejectionReason ?? 'CONNECTOR_REJECTED') : null;
 
+    const status = this.targetStatus(target);
     const nextState: WorkflowNextState = {
       context,
-      status: this.targetStatus(target),
+      status,
       currentStep: terminal ? null : target.name,
       completedAt: terminal ? new Date() : null,
-      rejectionReason: resolvedRejectionReason,
+      // A rejection routed back to the user (an expired code to its resend step) carries no reason;
+      // every other target — terminal, manual review — keeps it.
+      rejectionReason: status === 'awaiting_user' ? null : resolvedRejectionReason,
       scores: { ...scores },
       pendingConnector: null,
     };

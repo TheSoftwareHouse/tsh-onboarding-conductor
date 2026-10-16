@@ -243,7 +243,7 @@ describe('ConnectorsPage', () => {
   it('lists the type nav in declared capability order, not the order the engine reported connectors', async () => {
     await renderReady([
       createConnector({ id: 'acme_custom', type: 'custom', name: 'Acme Custom' }),
-      createConnector({ id: 'twilio_verify', type: 'phone_verification', name: 'Twilio Verify' }),
+      createConnector({ id: 'otp', type: 'otp_verification', name: 'OTP' }),
       createConnector(),
       createConnector({ id: 'sendgrid_email', name: 'SendGrid' }),
     ]);
@@ -253,22 +253,18 @@ describe('ConnectorsPage', () => {
       .getAllByRole('link')
       .map((link) => link.textContent);
 
-    expect(links).toEqual(['Phone verification 1', 'Email delivery 2', 'Custom 1']);
+    expect(links).toEqual(['OTP verification 1', 'Email delivery 2', 'Custom 1']);
   });
 
   it('selects the first populated type by default, and renders only that type', async () => {
     await renderReady([
       createConnector({ id: 'acme_custom', type: 'custom', name: 'Acme Custom' }),
-      createConnector({ id: 'twilio_verify', type: 'phone_verification', name: 'Twilio Verify' }),
+      createConnector({ id: 'otp', type: 'otp_verification', name: 'OTP' }),
     ]);
 
-    // `phone_verification` sorts before `custom` in `CONNECTOR_TYPES`, so it is the default.
-    expect(
-      screen.getByRole('heading', { level: 2, name: 'Phone verification' }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('form', { name: 'Twilio Verify connector settings' }),
-    ).toBeInTheDocument();
+    // `otp_verification` sorts before `custom` in `CONNECTOR_TYPES`, so it is the default.
+    expect(screen.getByRole('heading', { level: 2, name: 'OTP verification' })).toBeInTheDocument();
+    expect(screen.getByRole('form', { name: 'OTP connector settings' })).toBeInTheDocument();
     expect(
       screen.queryByRole('form', { name: 'Acme Custom connector settings' }),
     ).not.toBeInTheDocument();
@@ -278,20 +274,18 @@ describe('ConnectorsPage', () => {
     await renderReady(
       [
         createConnector({ id: 'acme_custom', type: 'custom', name: 'Acme Custom' }),
-        createConnector({ id: 'twilio_verify', type: 'phone_verification', name: 'Twilio Verify' }),
+        createConnector({ id: 'otp', type: 'otp_verification', name: 'OTP' }),
       ],
       '/connectors?type=does-not-exist',
     );
 
-    expect(
-      screen.getByRole('heading', { level: 2, name: 'Phone verification' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'OTP verification' })).toBeInTheDocument();
   });
 
   it('commits `?type=` when a nav item is clicked, swapping the visible group', async () => {
     await renderReady([
       createConnector({ id: 'acme_custom', type: 'custom', name: 'Acme Custom' }),
-      createConnector({ id: 'twilio_verify', type: 'phone_verification', name: 'Twilio Verify' }),
+      createConnector({ id: 'otp', type: 'otp_verification', name: 'OTP' }),
     ]);
 
     const customLink = screen.getByRole('link', { name: 'Custom 1' });
@@ -305,9 +299,7 @@ describe('ConnectorsPage', () => {
     expect(
       screen.getByRole('form', { name: 'Acme Custom connector settings' }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('form', { name: 'Twilio Verify connector settings' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('form', { name: 'OTP connector settings' })).not.toBeInTheDocument();
   });
 
   it('keeps two connectors of the same capability separately addressable', async () => {

@@ -23,13 +23,13 @@ import {
   type ConnectorErrorHandler,
 } from './ports/connector-error-handler.port';
 import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
-import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
+import { SmtpEmailOtpConnector } from './adapters/built-in/smtp-email-otp.connector';
+import { TwilioSmsOtpConnector } from './adapters/built-in/twilio-sms-otp.connector';
+import { BaseOtpConnector } from './adapters/built-in/otp/base-otp.connector';
+import { OtpChallengeEntity } from './entity/otp-challenge.entity';
 import { RetryThenFallbackHandler } from './error-handlers/built-in/retry-then-fallback.handler';
 import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
-import {
-  MockEmailVerificationConnector,
-  MockPhoneVerificationConnector,
-} from './adapters/fixtures/mock-verification.connector';
+import { MockOtpConnector } from './adapters/fixtures/mock-otp.connector';
 import {
   WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
@@ -91,6 +91,8 @@ const compileConnectorsModule = (configModule: DynamicModule | Promise<DynamicMo
     .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
     .overrideProvider(getRepositoryToken(OnboardingEntity))
     .useValue({ findOne: jest.fn() })
+    .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+    .useValue({})
     .overrideProvider(getRepositoryToken(WorkflowEntity))
     .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
     .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -139,6 +141,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(OnboardingEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+      .useValue({})
       .overrideProvider(getRepositoryToken(WorkflowEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -183,6 +187,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(OnboardingEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+      .useValue({})
       .overrideProvider(getRepositoryToken(WorkflowEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -204,7 +210,7 @@ describe('ConnectorsModule', () => {
     expect(adapters[0]).toMatchObject({ type: 'custom', supportsAsyncCallback: true });
   });
 
-  it('registers the Twilio Verify adapter exactly once and without async-callback support', async () => {
+  it('registers one otp_verification connector per provider, each extending BaseOtpConnector', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
     })
@@ -214,6 +220,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(OnboardingEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+      .useValue({})
       .overrideProvider(getRepositoryToken(WorkflowEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -229,19 +237,19 @@ describe('ConnectorsModule', () => {
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
       readonly ConnectorAdapter[] | undefined;
 
-    const twilioAdapters =
-      adapterCollection?.filter((adapter) => adapter.id === 'twilio_verify') ?? [];
+    const otpAdapters =
+      adapterCollection?.filter((adapter) => adapter instanceof BaseOtpConnector) ?? [];
 
-    expect(twilioAdapters).toHaveLength(1);
-    expect(twilioAdapters[0]).toMatchObject({
-      name: 'twilio_verify',
-      id: 'twilio_verify',
-      type: 'phone_verification',
-    });
-    expect(twilioAdapters[0].supportsAsyncCallback).toBeUndefined();
-
-    const twilioConnector = moduleRef.get(TwilioVerifyConnector);
-    expect(twilioConnector).toBeInstanceOf(TwilioVerifyConnector);
+    expect(otpAdapters.map((adapter) => adapter.id).sort()).toEqual([
+      'smtp_email_otp',
+      'twilio_sms_otp',
+    ]);
+    for (const adapter of otpAdapters) {
+      expect(adapter.type).toBe('otp_verification');
+      expect(adapter).not.toHaveProperty('supportsAsyncCallback');
+    }
+    expect(moduleRef.get(TwilioSmsOtpConnector).channel).toBe('sms');
+    expect(moduleRef.get(SmtpEmailOtpConnector).channel).toBe('email');
   });
 
   it('registers the generic http_request adapter with declaration validation', async () => {
@@ -254,6 +262,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(OnboardingEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+      .useValue({})
       .overrideProvider(getRepositoryToken(WorkflowEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -290,6 +300,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(OnboardingEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+      .useValue({})
       .overrideProvider(getRepositoryToken(WorkflowEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -330,6 +342,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(OnboardingEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+      .useValue({})
       .overrideProvider(getRepositoryToken(WorkflowEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -370,6 +384,8 @@ describe('ConnectorsModule', () => {
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(OnboardingEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+      .useValue({})
       .overrideProvider(getRepositoryToken(WorkflowEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -398,6 +414,8 @@ describe('ConnectorsModule', () => {
         .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
         .overrideProvider(getRepositoryToken(OnboardingEntity))
         .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+        .useValue({})
         .overrideProvider(getRepositoryToken(WorkflowEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
         .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -423,6 +441,8 @@ describe('ConnectorsModule', () => {
         .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
         .overrideProvider(getRepositoryToken(OnboardingEntity))
         .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+        .useValue({})
         .overrideProvider(getRepositoryToken(WorkflowEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
         .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -455,6 +475,8 @@ describe('ConnectorsModule', () => {
         .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
         .overrideProvider(getRepositoryToken(OnboardingEntity))
         .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+        .useValue({})
         .overrideProvider(getRepositoryToken(WorkflowEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
         .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -506,6 +528,8 @@ describe('ConnectorsModule', () => {
         .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
         .overrideProvider(getRepositoryToken(OnboardingEntity))
         .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(OtpChallengeEntity))
+        .useValue({})
         .overrideProvider(getRepositoryToken(WorkflowEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
         .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
@@ -530,13 +554,12 @@ describe('ConnectorsModule', () => {
     }) as readonly ConnectorAdapter[];
     const byId = (id: string) => adapterCollection.find((adapter) => adapter.id === id);
 
-    expect(byId('mock_phone_verification')).toBeInstanceOf(MockPhoneVerificationConnector);
-    expect(byId('mock_email_verification')).toBeInstanceOf(MockEmailVerificationConnector);
+    expect(byId('mock_otp')).toBeInstanceOf(MockOtpConnector);
     expect(byId('mock_email_delivery')).toBeInstanceOf(MockEmailDeliveryConnector);
 
     // Each can be driven asynchronously, which is how the callback path stays covered while
     // every built-in connector is still synchronous.
-    expect(byId('mock_phone_verification')?.supportsAsyncCallback).toBe(true);
+    expect(byId('mock_otp')?.supportsAsyncCallback).toBe(true);
     expect(byId('mock_email_delivery')?.callbackAuth).toMatchObject({ kind: 'none' });
   });
 
@@ -576,12 +599,13 @@ describe('ConnectorsModule', () => {
 
     expect(scopes).toBeDefined();
     expect(scopes?.get('sendgrid_email')).toBe('built-in');
-    expect(scopes?.get('twilio_verify')).toBe('built-in');
+    expect(scopes?.get('twilio_sms_otp')).toBe('built-in');
+    expect(scopes?.get('smtp_email_otp')).toBe('built-in');
     expect(scopes?.get('smtp')).toBe('built-in');
     expect(scopes?.get('http_request')).toBe('built-in');
     expect(scopes?.get('veriff_kyc')).toBe('built-in');
     expect(scopes?.get('mock_email_delivery')).toBe('fixtures');
-    expect(scopes?.get('mock_phone_verification')).toBe('fixtures');
+    expect(scopes?.get('mock_otp')).toBe('fixtures');
   });
 
   it('substitutes nothing while CONNECTOR_MOCKS is empty', async () => {
@@ -592,8 +616,8 @@ describe('ConnectorsModule', () => {
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
       strict: false,
     }) as readonly ConnectorAdapter[];
-    expect(adapterCollection.find((adapter) => adapter.id === 'twilio_verify')).toBeInstanceOf(
-      TwilioVerifyConnector,
+    expect(adapterCollection.find((adapter) => adapter.id === 'twilio_sms_otp')).toBeInstanceOf(
+      TwilioSmsOtpConnector,
     );
     expect(adapterCollection.find((adapter) => adapter.id === 'sendgrid_email')).toBeInstanceOf(
       SendgridEmailConnector,
@@ -603,13 +627,15 @@ describe('ConnectorsModule', () => {
   it('resolves each configured connector-to-mock pair', async () => {
     const moduleRef = await compileConnectorsModule(
       createTestConfigModule({
-        CONNECTOR_MOCKS: 'twilio_verify:mock_phone_verification,sendgrid_email:mock_email_delivery',
+        CONNECTOR_MOCKS:
+          'twilio_sms_otp:mock_otp,smtp_email_otp:mock_otp,sendgrid_email:mock_email_delivery',
       }),
     );
 
     expect(moduleRef.get(CONNECTOR_MOCK_SUBSTITUTIONS, { strict: false })).toEqual(
       new Map([
-        ['twilio_verify', 'mock_phone_verification'],
+        ['twilio_sms_otp', 'mock_otp'],
+        ['smtp_email_otp', 'mock_otp'],
         ['sendgrid_email', 'mock_email_delivery'],
       ]),
     );
@@ -619,7 +645,7 @@ describe('ConnectorsModule', () => {
     const moduleRef = await compileConnectorsModule(
       createTestConfigModule({
         NODE_ENV: 'development',
-        CONNECTOR_MOCKS: 'twilio_verify:mock_phone_verification',
+        CONNECTOR_MOCKS: 'twilio_sms_otp:mock_otp',
       }),
     );
 
@@ -627,21 +653,21 @@ describe('ConnectorsModule', () => {
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
       strict: false,
     }) as readonly ConnectorAdapter[];
-    expect(adapterCollection.find((adapter) => adapter.id === 'twilio_verify')).toBeInstanceOf(
-      TwilioVerifyConnector,
+    expect(adapterCollection.find((adapter) => adapter.id === 'twilio_sms_otp')).toBeInstanceOf(
+      TwilioSmsOtpConnector,
     );
   });
 
   it('fails a test run when a configured pair names an unregistered mock or connector', async () => {
     await expect(
       compileConnectorsModule(
-        createTestConfigModule({ CONNECTOR_MOCKS: 'twilio_verify:mock_nonexistent' }),
+        createTestConfigModule({ CONNECTOR_MOCKS: 'twilio_sms_otp:mock_nonexistent' }),
       ),
     ).rejects.toThrow('no adapter is registered as id=mock_nonexistent');
 
     await expect(
       compileConnectorsModule(
-        createTestConfigModule({ CONNECTOR_MOCKS: 'vonage_verify:mock_phone_verification' }),
+        createTestConfigModule({ CONNECTOR_MOCKS: 'vonage_verify:mock_otp' }),
       ),
     ).rejects.toThrow('asks for id=vonage_verify to be mocked, but no adapter serves it');
   });

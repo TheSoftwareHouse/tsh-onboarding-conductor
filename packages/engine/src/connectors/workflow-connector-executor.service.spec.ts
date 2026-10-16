@@ -2,6 +2,7 @@ import * as timersPromises from 'node:timers/promises';
 import {
   DEFAULT_CONNECTOR_RETRY,
   type NormalizedWorkflowConnectorDeclaration,
+  type OtpChannelName,
 } from '@tsh/ddl-schema';
 import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import type { DataSource } from 'typeorm';
@@ -14,6 +15,19 @@ import { ConnectorAdapterNotRegisteredError } from './errors/connector-adapter-n
 import { ConnectorErrorHandlerNotRegisteredError } from './errors/connector-error-handler-not-registered.error';
 import { ConnectorPayloadFieldNotFoundError } from './errors/connector-payload-field-not-found.error';
 import { ConnectorTypeMismatchError } from './errors/connector-type-mismatch.error';
+import { OtpDeclarationInvalidError } from './errors/otp-declaration-invalid.error';
+import { OtpDeliveryFailedException } from './errors/otp-delivery-failed.exception';
+import {
+  BaseOtpConnector,
+  OTP_DELIVERY_OUTCOMES,
+  type OtpDeliveryOutcome,
+} from './adapters/built-in/otp/base-otp.connector';
+import type { OtpChallengesConnection } from './otp-challenges.connection';
+import type {
+  OtpChallengeRow,
+  OtpChallengesRepository,
+  SaveOtpChallengeInput,
+} from './otp-challenges.repository';
 import type { ConnectorAdapter, ConnectorAdapterCollection } from './ports/connector-adapter.port';
 import {
   ConnectorFailureAction,
@@ -116,6 +130,59 @@ const createService = (
     options.auditService ?? createAuditServiceMock(),
     {} as DataSource,
   );
+
+/** One stored challenge per onboarding and channel, as the `otp_challenges` unique key keeps it. */
+const createInMemoryOtpChallenges = () => {
+  const rows = new Map<string, OtpChallengeRow>();
+  const key = (onboardingId: string, channel: string) => `${onboardingId}:${channel}`;
+
+  return {
+    find: jest.fn(
+      async (_manager: unknown, onboardingId: string, channel: string) =>
+        rows.get(key(onboardingId, channel)) ?? null,
+    ),
+    save: jest.fn(async (_manager: unknown, input: SaveOtpChallengeInput) => {
+      const existing = rows.get(key(input.onboardingId, input.channel));
+      const row = {
+        id: `challenge-${input.onboardingId}-${input.channel}`,
+        ...input,
+        attempts: 0,
+        sendCount: (existing?.sendCount ?? 0) + 1,
+      } as OtpChallengeRow;
+      rows.set(key(input.onboardingId, input.channel), row);
+      return row;
+    }),
+    incrementAttempts: jest.fn(),
+    remove: jest.fn(async (_manager: unknown, id: string) => {
+      for (const [rowKey, row] of rows) {
+        if (row.id === id) {
+          rows.delete(rowKey);
+        }
+      }
+    }),
+  };
+};
+
+/** A provider whose delivery the spec controls and observes. */
+class MockDeliveryOtpConnector extends BaseOtpConnector {
+  readonly name: string;
+  readonly delivered = jest
+    .fn<Promise<OtpDeliveryOutcome>, [string, string]>()
+    .mockResolvedValue(OTP_DELIVERY_OUTCOMES.delivered);
+
+  constructor(
+    challenges: OtpChallengesRepository,
+    readonly id: string,
+    readonly channel: OtpChannelName,
+  ) {
+    super({ getManager: async () => ({}) } as unknown as OtpChallengesConnection, challenges);
+    this.name = id;
+  }
+
+  protected deliver(recipient: string, code: string): Promise<OtpDeliveryOutcome> {
+    return this.delivered(recipient, code);
+  }
+}
 
 describe('WorkflowConnectorExecutorService', () => {
   it('forwards declaration config content, mapped payload, copied context, and execution identity', async () => {
@@ -1122,6 +1189,85 @@ describe('WorkflowConnectorExecutorService', () => {
       expect(propagated.action).toBe('connector.failure_propagated');
       expect(propagated.metadata.override).toBe('retry_delay_budget_exhausted');
       expect(propagated.metadata.connectorId).toBe('smtp');
+    });
+  });
+
+  describe('OTP providers in a fallback chain', () => {
+    const otpDeclaration = (
+      operation: 'send' | 'check',
+      id: string,
+      fallbackId: string,
+    ): NormalizedWorkflowConnectorDeclaration => {
+      const fieldMapping =
+        operation === 'send'
+          ? { recipient: 'phoneNumber' }
+          : { recipient: 'phoneNumber', code: 'verificationCode' };
+      const config = { operation, channel: 'sms' };
+
+      return declaration({
+        name: id,
+        id,
+        type: 'otp_verification',
+        order: 1,
+        fieldMapping,
+        config,
+        fallbacks: [
+          declaration({
+            name: fallbackId,
+            id: fallbackId,
+            type: 'otp_verification',
+            order: 1,
+            fieldMapping,
+            config,
+          }),
+        ],
+      });
+    };
+
+    it('sends through the fallback when the primary cannot deliver, and the primary checks that code', async () => {
+      const challenges = createInMemoryOtpChallenges();
+      const repository = challenges as unknown as OtpChallengesRepository;
+      const primary = new MockDeliveryOtpConnector(repository, 'mock_primary_sms_otp', 'sms');
+      const fallback = new MockDeliveryOtpConnector(repository, 'mock_fallback_sms_otp', 'sms');
+      primary.delivered.mockRejectedValue(new OtpDeliveryFailedException());
+      const service = createService([primary, fallback]);
+      const execution = { onboardingId: 'onboarding-123', stepName: 'request_code' };
+      const context = { phoneNumber: '+15551234567' };
+
+      const sent = await service.execute(
+        [otpDeclaration('send', primary.id, fallback.id)],
+        context,
+        execution,
+      );
+
+      expect(sent.isAccepted()).toBe(true);
+      expect(primary.delivered).toHaveBeenCalledTimes(1);
+      expect(fallback.delivered).toHaveBeenCalledTimes(1);
+      expect(challenges.save).toHaveBeenCalledTimes(1);
+
+      const code = fallback.delivered.mock.calls[0][1];
+      const checked = await service.execute(
+        [otpDeclaration('check', primary.id, fallback.id)],
+        { ...context, verificationCode: code },
+        { ...execution, stepName: 'verify_code' },
+      );
+
+      expect(checked.isAccepted()).toBe(true);
+      expect(challenges.remove).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses at startup a fallback provider of another channel', () => {
+      const repository = createInMemoryOtpChallenges() as unknown as OtpChallengesRepository;
+      const service = createService([
+        new MockDeliveryOtpConnector(repository, 'mock_primary_sms_otp', 'sms'),
+        new MockDeliveryOtpConnector(repository, 'mock_email_otp', 'email'),
+      ]);
+
+      expect(() =>
+        service.validateDeclarations([
+          otpDeclaration('send', 'mock_primary_sms_otp', 'mock_email_otp'),
+        ]),
+      ).toThrow(OtpDeclarationInvalidError);
     });
   });
 

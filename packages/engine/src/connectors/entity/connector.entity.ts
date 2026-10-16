@@ -2,7 +2,7 @@ import type { ConnectorType } from '@tsh/ddl-schema';
 import { Column, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
 /**
- * One connector, keyed by the `id` its adapter declares — `twilio_verify`, `smtp` — which is
+ * One connector, keyed by the `id` its adapter declares — `twilio_sms_otp`, `smtp` — which is
  * also the value a workflow step's connector declaration names. `type` classifies it along the
  * same axis a workflow's `type` uses, so an operator can ask for every `messaging` connector
  * without knowing which providers implement it.

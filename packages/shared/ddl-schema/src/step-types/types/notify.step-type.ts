@@ -24,8 +24,8 @@ import type {
 
 /**
  * The payload key every delivery adapter in this repository reads the destination from —
- * `sendgrid_email`, `smtp` and `twilio_verify` all agree on it, which is what makes one step type
- * serve all three.
+ * `sendgrid_email` and `smtp` agree on it, which is what makes one step type
+ * serve both.
  */
 const RECIPIENT_PAYLOAD_KEY = 'recipient';
 

@@ -159,18 +159,21 @@ jobs:
       - name: E2E tests
         run: pnpm test:e2e:ci
 
-      # The Compose stack this step starts includes `postgres`, because
-      # `engine-mailhog-test` resolves the SMTP connector's settings through the real
-      # `connectors` table. Compose publishes that container on
-      # `${POSTGRES_PORT:-5432}`, and `.env` (copied from `.env.dist` above) leaves it at
-      # 5432 — already bound by the `postgres` service container declared for this job, so
-      # Docker fails the run with "port is already allocated". Remap the host side to a free
-      # port; nothing here connects over it, the runner talks to `postgres:5432` inside the
-      # Compose network. Any further host-published service added to `engine-mailhog-test`'s
-      # dependencies (Redis on 6379, Garage on 3900) needs the same treatment.
+      # The Compose stack this step starts includes `postgres`, `redis` and `garage`, because
+      # `engine-mailhog-test` resolves connector settings through the real `connectors` table
+      # and its OTP spec boots the whole application. Compose publishes those containers on
+      # `${POSTGRES_PORT:-5432}`, `${REDIS_PORT:-6379}` and `${STORAGE_S3_PORT:-3900}`, and
+      # `.env` (copied from `.env.dist` above) leaves them at the defaults — already bound by
+      # this job's `postgres` and `redis` service containers and the "Start Garage" container,
+      # so Docker fails the run with "port is already allocated". Remap the host side to free
+      # ports; nothing here connects over them, the test talks to `postgres:5432`,
+      # `redis:6379` and `garage:3900` inside the Compose network. Any further host-published
+      # service added to `engine-mailhog-test`'s dependencies needs the same treatment.
       - name: MailHog SMTP integration test
         env:
           POSTGRES_PORT: 55432
+          REDIS_PORT: 56379
+          STORAGE_S3_PORT: 53900
         run: pnpm test:mailhog:integration
 
       - name: Stop Garage

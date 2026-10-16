@@ -60,7 +60,7 @@ describe('isApiRequest', () => {
       '/v1/health/live',
       '/v1/onboardings',
       '/v1/admin/audit?page=2',
-      '/v1/webhooks/twilio_verify',
+      '/v1/webhooks/otp',
     ]) {
       expect(isApiRequest({ originalUrl: url, url })).toBe(true);
     }

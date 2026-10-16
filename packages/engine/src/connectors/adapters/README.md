@@ -26,19 +26,25 @@ workflow's connector `name` is a free label the audit trail also records, so a d
 pointing at a fixture must not label it after a real provider.
 
 Built-in adapters talk to real providers and are named after the protocol or
-vendor they speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `sumsub_kyc`,
-`veriff_kyc`, `http_request`),
+vendor they speak to (`smtp`, `sendgrid_email`, `twilio_sms_otp`, `sumsub_kyc`, `veriff_kyc`,
+`http_request`),
 never after a particular development server.
 
-Every built-in but `http_request` declares a `settingsSchema` and reads its credentials through
+One-time-code providers (`twilio_sms_otp`, `smtp_email_otp`) extend
+[`built-in/otp/base-otp.connector.ts`](built-in/otp/base-otp.connector.ts), which owns the code,
+its hash and its limits; a subclass only delivers. A new provider is one subclass — see
+`docs/EXTENDING.md`, "Add an OTP provider".
+
+Most of them declare a `settingsSchema` and read their credentials through
 `ConnectorSettingsService`, so an operator can supply and rotate them at
 runtime over `/v1/admin/connectors` instead of through environment variables —
 the database is the only source, there is no environment fallback, and an
 unresolvable required credential surfaces as `503 CONNECTOR_NOT_CONFIGURED` at
-execution time. `http_request` is the exception and declares no `settingsSchema`:
+execution time. `http_request` declares no `settingsSchema`:
 its secret aliases are named by workflow JSON rather than by the adapter, so they
 stay deployment configuration in `HTTP_CONNECTOR_SECRETS` and it never appears on
-`/v1/admin/connectors`. Confidentiality at rest is the deployment database's
+`/v1/admin/connectors`. Neither does `smtp_email_otp`, which sends through `smtp` and so has
+no credentials of its own. Confidentiality at rest is the deployment database's
 responsibility, not the engine's: the `settings` column is plaintext JSON. See
 `docs/IMPLEMENTATION.md` §4 ("Operator-provided settings") for the resolution
 order and the admin routes.
@@ -50,7 +56,7 @@ paid or side-effecting third party. Configuration says which fixture takes its p
 
 ```bash
 # .env — shipped as the default in .env.dist
-CONNECTOR_MOCKS=twilio_verify:mock_phone_verification,sendgrid_email:mock_email_delivery
+CONNECTOR_MOCKS=twilio_sms_otp:mock_otp,smtp_email_otp:mock_otp,sendgrid_email:mock_email_delivery
 ```
 
 Each entry is `<connector id>:<mock connector id>`. The executor sends declarations
@@ -60,21 +66,20 @@ mappings and callback routes stay exactly as they are.
 The mocks are named after what they do, not after a vendor, so one serves every provider
 of the same kind:
 
-| Mock connector id         | Does                                   | Used for                     |
-| ------------------------- | -------------------------------------- | ---------------------------- |
-| `mock_phone_verification` | issues a code, then checks it          | `twilio_verify`, SMS vendors |
-| `mock_email_verification` | the same over email                    | email-OTP providers          |
-| `mock_email_delivery`     | takes a templated message and keeps it | `sendgrid_email`, mail APIs  |
+| Mock connector id     | Does                                                                       | Used for                    |
+| --------------------- | -------------------------------------------------------------------------- | --------------------------- |
+| `mock_otp`            | issues a code, then checks it, per onboarding and channel (`sms`, `email`) | every OTP provider          |
+| `mock_email_delivery` | takes a templated message and keeps it                                     | `sendgrid_email`, mail APIs |
 
 They are ordinary fixtures — same `ConnectorAdapter` port, own connector ids,
 registered like every other fixture — so a fixture workflow can also name one directly.
 `smtp` and `http_request` need nothing here: the first runs against the MailHog
 container, the second against a server the test starts itself.
 
-To serve a provider that words its declarations differently, add the spelling to the
-mock's alias list (`CHALLENGE_OPERATIONS` / `VERIFY_OPERATIONS`, or
-`TEMPLATE_DATA_PREFIXES`). Both mocks already read the wording of the connectors above
-alongside their own.
+`mock_otp` reads only the `send` and `check` operations the `otp-verify` step derives onto its
+declarations, so it needs no spelling list of its own. `mock_email_delivery` reads the
+payload prefixes in `TEMPLATE_DATA_PREFIXES`; to serve a provider that words its payload
+differently, add the spelling there.
 
 What the fixtures share — issued codes and their limits, and the correlation a parked
 step needs — lives in [`fixtures/support/`](fixtures/support/), which holds no adapters
@@ -92,7 +97,7 @@ callbacks simply leaves the async half unused.
 Tests speak for the provider through the mock:
 
 ```ts
-const mock = app.get(MockPhoneVerificationConnector);
+const mock = app.get(MockOtpConnector);
 const code = mock.__peekCodeForTests(onboardingId); // what the provider "sent"
 mock.__setNowForTests(() => later); // force CHALLENGE_EXPIRED
 

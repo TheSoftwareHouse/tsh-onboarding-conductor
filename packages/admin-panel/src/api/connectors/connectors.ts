@@ -62,7 +62,7 @@ export interface ConnectorSetting {
 }
 
 export interface Connector {
-  /** The connector's own identifier, e.g. `twilio_verify`. */
+  /** The connector's own identifier, e.g. `twilio_sms_otp`. */
   id: string;
   /**
    * What it does, e.g. `email_delivery` — the axis the page groups by. Left as a plain string

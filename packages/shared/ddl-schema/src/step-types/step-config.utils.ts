@@ -209,8 +209,8 @@ export type StepConnectorBinding = {
 
 /**
  * What a step type's connector slot accepts. `types` is the binding between a step and the
- * connectors that can fill it: an OTP challenge is served by a `phone_verification` or an
- * `email_verification` adapter and by nothing else, and declaring one of another capability is an
+ * connectors that can fill it: an OTP challenge is served by an `otp_verification`
+ * adapter and by nothing else, and declaring one of another capability is an
  * authoring error the schema refuses — a builder reads the same list to offer only matching
  * connectors. The engine closes the loop at startup by refusing a declared type that disagrees with
  * the adapter registered under the `id`.

@@ -22,6 +22,7 @@ This document assumes you have the local stack running; see the [README](../READ
 - [Integrate a provider without writing code](#integrate-a-provider-without-writing-code)
 - [Add a connector adapter](#add-a-connector-adapter)
   - [Add a KYC provider](#add-a-kyc-provider)
+- [Add an OTP provider](#add-an-otp-provider)
 - [Add a connector error handler](#add-a-connector-error-handler)
 - [Add a field type or text format](#add-a-field-type-or-text-format)
 - [Add an email template](#add-an-email-template)
@@ -88,7 +89,8 @@ A file is a list of typed steps — see the next section for the vocabulary — 
 quickest start is to copy the closest workflow from [workflows/fixtures/](../workflows/fixtures/),
 which holds the flows the e2e suites run against, each written as `custom` steps, one hand-written
 compiled step each (a new fixture is written in specialized step types): `base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`,
-`twilio-verify`, `sendgrid-email` and `scoring` — `scoring` is the one to copy for named scores and
+`otp-sms`, `otp-email-typed`, `sendgrid-email` and `scoring` — `otp-sms` is the one to copy for a code
+sent to a phone, `otp-email-typed` for a code sent by email, and `scoring` for named scores and
 score-conditioned transitions. The production reference
 flow is [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), shipped built-in in both forms —
 revision 1 as `custom` steps, revision 2 (`-v2`) through the specialized types: EU B2C individual
@@ -162,7 +164,7 @@ revision without a `name` leaves the label alone. `GET /v1/admin/workflows/:work
 as `name`, null when no version declares one.
 Each step names the data it collects, the connectors it calls in order, and a transition per
 outcome. A connector declaration names the adapter by `id` and repeats what that adapter does as
-`type`, one of `kyc`, `kyb`, `aml`, `credit`, `phone_verification`, `email_verification`,
+`type`, one of `kyc`, `kyb`, `aml`, `credit`, `otp_verification`,
 `email_delivery`, `sms_delivery`, `bank_verification`, `payment`, `e_signature`,
 `document_storage` and `custom`; declaring a `type` that
 disagrees with the adapter fails at startup. The
@@ -415,8 +417,9 @@ connector declaration from those, which is why its config is five keys rather th
 corollary is that it fails at load if nothing in the document collects an attribute it needs —
 that is the check working, not a bug.
 
-**A step that calls a connector says which kind it can drive.** `otp-verify` takes a
-`phone_verification` or `email_verification` connector and assumes the one its `channel` implies;
+**A step that calls a connector says which kind it can drive.** `otp-verify` takes an
+`otp_verification` connector of its `channel` (`sms` or `email`) — `twilio_sms_otp` for `sms`,
+`smtp_email_otp` for `email` — and a connector of the other channel fails at startup;
 `kyc-identity-verification` takes `kyc`; `notify` takes `email_delivery` or `sms_delivery`;
 `http-call` takes `custom` and defaults to `http_request`. Binding anything else fails at load with
 the path of the offending `connector`, and `GET /v1/admin/step-types` lists each type's
@@ -441,13 +444,13 @@ so the verification step needs no field configuration of its own:
   "name": "send_phone_code",
   "type": "otp-verify",
   "substeps": { "verify": "verify_phone_code", "resend": "resend_phone_code" },
-  "config": { "channel": "sms", "connector": { "id": "twilio_verify" } },
+  "config": { "channel": "sms", "connector": { "id": "twilio_sms_otp" } },
   "edges": { "verified": "collect_personal", "refused": "rejected" },
 }
 ```
 
-`otp-verify` sends to whatever the channel's canonical field resolves to — `phoneNumber` for `sms`
-and `voice`, `email` for `email` — and fails at load if no earlier step publishes it; set
+`otp-verify` sends to whatever the channel's canonical field resolves to — `phoneNumber` for `sms`,
+`email` for `email` — and fails at load if no earlier step publishes it; set
 `recipientField` when the number lives under another name. Its second compiled step collects the
 code and never persists it.
 
@@ -468,7 +471,9 @@ on an edge arm is the compiled form's per-transition opt-out, reachable from eve
 the slot allows, a `connector` block may name `errorHandler`, `retry` and up to three `fallback`
 entries — each an `id` of the same capability, with its own `retry` and, where the slot allows,
 `fieldMapping` and `config` additions laid under the keys the type derives (an entry declaring none
-inherits the primary's). `otp-verify` entries may carry their own `startConfig` and `checkConfig`.
+inherits the primary's). An `otp-verify` fallback is another `otp_verification` provider of the same
+channel: the type derives the same `config: { operation, channel }` onto every entry, and the check
+accepts a code whichever provider in the chain delivered it.
 `packages/engine/test/connector-fallback-chain.e2e-spec.ts` writes and runs a worked example.
 
 Reach for `connector-call` when the connector you need has no specialized type — a mock adapter in
@@ -591,8 +596,8 @@ including that the schema rebuilds around the new type.
 When a provider needs real code — an SDK, a signature scheme, a non-JSON payload — implement the one
 `ConnectorAdapter` interface in
 [connector-adapter.port.ts](../packages/engine/src/connectors/ports/connector-adapter.port.ts).
-An adapter declares an `id` — its own unique identifier, `twilio_verify` — and a `type`, what it
-does, from `CONNECTOR_TYPES`: `kyc`, `kyb`, `aml`, `credit`, `phone_verification`, `email_verification`,
+An adapter declares an `id` — its own unique identifier, `smtp` — and a `type`, what it
+does, from `CONNECTOR_TYPES`: `kyc`, `kyb`, `aml`, `credit`, `otp_verification`,
 `email_delivery`, `sms_delivery`, `bank_verification`, `payment`, `e_signature`,
 `document_storage` and `custom`.
 Two providers of the same capability share a value, so `sendgrid_email` and `smtp` are both
@@ -661,14 +666,16 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
    reason. The page lists adapters in the `fixtures` scope only outside production.
 
 Workflows then reach your adapter by its `id`, which a step's connector declaration names directly
-(`{"name": "...", "id": "twilio_verify", "type": "phone_verification"}`). `fieldMapping` and
+(`{"name": "...", "id": "smtp", "type": "email_delivery"}`). `fieldMapping` and
 `optionalFieldMapping` are the two channels from onboarding data into it. What they may name is
 settled at load time: a source field must be written in the same step, or in a step every path
 passes through — except for an optional mapping, which is exempt from that second half precisely
 because it declares a source that may be absent. Nothing else in the engine changes.
 
-Adapters shipped today: `http_request`, `twilio_verify`, `sendgrid_email`, `smtp`, `sumsub_kyc`,
-`veriff_kyc`, and the `mock_*` fixtures used by the example workflows.
+Adapters shipped today: `http_request`, `sendgrid_email`, `smtp`, `smtp_email_otp`, `sumsub_kyc`,
+`twilio_sms_otp`, `veriff_kyc`, and the `mock_*` fixtures used by the example workflows. A one-time-code provider
+extends a base class instead of implementing the port: see
+[Add an OTP provider](#add-an-otp-provider).
 
 ### Add a KYC provider
 
@@ -736,6 +743,77 @@ redelivery guards; the outcome rules in `kyc-outcome.ts` (including the identity
 approval and the attempt cap on a resubmission); the closed `submittedData` shape; and the log lines.
 A provider that re-derives any of these will drift from the other providers on what `human_review`
 or `retry` means, which is the problem the kernel exists to prevent.
+
+## Add an OTP provider
+
+Every one-time-code connector extends the abstract `BaseOtpConnector` in
+[base-otp.connector.ts](../packages/engine/src/connectors/adapters/built-in/otp/base-otp.connector.ts).
+The base class owns everything that must not differ between providers: it generates the code,
+stores a salted hash of it with an expiry and an attempt budget, enforces the send limit, and checks
+what the customer types. A provider only **delivers** a code the engine already made, so a new
+provider — another SMS gateway, a WhatsApp API, an email API — is one subclass:
+
+```ts
+@Injectable()
+export class AcmeSmsOtpConnector extends BaseOtpConnector {
+  readonly id = 'acme_sms_otp';
+  readonly name = 'acme_sms_otp';
+  readonly channel: OtpChannelName = 'sms'; // one of OTP_CHANNELS in @tsh/ddl-schema
+  readonly settingsSchema: ConnectorSettingsSchema = {
+    fields: [{ key: 'apiKey', secret: true, required: true }],
+  };
+
+  constructor(
+    connection: OtpChallengesConnection,
+    challenges: OtpChallengesRepository,
+    private readonly connectorSettingsService: ConnectorSettingsService,
+  ) {
+    super(connection, challenges);
+  }
+
+  protected async deliver(recipient: string, code: string): Promise<OtpDeliveryOutcome> {
+    const settings = await this.connectorSettingsService.resolve(this);
+    // Call the provider with settings.get('apiKey'). Return OTP_DELIVERY_OUTCOMES.invalidRecipient
+    // when it refuses the number itself; throw OtpDeliveryFailedException on any other failure.
+    return OTP_DELIVERY_OUTCOMES.delivered;
+  }
+}
+```
+
+1. **Write the class** — in `adapters/users/` for your own, beside
+   [twilio-sms-otp.connector.ts](../packages/engine/src/connectors/adapters/built-in/twilio-sms-otp.connector.ts)
+   and
+   [smtp-email-otp.connector.ts](../packages/engine/src/connectors/adapters/built-in/smtp-email-otp.connector.ts)
+   for a built-in one. Pass `OtpChallengesConnection` and `OtpChallengesRepository` to `super`, and
+   inject whatever `deliver` needs after them. `deliver` delivers `code` to `recipient` and returns
+   `OTP_DELIVERY_OUTCOMES.delivered`, or returns `OTP_DELIVERY_OUTCOMES.invalidRecipient` when the
+   provider refuses the address or number itself — the submit then fails `400` on the recipient's
+   field, so the person can give another. Anything else throws: `OtpDeliveryFailedException`
+   (`500 OTP_DELIVERY_FAILED`) when the transport fails or the provider answers with an error, and
+   `503 CONNECTOR_NOT_CONFIGURED`, naming the key, for a setting `settings.get` cannot resolve. Only
+   `delivered` stores anything, so the declaration's error handler can retry or fall back. Read the
+   provider's response body to the end, so the connection returns to the pool. Do not store, log or
+   return the code.
+2. **Register it** like any other adapter: add the class to `USER_CONNECTOR_ADAPTER_PROVIDERS` (or
+   `BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS`) in
+   [connectors.module.ts](../packages/engine/src/connectors/connectors.module.ts). Its
+   `settingsSchema` puts it on `GET /v1/admin/connectors` and the admin panel's Connectors tab under
+   its own id; a provider that delegates to another connector, as `smtp_email_otp` does to `smtp`,
+   declares none.
+3. **Bind it in a workflow** by id: `"connector": { "id": "acme_sms_otp" }` on an `otp-verify` step
+   of the same `channel`. Switching provider later is an edit to that id; failing over is a
+   `fallback` entry naming another provider of the channel, for example
+   `{ "id": "acme_sms_otp", "fallback": [{ "id": "twilio_sms_otp" }] }`. A code is stored per
+   onboarding and channel, not per provider, so the check finds it whichever provider sent it.
+
+A new **channel** is a new value in `OTP_CHANNELS` in `@tsh/ddl-schema`
+([otp-verify.step-type.ts](../packages/shared/ddl-schema/src/step-types/types/otp-verify.step-type.ts)),
+with a canonical contact role in that file's `CHANNEL_DEFAULTS` so the step knows which collected
+field to challenge, plus a provider declaring it. Rebuild the package
+(`pnpm --filter @tsh/ddl-schema build`) before the engine sees the change.
+
+The code length, lifetime, attempt budget and send limit are constants in `BaseOtpConnector` and
+the same for every provider; a subclass cannot change them.
 
 ## Add a connector error handler
 

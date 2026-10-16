@@ -33,11 +33,11 @@ describe('groupConnectorsByType', () => {
   it('orders groups by the declared capability order, not by how the engine listed them', () => {
     const { groups } = groupConnectorsByType([
       createCard('acme_custom', 'custom'),
-      createCard('twilio_verify', 'phone_verification'),
+      createCard('otp', 'otp_verification'),
       createCard('mock_kyc_1', 'kyc'),
     ]);
 
-    expect(groups.map((group) => group.type)).toEqual(['kyc', 'phone_verification', 'custom']);
+    expect(groups.map((group) => group.type)).toEqual(['kyc', 'otp_verification', 'custom']);
   });
 
   it('drops a capability nothing implements', () => {
@@ -66,12 +66,12 @@ describe('groupConnectorsByType', () => {
 
   it('reports the declared types no connector implements, in declared order', () => {
     const { notImplemented } = groupConnectorsByType([
-      createCard('twilio_verify', 'phone_verification'),
+      createCard('otp', 'otp_verification'),
       createCard('smtp', 'email_delivery'),
     ]);
 
     expect(notImplemented[0]).toBe('kyc');
-    expect(notImplemented).not.toContain('phone_verification');
+    expect(notImplemented).not.toContain('otp_verification');
     expect(notImplemented).not.toContain('email_delivery');
   });
 

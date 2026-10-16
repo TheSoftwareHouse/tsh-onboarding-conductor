@@ -2,10 +2,7 @@ import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
 } from '../../ports/connector-execution-result';
-import {
-  MockEmailVerificationConnector,
-  MockPhoneVerificationConnector,
-} from './mock-verification.connector';
+import { MockOtpConnector } from './mock-otp.connector';
 
 const RECIPIENT = '+15551234567';
 const MAX_ATTEMPTS = 5;
@@ -13,11 +10,11 @@ const TTL_SECONDS = 600;
 
 const challenge = (
   onboardingId: string,
-  options: { async?: boolean; operation?: string; recipient?: unknown } = {},
+  options: { async?: boolean; operation?: string; recipient?: unknown; channel?: string } = {},
 ) => ({
   declaration: {
     order: 1,
-    config: { operation: options.operation ?? 'challenge' },
+    config: { operation: options.operation ?? 'send', channel: options.channel ?? 'sms' },
     async: options.async,
   },
   execution: { onboardingId, stepName: 'request_code' },
@@ -29,11 +26,11 @@ const challenge = (
 const verify = (
   onboardingId: string,
   code: unknown,
-  options: { async?: boolean; operation?: string } = {},
+  options: { async?: boolean; operation?: string; channel?: string } = {},
 ) => ({
   declaration: {
     order: 1,
-    config: { operation: options.operation ?? 'verify' },
+    config: { operation: options.operation ?? 'check', channel: options.channel ?? 'sms' },
     async: options.async,
   },
   execution: { onboardingId, stepName: 'verify_code' },
@@ -42,21 +39,19 @@ const verify = (
   payloadFieldSources: { recipient: 'phoneNumber', code: 'verificationCode' },
 });
 
-describe('MockPhoneVerificationConnector', () => {
+describe('MockOtpConnector', () => {
   it('is registered under its own connector type and accepts callbacks', () => {
-    const connector = new MockPhoneVerificationConnector();
+    const connector = new MockOtpConnector();
 
-    expect(connector.name).toBe('mock_phone_verification');
-    expect(connector.id).toBe('mock_phone_verification');
-    expect(connector.type).toBe('phone_verification');
+    expect(connector.name).toBe('mock_otp');
+    expect(connector.id).toBe('mock_otp');
+    expect(connector.type).toBe('otp_verification');
     expect(connector.supportsAsyncCallback).toBe(true);
-    expect(new MockEmailVerificationConnector().id).toBe('mock_email_verification');
-    expect(new MockEmailVerificationConnector().type).toBe('email_verification');
   });
 
   describe('synchronous declarations', () => {
     it('accepts the code it issued for the challenge', async () => {
-      const connector = new MockPhoneVerificationConnector();
+      const connector = new MockOtpConnector();
 
       await expect(connector.execute(challenge('onboarding-1'))).resolves.toEqual(
         ConnectorExecutionResult.accepted(),
@@ -70,22 +65,24 @@ describe('MockPhoneVerificationConnector', () => {
       );
     });
 
-    it('reads the operation wording of the providers it stands in for', async () => {
-      const connector = new MockPhoneVerificationConnector();
+    it('keeps one challenge per channel for the same onboarding', async () => {
+      const connector = new MockOtpConnector();
+      await connector.execute(challenge('onboarding-1', { channel: 'sms' }));
+      await connector.execute(challenge('onboarding-1', { channel: 'email', recipient: 'a@b.co' }));
+
+      const smsCode = connector.__peekCodeForTests('onboarding-1', 'sms');
+      expect(connector.__peekCodeForTests('onboarding-1', 'email')).toBeDefined();
 
       await expect(
-        connector.execute(challenge('onboarding-1', { operation: 'startVerification' })),
-      ).resolves.toEqual(ConnectorExecutionResult.accepted());
-
-      const code = connector.__peekCodeForTests('onboarding-1');
-
+        connector.execute(verify('onboarding-1', smsCode, { channel: 'email' })),
+      ).resolves.toMatchObject({ status: 'invalid-data' });
       await expect(
-        connector.execute(verify('onboarding-1', code, { operation: 'checkVerification' })),
+        connector.execute(verify('onboarding-1', smsCode, { channel: 'sms' })),
       ).resolves.toEqual(ConnectorExecutionResult.accepted());
     });
 
     it('marks a wrong code as retryable invalid data', async () => {
-      const connector = new MockPhoneVerificationConnector();
+      const connector = new MockOtpConnector();
       await connector.execute(challenge('onboarding-1'));
 
       await expect(connector.execute(verify('onboarding-1', '000001'))).resolves.toEqual(
@@ -97,7 +94,7 @@ describe('MockPhoneVerificationConnector', () => {
     });
 
     it('rejects an exhausted, expired or missing challenge', async () => {
-      const connector = new MockPhoneVerificationConnector();
+      const connector = new MockOtpConnector();
 
       await expect(connector.execute(verify('missing', '123456'))).resolves.toEqual(
         ConnectorExecutionResult.rejected('CHALLENGE_NOT_FOUND'),
@@ -123,11 +120,17 @@ describe('MockPhoneVerificationConnector', () => {
       );
     });
 
-    it('reports invalid input for an unknown operation, a missing recipient or a missing code', async () => {
-      const connector = new MockPhoneVerificationConnector();
+    it('reports invalid input for an unknown operation or channel, a missing recipient or a missing code', async () => {
+      const connector = new MockOtpConnector();
 
       await expect(
         connector.execute(challenge('onboarding-1', { operation: 'transmogrify' })),
+      ).resolves.toEqual(ConnectorExecutionResult.invalid());
+      await expect(
+        connector.execute(challenge('onboarding-1', { operation: 'challenge' })),
+      ).resolves.toEqual(ConnectorExecutionResult.invalid());
+      await expect(
+        connector.execute(challenge('onboarding-1', { channel: 'fax' })),
       ).resolves.toEqual(ConnectorExecutionResult.invalid());
       await expect(
         connector.execute(challenge('onboarding-1', { recipient: '  ' })),
@@ -138,7 +141,7 @@ describe('MockPhoneVerificationConnector', () => {
     });
 
     it('forgets every challenge on reset', async () => {
-      const connector = new MockPhoneVerificationConnector();
+      const connector = new MockOtpConnector();
       await connector.execute(challenge('onboarding-1'));
 
       connector.__resetForTests();
@@ -150,7 +153,7 @@ describe('MockPhoneVerificationConnector', () => {
 
   describe('asynchronous declarations', () => {
     it('answers a challenge with an initiation the engine can park', async () => {
-      const connector = new MockPhoneVerificationConnector();
+      const connector = new MockOtpConnector();
 
       await expect(connector.execute(challenge('onboarding-1', { async: true }))).resolves.toEqual(
         ConnectorExecutionResult.accepted(),
@@ -159,13 +162,13 @@ describe('MockPhoneVerificationConnector', () => {
       expect(connector.__peekInitiationForTests('onboarding-1')).toMatchObject({
         onboardingId: 'onboarding-1',
         connectorOrder: 1,
-        detail: { operation: 'challenge' },
+        detail: { operation: 'send', channel: 'sms' },
         providerReference: expect.any(String),
       });
     });
 
     it('defers a verification to the callback, then replays the submitted code', async () => {
-      const connector = new MockPhoneVerificationConnector();
+      const connector = new MockOtpConnector();
       await connector.execute(challenge('onboarding-1'));
       const code = connector.__peekCodeForTests('onboarding-1');
 
@@ -188,7 +191,7 @@ describe('MockPhoneVerificationConnector', () => {
     });
 
     it('reports a wrong code from the callback as retryable invalid data', async () => {
-      const connector = new MockPhoneVerificationConnector();
+      const connector = new MockOtpConnector();
       await connector.execute(challenge('onboarding-1'));
       await connector.execute(verify('onboarding-1', '000001', { async: true }));
 
@@ -208,7 +211,7 @@ describe('MockPhoneVerificationConnector', () => {
     });
 
     it('lets the provider report a terminal rejection with its reason', async () => {
-      const connector = new MockPhoneVerificationConnector();
+      const connector = new MockOtpConnector();
       await connector.execute(challenge('onboarding-1'));
       await connector.execute(verify('onboarding-1', '000001', { async: true }));
 
@@ -225,7 +228,7 @@ describe('MockPhoneVerificationConnector', () => {
     });
 
     it('refuses a callback that is unknown, empty or carries engine correlation fields', async () => {
-      const connector = new MockPhoneVerificationConnector();
+      const connector = new MockOtpConnector();
       const encode = (payload: unknown) => ({
         rawBody: new TextEncoder().encode(JSON.stringify(payload)),
         headers: {},

@@ -18,6 +18,9 @@ import { ConnectorsRepository } from './connectors.repository';
 import { ConnectorSettingsService } from './connector-settings.service';
 import { ConnectorsController } from './connectors.controller';
 import { ConnectorEntity } from './entity/connector.entity';
+import { OtpChallengeEntity } from './entity/otp-challenge.entity';
+import { OtpChallengesConnection } from './otp-challenges.connection';
+import { OtpChallengesRepository } from './otp-challenges.repository';
 import { HttpRequestConnector } from './adapters/built-in/http-request.connector';
 import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
 import { SmtpConnector } from './adapters/built-in/smtp.connector';
@@ -28,18 +31,16 @@ import { VeriffKycConnector } from './adapters/built-in/veriff-kyc.connector';
 import { VeriffClient } from './adapters/built-in/veriff-kyc/veriff-client';
 import { VeriffKycProvider } from './adapters/built-in/veriff-kyc/veriff-kyc.provider';
 import { VeriffMediaFitter } from './adapters/built-in/veriff-kyc/veriff-media-fitter';
-import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
+import { SmtpEmailOtpConnector } from './adapters/built-in/smtp-email-otp.connector';
+import { TwilioSmsOtpConnector } from './adapters/built-in/twilio-sms-otp.connector';
 import {
   MockAsyncCallback2Connector,
   MockAsyncCallbackConnector,
 } from './adapters/fixtures/mock-async-callback.connector';
 import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
 import { MockKyc1Connector, MockKyc2Connector } from './adapters/fixtures/mock-kyc.connector';
+import { MockOtpConnector } from './adapters/fixtures/mock-otp.connector';
 import { MockSumsubFileUploadConnector } from './adapters/fixtures/mock-sumsub-file-upload.connector';
-import {
-  MockEmailVerificationConnector,
-  MockPhoneVerificationConnector,
-} from './adapters/fixtures/mock-verification.connector';
 import {
   CONNECTOR_MOCK_SUBSTITUTIONS,
   type ConnectorMockSubstitutions,
@@ -77,9 +78,10 @@ const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
   HttpRequestConnector,
   SendgridEmailConnector,
   SmtpConnector,
+  SmtpEmailOtpConnector,
   SumsubKycConnector,
+  TwilioSmsOtpConnector,
   VeriffKycConnector,
-  TwilioVerifyConnector,
 ] as const;
 
 /**
@@ -91,10 +93,9 @@ const FIXTURE_CONNECTOR_ADAPTER_PROVIDERS = [
   MockAsyncCallbackConnector,
   MockAsyncCallback2Connector,
   MockEmailDeliveryConnector,
-  MockEmailVerificationConnector,
   MockKyc1Connector,
   MockKyc2Connector,
-  MockPhoneVerificationConnector,
+  MockOtpConnector,
   MockSumsubFileUploadConnector,
 ] as const;
 
@@ -190,7 +191,12 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
     AuditModule,
     forwardRef(() => AuthModule),
     forwardRef(() => WorkflowsModule),
-    TypeOrmModule.forFeature([OnboardingDocumentEntity, ConnectorEntity, OnboardingEntity]),
+    TypeOrmModule.forFeature([
+      OnboardingDocumentEntity,
+      ConnectorEntity,
+      OnboardingEntity,
+      OtpChallengeEntity,
+    ]),
   ],
   controllers: [ConnectorsController],
   providers: [
@@ -204,6 +210,8 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
     VeriffClient,
     VeriffMediaFitter,
     VeriffKycProvider,
+    OtpChallengesConnection,
+    OtpChallengesRepository,
     ...CONNECTOR_ADAPTER_PROVIDERS,
     {
       provide: CONNECTOR_ADAPTER_COLLECTION,

@@ -84,7 +84,7 @@ export type ConnectorSettingsSchema = Readonly<{
 export interface ConnectorAdapter {
   readonly name: string;
   /**
-   * The connector's unique identifier — `twilio_verify`, `smtp` — and the value a workflow
+   * The connector's unique identifier — `twilio_sms_otp`, `smtp` — and the value a workflow
    * step's connector declaration names. Freely chosen per adapter, exactly as a workflow
    * chooses its own `id`.
    */

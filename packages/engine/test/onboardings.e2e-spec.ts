@@ -12,7 +12,7 @@ import { DataSource } from 'typeorm';
 import { WebhookEventType } from '../src/webhook/webhook-event';
 import { WebhookOutboxStatus } from '../src/webhook/entity/webhook-outbox.entity';
 import { WebhookService } from '../src/webhook/webhook.service';
-import { MockPhoneVerificationConnector } from '../src/connectors/adapters/fixtures/mock-verification.connector';
+import { MockOtpConnector } from '../src/connectors/adapters/fixtures/mock-otp.connector';
 import {
   MockKyc1Connector,
   MockKyc2Connector,
@@ -46,11 +46,11 @@ const OTP_INVALID_DATA = {
 
 const STRUCTURED_ROUNDTRIP_WORKFLOW_ID = 'structured-roundtrip';
 const CONDITIONAL_FIELDS_TRANSITIONS_WORKFLOW_ID = 'conditional-fields-and-transitions';
-const TWILIO_VERIFY_WORKFLOW_ID = 'twilio-verify';
-const TWILIO_PHONE_NUMBER = '+15551234567';
-// Twilio's own Verify service settings, which the mock reproduces.
-const TWILIO_MAX_ATTEMPTS = 5;
-const TWILIO_TTL_SECONDS = 600;
+const OTP_SMS_WORKFLOW_ID = 'otp-sms';
+const OTP_PHONE_NUMBER = '+15551234567';
+// The attempt budget and TTL of the OTP connectors (`BaseOtpConnector`), which the mock reproduces.
+const OTP_MAX_ATTEMPTS = 5;
+const OTP_TTL_SECONDS = 600;
 
 let clientWebhookTestUrl = '';
 let localWebhookResponseMode: 'success' | 'failure' = 'success';
@@ -723,15 +723,14 @@ describe('OnboardingsController (e2e)', () => {
       'awaiting_user',
     );
 
-  const startOtpOnboarding = async (workflowId: typeof TWILIO_VERIFY_WORKFLOW_ID) =>
+  const startOtpOnboarding = async (workflowId: typeof OTP_SMS_WORKFLOW_ID) =>
     startWorkflowOnboarding(workflowId, 'request_code', 'awaiting_user');
 
   /**
-   * CONNECTOR_MOCKS hands `twilio_verify` to this fixture for the whole suite, so the
+   * CONNECTOR_MOCKS hands `twilio_sms_otp` to the `mock_otp` fixture for the whole suite, so the
    * shipped workflow runs unchanged and no test needs to fake provider HTTP.
    */
-  const twilioVerifyMock = (): MockPhoneVerificationConnector =>
-    getApp().get(MockPhoneVerificationConnector);
+  const otpMock = (): MockOtpConnector => getApp().get(MockOtpConnector);
 
   const startManualReviewOnboarding = async () => {
     return startWorkflowOnboarding(
@@ -2495,12 +2494,12 @@ describe('OnboardingsController (e2e)', () => {
     secondExecuteSpy.mockRestore();
   });
 
-  it('completes the Twilio Verify flow against the mock, keeping the code out of persistence', async () => {
-    const onboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
+  it('completes the SMS OTP flow against the mock, keeping the code out of persistence', async () => {
+    const onboardingId = await startOtpOnboarding(OTP_SMS_WORKFLOW_ID);
 
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
+      .send({ phoneNumber: OTP_PHONE_NUMBER })
       .expect((response) => expect([200, 201]).toContain(response.status))
       .expect({
         appliedStep: 'request_code',
@@ -2509,7 +2508,7 @@ describe('OnboardingsController (e2e)', () => {
         rejectionReason: null,
       });
 
-    const generatedCode = twilioVerifyMock().__peekCodeForTests(onboardingId);
+    const generatedCode = otpMock().__peekCodeForTests(onboardingId);
     expect(generatedCode).toMatch(/^\d{6}$/);
 
     await http()
@@ -2526,21 +2525,21 @@ describe('OnboardingsController (e2e)', () => {
     const completed = await readOnboarding(onboardingId);
     expect(completed.status).toBe('approved');
     expect(completed.current_step).toBeNull();
-    expect(completed.context).toEqual({ phoneNumber: TWILIO_PHONE_NUMBER });
+    expect(completed.context).toEqual({ phoneNumber: OTP_PHONE_NUMBER });
     expect(JSON.stringify(completed.context)).not.toContain('verificationCode');
     expect(JSON.stringify(completed.context)).not.toContain(String(generatedCode));
   });
 
   it('returns INVALID_STEP_DATA field errors for a non-final wrong code and preserves active verification state', async () => {
-    const onboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
+    const onboardingId = await startOtpOnboarding(OTP_SMS_WORKFLOW_ID);
 
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
+      .send({ phoneNumber: OTP_PHONE_NUMBER })
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     const before = await readOnboarding(onboardingId);
-    const generatedCode = twilioVerifyMock().__peekCodeForTests(onboardingId);
+    const generatedCode = otpMock().__peekCodeForTests(onboardingId);
     const outboxRowsBeforeInvalid = await readOutboxRowsForOnboarding(onboardingId);
     const webhookRequestsBeforeInvalid = capturedWebhookRequests.length;
 
@@ -2557,7 +2556,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(afterInvalid.status).toBe('awaiting_user');
     expect(afterInvalid.current_step).toBe('verify_code');
     expect(afterInvalid.context).toEqual(before.context);
-    expect(afterInvalid.context).toEqual({ phoneNumber: TWILIO_PHONE_NUMBER });
+    expect(afterInvalid.context).toEqual({ phoneNumber: OTP_PHONE_NUMBER });
     expect(JSON.stringify(afterInvalid.context)).not.toContain('verificationCode');
 
     await http()
@@ -2573,13 +2572,13 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('routes verification exhaustion, TTL expiry, and missing challenge to terminal rejected without INVALID_STEP_DATA', async () => {
-    const exhaustedOnboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
+    const exhaustedOnboardingId = await startOtpOnboarding(OTP_SMS_WORKFLOW_ID);
     await http()
       .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
-      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
+      .send({ phoneNumber: OTP_PHONE_NUMBER })
       .expect((response) => expect([200, 201]).toContain(response.status));
 
-    for (let attempt = 1; attempt < TWILIO_MAX_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt < OTP_MAX_ATTEMPTS; attempt += 1) {
       await http()
         .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
         .send({ verificationCode: String(attempt).repeat(6) })
@@ -2603,19 +2602,19 @@ describe('OnboardingsController (e2e)', () => {
     const exhaustedState = await readOnboarding(exhaustedOnboardingId);
     expect(exhaustedState.status).toBe('rejected');
     expect(exhaustedState.current_step).toBeNull();
-    expect(exhaustedState.context).toEqual({ phoneNumber: TWILIO_PHONE_NUMBER });
+    expect(exhaustedState.context).toEqual({ phoneNumber: OTP_PHONE_NUMBER });
     expect(JSON.stringify(exhaustedState.context)).not.toContain('verificationCode');
 
-    twilioVerifyMock().__setNowForTests(() => 1_000);
+    otpMock().__setNowForTests(() => 1_000);
 
-    const expiredOnboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
+    const expiredOnboardingId = await startOtpOnboarding(OTP_SMS_WORKFLOW_ID);
     await http()
       .post(`/v1/onboardings/${expiredOnboardingId}/submit`)
-      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
+      .send({ phoneNumber: OTP_PHONE_NUMBER })
       .expect((response) => expect([200, 201]).toContain(response.status));
 
-    const expiredCode = twilioVerifyMock().__peekCodeForTests(expiredOnboardingId);
-    twilioVerifyMock().__setNowForTests(() => 1_000 + (TWILIO_TTL_SECONDS + 1) * 1_000);
+    const expiredCode = otpMock().__peekCodeForTests(expiredOnboardingId);
+    otpMock().__setNowForTests(() => 1_000 + (OTP_TTL_SECONDS + 1) * 1_000);
 
     const expiredResponse = await http()
       .post(`/v1/onboardings/${expiredOnboardingId}/submit`)
@@ -2633,19 +2632,19 @@ describe('OnboardingsController (e2e)', () => {
     const expiredState = await readOnboarding(expiredOnboardingId);
     expect(expiredState.status).toBe('rejected');
     expect(expiredState.current_step).toBeNull();
-    expect(expiredState.context).toEqual({ phoneNumber: TWILIO_PHONE_NUMBER });
+    expect(expiredState.context).toEqual({ phoneNumber: OTP_PHONE_NUMBER });
     expect(JSON.stringify(expiredState.context)).not.toContain('verificationCode');
 
-    twilioVerifyMock().__resetForTests();
+    otpMock().__resetForTests();
 
-    const missingChallengeOnboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
+    const missingChallengeOnboardingId = await startOtpOnboarding(OTP_SMS_WORKFLOW_ID);
     await http()
       .post(`/v1/onboardings/${missingChallengeOnboardingId}/submit`)
-      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
+      .send({ phoneNumber: OTP_PHONE_NUMBER })
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     // Whatever the provider knew about this verification is gone, as after a restart.
-    twilioVerifyMock().__resetForTests();
+    otpMock().__resetForTests();
 
     const missingChallengeResponse = await http()
       .post(`/v1/onboardings/${missingChallengeOnboardingId}/submit`)
@@ -2663,12 +2662,12 @@ describe('OnboardingsController (e2e)', () => {
     const missingChallengeState = await readOnboarding(missingChallengeOnboardingId);
     expect(missingChallengeState.status).toBe('rejected');
     expect(missingChallengeState.current_step).toBeNull();
-    expect(missingChallengeState.context).toEqual({ phoneNumber: TWILIO_PHONE_NUMBER });
+    expect(missingChallengeState.context).toEqual({ phoneNumber: OTP_PHONE_NUMBER });
     expect(JSON.stringify(missingChallengeState.context)).not.toContain('verificationCode');
   });
 
-  it('rejects non-E.164 Twilio Verify phone numbers before the connector runs', async () => {
-    const onboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
+  it('rejects non-E.164 OTP phone numbers before the connector runs', async () => {
+    const onboardingId = await startOtpOnboarding(OTP_SMS_WORKFLOW_ID);
 
     const response = await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -2680,7 +2679,7 @@ describe('OnboardingsController (e2e)', () => {
       message: 'INVALID_STEP_DATA',
       errors: { phoneNumber: ['INVALID'] },
     });
-    expect(twilioVerifyMock().__peekCodeForTests(onboardingId)).toBeUndefined();
+    expect(otpMock().__peekCodeForTests(onboardingId)).toBeUndefined();
 
     const rejected = await readOnboarding(onboardingId);
     expect(rejected.status).toBe('awaiting_user');
@@ -3814,9 +3813,12 @@ describe('OnboardingsController (e2e)', () => {
        ORDER BY id`,
     );
 
-    // The whole schema is one migration: the incremental history was folded into it before
-    // anything was deployed.
-    expect(migrations).toEqual([{ name: '0001_initial_schema_1735689600000' }]);
+    // The schema up to the fold is one migration: the incremental history was folded into it
+    // before anything was deployed. Later migrations are additive.
+    expect(migrations).toEqual([
+      { name: '0001_initial_schema_1735689600000' },
+      { name: '0002_create_otp_challenges_2053382400000' },
+    ]);
 
     const tables = await dataSource.query(
       `SELECT table_name
@@ -3839,6 +3841,7 @@ describe('OnboardingsController (e2e)', () => {
       { table_name: 'onboarding_agreements' },
       { table_name: 'onboarding_documents' },
       { table_name: 'onboardings' },
+      { table_name: 'otp_challenges' },
       { table_name: 'workflow_connector_selections' },
       { table_name: 'workflow_versions' },
       { table_name: 'workflows' },

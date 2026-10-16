@@ -50,8 +50,7 @@ export const CONNECTOR_TYPES = [
   'aml',
   'credit',
   // Reaching, and proving, a contact channel.
-  'phone_verification',
-  'email_verification',
+  'otp_verification',
   'email_delivery',
   'sms_delivery',
   // Instruments and agreements.

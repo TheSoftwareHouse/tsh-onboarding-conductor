@@ -24,10 +24,10 @@ import { markAuditRecorded } from '../audit/audit-recorded.marker';
 import { ConnectorNotConfiguredException } from '../connectors/errors/connector-not-configured.exception';
 import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
 import { ConnectorCallbackSupersededError } from '../connectors/errors/connector-callback-superseded.error';
+import { OtpDeliveryFailedException } from '../connectors/errors/otp-delivery-failed.exception';
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
 import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
 import { VeriffUnavailableException } from '../connectors/errors/veriff-unavailable.exception';
-import { TwilioVerifyUnavailableException } from '../connectors/errors/twilio-verify-unavailable.exception';
 import { InvalidStepDataException } from '../onboardings/errors/invalid-step-data.exception';
 import { OnboardingCompletedException } from '../onboardings/errors/onboarding-completed.exception';
 import { OnboardingNotFoundException } from '../onboardings/errors/onboarding-not-found.exception';
@@ -119,7 +119,7 @@ export class WebhookController {
     WorkflowRetiredException,
     OnboardingCompletedException,
     UnknownWorkflowEvaluationException,
-    TwilioVerifyUnavailableException,
+    OtpDeliveryFailedException,
     SendgridEmailUnavailableException,
     SumsubUnavailableException,
     VeriffUnavailableException,

@@ -6,7 +6,7 @@
 - `503 CONNECTOR_NOT_CONFIGURED` — an operator has not supplied a connector credential
 - `503 AGREEMENT_NOT_PUBLISHED` — a step declares an agreement family with no published version;
   hit at start
-- `500 TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`
+- `500 OTP_DELIVERY_FAILED`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`
 - any other engine 5xx, a transport failure, or a client-side timeout — never forwarded as-is
 
 **Shown to the customer as a form error** — recoverable, the onboarding did not move:

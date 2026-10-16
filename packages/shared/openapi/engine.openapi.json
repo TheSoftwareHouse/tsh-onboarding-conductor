@@ -2668,7 +2668,7 @@
             "in": "path",
             "description": "The connector's id, as the list reports it.",
             "schema": {
-              "example": "twilio_verify",
+              "example": "twilio_sms_otp",
               "type": "string"
             }
           }
@@ -2760,7 +2760,7 @@
             "in": "path",
             "description": "The connector's id, as the list reports it.",
             "schema": {
-              "example": "twilio_verify",
+              "example": "twilio_sms_otp",
               "type": "string"
             }
           },
@@ -2907,7 +2907,7 @@
             "in": "path",
             "description": "The connector's id, as the list reports it.",
             "schema": {
-              "example": "twilio_verify",
+              "example": "twilio_sms_otp",
               "type": "string"
             }
           }
@@ -3041,7 +3041,7 @@
             "in": "path",
             "description": "The connector's id, as the list reports it.",
             "schema": {
-              "example": "twilio_verify",
+              "example": "twilio_sms_otp",
               "type": "string"
             }
           }
@@ -3279,7 +3279,7 @@
             }
           },
           "500": {
-            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
+            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`OTP_DELIVERY_FAILED`: The one-time code could not be delivered: the SMS provider or the mail transport could not be reached, or answered with an error.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3298,7 +3298,7 @@
                             "code": {
                               "type": "string",
                               "enum": [
-                                "TWILIO_VERIFY_UNAVAILABLE",
+                                "OTP_DELIVERY_FAILED",
                                 "SENDGRID_EMAIL_UNAVAILABLE",
                                 "SUMSUB_UNAVAILABLE",
                                 "VERIFF_UNAVAILABLE",
@@ -3760,7 +3760,7 @@
             }
           },
           "500": {
-            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
+            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`OTP_DELIVERY_FAILED`: The one-time code could not be delivered: the SMS provider or the mail transport could not be reached, or answered with an error.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3779,7 +3779,7 @@
                             "code": {
                               "type": "string",
                               "enum": [
-                                "TWILIO_VERIFY_UNAVAILABLE",
+                                "OTP_DELIVERY_FAILED",
                                 "SENDGRID_EMAIL_UNAVAILABLE",
                                 "SUMSUB_UNAVAILABLE",
                                 "VERIFF_UNAVAILABLE",
@@ -5062,7 +5062,7 @@
             }
           },
           "500": {
-            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.\n\n`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.",
+            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.\n\n`OTP_DELIVERY_FAILED`: The one-time code could not be delivered: the SMS provider or the mail transport could not be reached, or answered with an error.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5082,7 +5082,7 @@
                               "type": "string",
                               "enum": [
                                 "CLIENT_WEBHOOK_DELIVERY_FAILED",
-                                "TWILIO_VERIFY_UNAVAILABLE",
+                                "OTP_DELIVERY_FAILED",
                                 "SENDGRID_EMAIL_UNAVAILABLE",
                                 "SUMSUB_UNAVAILABLE",
                                 "VERIFF_UNAVAILABLE"
@@ -5217,7 +5217,7 @@
   "info": {
     "title": "TSH Onboarding Conductor Engine API",
     "description": "The HTTP surface of the onboarding engine: the service that loads workflow definitions, runs\nonboardings against them and drives connectors, provider callbacks and client webhooks.\n\n## Audiences\n\n- **Onboarding flow.** The end customer's own onboarding. Unauthenticated: the onboarding id is\n  the only handle, so treat it as a capability.\n- **Admin.** The operator surface the admin panel is built on. Every operation requires a bearer\n  access token (see *Authentication*).\n- **Provider callbacks.** Where a connector's provider posts an asynchronous result, authenticated\n  by the HMAC recipe the connector adapter declares.\n\n## Authentication\n\nAdmin operations carry the `entraBearer` security requirement: a Microsoft Entra ID\naccess token for the engine's API app registration whose `roles` claim holds at least one of the\nconfigured operator roles. A missing or unverifiable token is answered with `401`, a verified token\nwithout an operator role with `403`, and `503` says the token could not be judged because Entra's\nsigning keys were unreachable. Every decision, granted or refused, is written to the audit log.\n\n## Errors\n\nThe engine answers a refusal it owns with `{ \"code\", \"message\" }`: `code` is the stable\nidentifier a client should branch on, and each operation lists the codes it can return. Some codes\nadd detail properties; the operation's response description names them. Where the framework answers\ninstead of the engine, the body is NestJS's own `{ \"statusCode\", \"message\", \"error\" }` envelope:\nrequest validation (`400`), the admin bearer guard (`401`, `403`, `503`), and a `500` on the\nsubmit and provider-callback routes, where a connector adapter can fail with a plain error and there\nis no `code` to branch on.\n\n## Bodies the workflow decides\n\nTwo request bodies have no fixed shape. A submit body follows the current step: read\n`GET /v1/onboardings/{id}/state` and its `step.schema` says exactly what the engine will accept.\nA connector's settings body is a map whose keys the connector adapter declares; the read side lists\nthem. The compile body is a workflow document, and its schema is embedded here in full.\n\n## About this document\n\nGenerated from the engine's own route and DTO decorators, and committed beside the code; a test\nfails when the two disagree. A running engine serves it at `GET /v1/openapi.json`.",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "contact": {},
     "license": {
       "name": "MIT",
@@ -6026,8 +6026,7 @@
           "kyb",
           "aml",
           "credit",
-          "phone_verification",
-          "email_verification",
+          "otp_verification",
           "email_delivery",
           "sms_delivery",
           "bank_verification",
@@ -6818,7 +6817,7 @@
           "id": {
             "type": "string",
             "description": "The connector's own identifier.",
-            "example": "twilio_verify"
+            "example": "twilio_sms_otp"
           },
           "type": {
             "description": "The capability class, drawn from the same set a workflow's connector `type` is.",
@@ -7007,7 +7006,7 @@
             "description": "The step now awaiting data; null once the onboarding is terminal."
           },
           "rejectionReason": {
-            "description": "Why a connector refused, when the move was a rejection a connector drove; null otherwise.",
+            "description": "Why a connector refused, set only when the move ends the onboarding as rejected; null otherwise, including a rejection routed to a live step such as a resend.",
             "oneOf": [
               {
                 "allOf": [
@@ -8191,8 +8190,7 @@
               "kyb",
               "aml",
               "credit",
-              "phone_verification",
-              "email_verification",
+              "otp_verification",
               "email_delivery",
               "sms_delivery",
               "bank_verification",
@@ -8241,8 +8239,7 @@
               "kyb",
               "aml",
               "credit",
-              "phone_verification",
-              "email_verification",
+              "otp_verification",
               "email_delivery",
               "sms_delivery",
               "bank_verification",
@@ -10558,8 +10555,7 @@
                     "channel": {
                       "enum": [
                         "sms",
-                        "email",
-                        "voice"
+                        "email"
                       ]
                     },
                     "recipientField": {
@@ -10604,18 +10600,11 @@
                         },
                         "type": {
                           "enum": [
-                            "phone_verification",
-                            "email_verification"
+                            "otp_verification"
                           ]
                         },
                         "fieldMapping": {
                           "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
-                        },
-                        "startConfig": {
-                          "type": "object"
-                        },
-                        "checkConfig": {
-                          "type": "object"
                         },
                         "errorHandler": {
                           "type": "string",
@@ -10645,18 +10634,11 @@
                               },
                               "type": {
                                 "enum": [
-                                  "phone_verification",
-                                  "email_verification"
+                                  "otp_verification"
                                 ]
                               },
                               "fieldMapping": {
                                 "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
-                              },
-                              "startConfig": {
-                                "type": "object"
-                              },
-                              "checkConfig": {
-                                "type": "object"
                               },
                               "retry": {
                                 "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
@@ -11586,8 +11568,7 @@
               "kyb",
               "aml",
               "credit",
-              "phone_verification",
-              "email_verification",
+              "otp_verification",
               "email_delivery",
               "sms_delivery",
               "bank_verification",
@@ -11636,8 +11617,7 @@
               "kyb",
               "aml",
               "credit",
-              "phone_verification",
-              "email_verification",
+              "otp_verification",
               "email_delivery",
               "sms_delivery",
               "bank_verification",

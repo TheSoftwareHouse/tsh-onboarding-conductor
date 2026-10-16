@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import type { ConnectorType } from '@tsh/ddl-schema';
+import {
+  OTP_CHANNELS,
+  OTP_CONFIG_KEYS,
+  OTP_OPERATIONS,
+  type OtpChannelName,
+  type OtpOperation,
+} from '@tsh/ddl-schema';
 import type {
   ConnectorAdapter,
   ConnectorCallbackMappingInput,
@@ -15,20 +21,19 @@ import {
 import { OtpChallengeStore } from './support/otp-challenge.store';
 import { ProviderCallbackStore, type ProviderInitiation } from './support/provider-callback.store';
 
-/**
- * Operation names accepted for each step of a verification. The mock's own wording comes
- * first; the rest are the spellings of the providers it stands in for, so a workflow written
- * for a real provider needs no edit when CONNECTOR_MOCKS points its type here.
- */
-const CHALLENGE_OPERATIONS = ['challenge', 'startVerification', 'generateCode'];
-const VERIFY_OPERATIONS = ['verify', 'checkVerification', 'verifyCode'];
-
 /** Provider services keep these out of the workflow, so the mock picks usual values. */
 const CODE_LENGTH = 6;
 const TTL_SECONDS = 600;
 const MAX_ATTEMPTS = 5;
 
-type PendingDetail = Readonly<{ operation: 'challenge' | 'verify'; code?: string }>;
+type PendingDetail = Readonly<{
+  operation: OtpOperation;
+  channel: OtpChannelName;
+  codeField: string;
+  code?: string;
+}>;
+
+const DEFAULT_CODE_FIELD = 'code';
 
 type ChallengeOutcome =
   | Readonly<{ status: 'accepted' }>
@@ -40,13 +45,17 @@ type ChallengeOutcome =
     }>;
 
 /**
- * One-time-code verification with no provider behind it: challenge a recipient, then check
+ * One-time-code verification with no provider behind it: send a code to a recipient, then check
  * the code. Both drive modes are implemented because the choice belongs to the workflow — a
  * declaration with `async: false` gets its verdict from `execute`, while `async: true` makes
  * `execute` an initiation the engine parks until a callback reports. Standing in for a
  * provider that has no callbacks simply leaves the async half unused.
  */
-abstract class OtpVerificationMockConnector implements ConnectorAdapter {
+@Injectable()
+export class MockOtpConnector implements ConnectorAdapter {
+  readonly id = 'mock_otp';
+  readonly name = 'mock_otp';
+  readonly type = 'otp_verification';
   readonly supportsAsyncCallback = true;
   readonly callbackAuth: ConnectorCallbackUnsignedAuth = {
     kind: 'none',
@@ -54,31 +63,26 @@ abstract class OtpVerificationMockConnector implements ConnectorAdapter {
       'Fixture with no upstream provider to share a signing secret with; production ingress additionally requires naming it in CONNECTOR_CALLBACK_UNSIGNED_TYPES, which no deployment should do.',
   };
 
-  private readonly challenges: OtpChallengeStore;
+  private readonly challenges = new OtpChallengeStore('mock_otp');
   private readonly callbacks = new ProviderCallbackStore<PendingDetail>();
 
-  protected constructor(
-    readonly name: string,
-    readonly id: string,
-    readonly type: ConnectorType,
-  ) {
-    this.challenges = new OtpChallengeStore(id);
-  }
-
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
-    const operation = this.resolveOperation(input.declaration.config.operation);
+    const operation = this.resolveOperation(input.declaration.config[OTP_CONFIG_KEYS.operation]);
+    const channel = this.resolveChannel(input.declaration.config[OTP_CONFIG_KEYS.channel]);
     const recipient = this.text(input.payload.recipient);
     const { onboardingId } = input.execution;
 
-    if (!operation || !recipient) {
+    if (!operation || !channel || !recipient) {
       return ConnectorExecutionResult.invalid();
     }
 
-    if (operation === 'challenge') {
+    const codeField = input.payloadFieldSources.code ?? DEFAULT_CODE_FIELD;
+
+    if (operation === OTP_OPERATIONS.send) {
       const outcome = this.challenges.generateCode(
         onboardingId,
         { recipient },
-        { codeLength: CODE_LENGTH, ttlSeconds: TTL_SECONDS },
+        { channel, codeLength: CODE_LENGTH, ttlSeconds: TTL_SECONDS },
       );
 
       if (outcome.status === 'accepted' && input.declaration.async === true) {
@@ -86,7 +90,7 @@ abstract class OtpVerificationMockConnector implements ConnectorAdapter {
         this.callbacks.record({
           onboardingId,
           connectorOrder: input.declaration.order,
-          detail: { operation: 'challenge' },
+          detail: { operation, channel, codeField },
         });
       }
 
@@ -104,14 +108,18 @@ abstract class OtpVerificationMockConnector implements ConnectorAdapter {
       this.callbacks.record({
         onboardingId,
         connectorOrder: input.declaration.order,
-        detail: { operation: 'verify', code },
+        detail: { operation, channel, codeField, code },
       });
 
       return ConnectorExecutionResult.accepted();
     }
 
     return this.toResult(
-      this.challenges.verifyCode(onboardingId, { code }, { maxAttempts: MAX_ATTEMPTS }),
+      this.challenges.verifyCode(
+        onboardingId,
+        { code },
+        { channel, codeField, maxAttempts: MAX_ATTEMPTS },
+      ),
     );
   }
 
@@ -141,7 +149,7 @@ abstract class OtpVerificationMockConnector implements ConnectorAdapter {
       throw new Error('status must be one of accepted, rejected');
     }
 
-    if (initiation.detail.operation === 'challenge' || status === 'accepted') {
+    if (initiation.detail.operation === OTP_OPERATIONS.send || status === 'accepted') {
       return ConnectorExecutionResult.accepted();
     }
 
@@ -154,20 +162,24 @@ abstract class OtpVerificationMockConnector implements ConnectorAdapter {
     }
 
     return this.toResult(
-      this.challenges.verifyCode(initiation.onboardingId, { code }, { maxAttempts: MAX_ATTEMPTS }),
+      this.challenges.verifyCode(
+        initiation.onboardingId,
+        { code },
+        {
+          channel: initiation.detail.channel,
+          codeField: initiation.detail.codeField,
+          maxAttempts: MAX_ATTEMPTS,
+        },
+      ),
     );
   }
 
-  private resolveOperation(value: unknown): 'challenge' | 'verify' | undefined {
-    if (typeof value !== 'string') {
-      return undefined;
-    }
+  private resolveOperation(value: unknown): OtpOperation | undefined {
+    return value === OTP_OPERATIONS.send || value === OTP_OPERATIONS.check ? value : undefined;
+  }
 
-    if (CHALLENGE_OPERATIONS.includes(value)) {
-      return 'challenge';
-    }
-
-    return VERIFY_OPERATIONS.includes(value) ? 'verify' : undefined;
+  private resolveChannel(value: unknown): OtpChannelName | undefined {
+    return OTP_CHANNELS.find((channel) => channel === value);
   }
 
   private text(value: unknown): string | undefined {
@@ -209,8 +221,8 @@ abstract class OtpVerificationMockConnector implements ConnectorAdapter {
     return ConnectorExecutionResult.rejected(outcome.reason);
   }
 
-  __peekCodeForTests(onboardingId: string): string | undefined {
-    return this.challenges.peekCodeForTests(onboardingId);
+  __peekCodeForTests(onboardingId: string, channel?: OtpChannelName): string | undefined {
+    return this.challenges.peekCodeForTests(onboardingId, channel);
   }
 
   __peekInitiationForTests(onboardingId: string): ProviderInitiation<PendingDetail> | undefined {
@@ -228,19 +240,5 @@ abstract class OtpVerificationMockConnector implements ConnectorAdapter {
   __resetForTests(): void {
     this.challenges.resetForTests();
     this.callbacks.reset();
-  }
-}
-
-@Injectable()
-export class MockPhoneVerificationConnector extends OtpVerificationMockConnector {
-  constructor() {
-    super('mock_phone_verification', 'mock_phone_verification', 'phone_verification');
-  }
-}
-
-@Injectable()
-export class MockEmailVerificationConnector extends OtpVerificationMockConnector {
-  constructor() {
-    super('mock_email_verification', 'mock_email_verification', 'email_verification');
   }
 }

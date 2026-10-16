@@ -16,8 +16,8 @@ const buildWorkflow = (transitions: TransitionFixture[], canReject = true) => ({
       connectors: [
         {
           name: 'verifier',
-          id: 'twilio_verify',
-          type: 'phone_verification',
+          id: 'otp',
+          type: 'otp_verification',
           canReject,
           order: 1,
           fieldMapping: { code: 'code' },

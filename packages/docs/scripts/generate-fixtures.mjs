@@ -35,7 +35,8 @@ const DESCRIPTIONS = {
   scoring:
     'Named scores accumulated by rules across phone verification, an identity check and a manual review, with transitions that branch on them.',
   'sendgrid-email': 'Sending an email through SendGrid.',
-  'twilio-verify': 'A one-time code sent and checked through Twilio Verify.',
+  'otp-sms': 'A one-time code the engine generates and delivers by SMS, then checks.',
+  'otp-email-typed': 'A one-time code the engine generates and delivers by email, then checks.',
   'eu-b2c-individual-kyc-eea':
     'The production reference flow written as custom steps: EU B2C individual KYC across the EEA, where the applicant chooses between a passport and a national ID card.',
   'eu-b2c-individual-kyc-eea-v2':

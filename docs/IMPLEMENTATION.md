@@ -217,7 +217,7 @@ recover from a challenge that merely went stale instead of refusing the customer
 filters bind like `when`: they are conditional arms, so they precede the one unconditional arm in
 their status group, and `Step.resolveTransition` takes the reason alongside the trigger.
 
-_Reasoning:_ before this, `twilio_verify` returning `CHALLENGE_EXPIRED` for an SMS that arrived
+_Reasoning:_ before this, an OTP connector's `CHALLENGE_EXPIRED` for a code that arrived
 two minutes late ended the onboarding, because every `rejected` arm was forced onto a terminal
 step. The alternative — dropping that constraint — would let a document swallow a compliance
 refusal silently. Naming the recoverable reasons keeps the guarantee and makes the recovery
@@ -231,14 +231,17 @@ step_, which needs no status of its own.
 
 ### Connector types
 
-`CONNECTOR_TYPES` = `kyc | kyb | aml | credit | phone_verification | email_verification |
+`CONNECTOR_TYPES` = `kyc | kyb | aml | credit | otp_verification |
 email_delivery | sms_delivery | bank_verification | payment | e_signature | document_storage |
 custom`.
 
-A step's connector declaration names two things. `id` is the adapter it invokes — `twilio_verify`,
+A step's connector declaration names two things. `id` is the adapter it invokes — `twilio_sms_otp`,
 `smtp` — matched against `ConnectorAdapter.id`. `type` is what that adapter **does**, from the set
 above, so `sendgrid_email` and `smtp` are both `email_delivery` and adding a provider joins an
-existing value rather than adding one.
+existing value rather than adding one. One-time codes are a single capability,
+`otp_verification`, whatever provider or channel carries them: `twilio_sms_otp` and
+`smtp_email_otp` both extend `BaseOtpConnector` (§4, "The OTP connectors"), and the channel is a
+property of each, not a connector type of its own.
 
 The set is capability-only on purpose. A market segment (B2C against B2B) is a property of the
 onboarding, not of the connector — the same identity check serves both — so it is not a value here.
@@ -655,11 +658,12 @@ types (§4) it can drive, an optional default id or type, and how much the autho
 binding under `config.connector` is checked against it at compile time, so an `otp-verify` bound to
 `sumsub_kyc`, or a `kyc-identity-verification` bound to a delivery connector, fails the document
 with `INVALID_VALUE` at `steps[i].config.connector` rather than a type-mismatch at runtime.
-`otp-verify` accepts `phone_verification` or `email_verification` and assumes the one that follows
-from its `channel`; `kyc-identity-verification` accepts `kyc`; `notify` accepts `email_delivery` or
+`otp-verify` accepts `otp_verification` only, and its `channel` (`sms` or `email`) is carried to the
+adapter as derived config; `kyc-identity-verification` accepts `kyc`; `notify` accepts `email_delivery` or
 `sms_delivery`; `http-call` accepts `custom` and defaults to `http_request`. The slot's `extras`
 says what else the binding may carry: `otp-verify` lets the author add `fieldMapping` keys beside
-the `recipient` and `code` it derives, and `kyc-identity-verification` and `notify` let them add
+the `recipient` and `code` it derives (it has no `config` extras: the `operation` and `channel` it
+derives are the adapter's whole config), and `kyc-identity-verification` and `notify` let them add
 both `fieldMapping` and `config` keys beside what the type derives (for `notify` that is only the
 `recipient` key, so the template's payload keys and the adapter's settings all travel on the
 binding). An addition that would override a derived key is refused — the derivation is the point of
@@ -684,8 +688,10 @@ Every binding also carries the compiled form's **failure policy** (§4): `errorH
 a `fallback` chain of up to three entries, each naming an `id` of the same capability and, where
 the slot allows, its own `fieldMapping` and `config` additions — laid under the same derived keys
 the primary has, so an SMTP stand-in can name the template an email API's primary never needed,
-while an entry declaring no additions inherits the primary's. `otp-verify`'s entries carry their
-own `startConfig` and `checkConfig`, since a mock's `challenge` is Twilio's `startVerification`.
+while an entry declaring no additions inherits the primary's. Every declaration an `otp-verify`
+emits, fallbacks included, carries the derived `config: { operation, channel }` — `operation` is
+`send` on the send and re-send steps and `check` on the code-entry step — so a fallback is an
+`otp_verification` adapter that reads the same two keys.
 The `connector-call` type has no slot at all: its `connectors` are declarations in full, as a
 compiled step carries them, which is what makes a mock `kyc` adapter on a collection step
 expressible without a `custom` step.
@@ -693,7 +699,7 @@ expressible without a `custom` step.
 **Collecting contact details and proving them are two steps.** `contact-details` collects `email`
 and `phoneNumber` under those canonical names, each `required`, `optional` or `omitted`.
 `otp-verify` collects nothing: it sends to the field the canonical role of its channel resolves to
-(`phoneNumber` for `sms` and `voice`, `email` for `email`), which a collector earlier in the
+(`phoneNumber` for `sms`, `email` for `email`), which a collector earlier in the
 document must have published — or to an explicit `recipientField` — and fails at load if neither
 is there. Its second compiled step is the code entry, with the code never persisted.
 
@@ -924,12 +930,12 @@ with `WorkflowScopeConflictError`. The four `users/*-local.workflow.json` files 
 `eu-b2c-individual-kyc-eea-veriff-v2-local` — are the fork pattern instead: copies under ids of their
 own, with renamed `sourceKey`s (and, for the manual-test walkthroughs, a local provisioning stub).
 
-| File                                                | Rev | Authored as                           | Connector types                       | Is                                                                                                |
-| --------------------------------------------------- | --- | ------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `eu-b2c-individual-kyc-eea.workflow.json`           | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card      |
-| `eu-b2c-individual-kyc-eea-v2.workflow.json`        | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The identical flow, authored through the specialized step types (§2.1)                            |
-| `eu-b2c-individual-kyc-eea-veriff.workflow.json`    | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The same flow with the KYC step bound to `veriff_kyc` (family `eu-b2c-individual-kyc-eea-veriff`) |
-| `eu-b2c-individual-kyc-eea-veriff-v2.workflow.json` | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The Veriff family's revision 2, through the specialized step types                                |
+| File                                                | Rev | Authored as                           | Connector types                     | Is                                                                                                |
+| --------------------------------------------------- | --- | ------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `eu-b2c-individual-kyc-eea.workflow.json`           | 1   | `custom` steps, one per compiled step | `otp_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card      |
+| `eu-b2c-individual-kyc-eea-v2.workflow.json`        | 2   | specialized step types                | `otp_verification`, `kyc`, `custom` | The identical flow, authored through the specialized step types (§2.1)                            |
+| `eu-b2c-individual-kyc-eea-veriff.workflow.json`    | 1   | `custom` steps, one per compiled step | `otp_verification`, `kyc`, `custom` | The same flow with the KYC step bound to `veriff_kyc` (family `eu-b2c-individual-kyc-eea-veriff`) |
+| `eu-b2c-individual-kyc-eea-veriff-v2.workflow.json` | 2   | specialized step types                | `otp_verification`, `kyc`, `custom` | The Veriff family's revision 2, through the specialized step types                                |
 
 Seventeen steps: contact and consents → SMS one-time code (with a resend path) → declared identity →
 purpose and source of funds → `select_document_type` → the capture steps for the document chosen →
@@ -1077,15 +1083,16 @@ instead.
 checks over every checked-in file, holds every connector `sourceKey` to one family across all three
 scopes, and holds each fixture's file name to its `id`, which the fixtures site keys its URL by.
 
-| File                                 | Connector types                               | Demonstrates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `base`                               | `kyc`                                         | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression, one root `agreements` declaration (`base-terms`, bound to `accept_terms`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `conditional-fields-and-transitions` | `kyc`                                         | `when` on fields and on transitions, `persist: false`, branching manual review                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `twilio-verify`                      | `phone_verification`                          | The same shape against a real provider                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `sendgrid-email`                     | `email_delivery`                              | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `file-upload`                        | `kyc`                                         | `file` field plus the document reservation flow                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `manual-review`                      | none                                          | All three manual triggers and a recursive `success` transition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `scoring`                            | `phone_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_verify` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting |
+| File                                 | Connector types                             | Demonstrates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `base`                               | `kyc`                                       | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression, one root `agreements` declaration (`base-terms`, bound to `accept_terms`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `conditional-fields-and-transitions` | `kyc`                                       | `when` on fields and on transitions, `persist: false`, branching manual review                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `otp-sms`                            | `otp_verification`                          | The engine-owned `twilio_sms_otp` connector over the `sms` channel                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `otp-email-typed`                    | `otp_verification`                          | `otp-verify` over the `email` channel after a `contact-details` that omits the phone number, run against the real `smtp_email_otp` connector by `packages/engine/test/otp-email.e2e-spec.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `sendgrid-email`                     | `email_delivery`                            | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `file-upload`                        | `kyc`                                       | `file` field plus the document reservation flow                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `manual-review`                      | none                                        | All three manual triggers and a recursive `success` transition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `scoring`                            | `otp_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_sms_otp` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting |
 
 ---
 
@@ -1164,6 +1171,9 @@ explicit and forcing the caller to handle each.
      transition whose status matches, whose `reason` covers the refusal, and whose `when` holds.
      Order in the JSON is the precedence. Since the unconditional fallback is optional (§2), a
      trigger whose arms all fail resolves to no transition, which ends the onboarding `invalid`.
+     A refusal's reason is kept in the next state's `rejectionReason` wherever it routes — a
+     terminal step, manual review — except to a step awaiting the user, such as an expired code's
+     re-send step, which carries none.
 8. Assign the next state, save, and write the `onboarding.state_transition` audit row **inside the
    same transaction**. A next state that parks is stamped first: `stampParkedAt` sets
    `pendingConnector.parkedAt` (ISO-8601) when the record has none, and leaves a re-park's stamp
@@ -1245,14 +1255,14 @@ A connector declaration on a step is:
 
 ```jsonc
 {
-  "name": "twilio_verify", // instance name, unique within the step
-  "id": "twilio_verify", // resolves to a registered adapter's `id`
-  "type": "phone_verification", // what that adapter does; must match the adapter's own `type`
+  "name": "send_code", // instance name, unique within the step
+  "id": "twilio_sms_otp", // resolves to a registered adapter's `id`
+  "type": "otp_verification", // what that adapter does; must match the adapter's own `type`
   "order": 1, // execution order within the step
   "async": false, // true → initiate, park, resume on callback
   "canReject": true, // this call may reject; constrains the step's `rejected` routing
   "fieldMapping": { "recipient": "phoneNumber" }, // payloadKey → context/field name
-  "config": { "operation": "startVerification" },
+  "config": { "operation": "send", "channel": "sms" },
 } // adapter-specific, validated at load
 ```
 
@@ -1438,7 +1448,7 @@ file before it is persisted as well as over every stored revision; see "Load and
 An adapter may declare a `settingsSchema` on `ConnectorAdapter` — a list of
 `{key, secret, required, pattern?}` fields. `pattern` is an optional
 `RegExp` a submitted value must match, checked in the same collect-all-issues validation as every
-other rule; only `twilio_verify.verifyServiceSid` and `sendgrid_email.from` declare one today. An
+other rule; only `twilio_sms_otp`'s `accountSid` and `messagingServiceSid` and `sendgrid_email.from` declare one today. An
 adapter with no `settingsSchema` is not configurable and does not appear on the admin API below —
 `http_request` is the shipped example, since its secret aliases are named by workflow JSON rather
 than by the adapter and so remain deployment configuration (`HTTP_CONNECTOR_SECRETS`).
@@ -1461,13 +1471,13 @@ since the adapter registry's factory already injects every adapter.
 
 Declared schemas:
 
-| Id               | Keys                                                                                                                  |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `sendgrid_email` | `apiKey` (secret, required), `from` (required, must match an email-address `pattern`)                                 |
-| `twilio_verify`  | `accountSid` (required), `authToken` (secret, required), `verifyServiceSid` (required, must match `^VA[A-Za-z0-9]+$`) |
-| `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       |
-| `sumsub_kyc`     | `appToken` (required), `secretKey` (secret, required), `callbackSigningSecret` (secret, required)                     |
-| `veriff_kyc`     | `apiKey` (required), `sharedSecretKey` (secret, required)                                                             |
+| Id               | Keys                                                                                                                                                                                            |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sendgrid_email` | `apiKey` (secret, required), `from` (required, must match an email-address `pattern`)                                                                                                           |
+| `twilio_sms_otp` | `accountSid` (required, must match `^AC[0-9a-fA-F]{32}$`), `authToken` (secret, required), `messagingServiceSid` (required, must match `^MG[0-9a-fA-F]{32}$`) — see "The OTP connectors" below. |
+| `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                                                                                                 |
+| `sumsub_kyc`     | `appToken` (required), `secretKey` (secret, required), `callbackSigningSecret` (secret, required)                                                                                               |
+| `veriff_kyc`     | `apiKey` (required), `sharedSecretKey` (secret, required)                                                                                                                                       |
 
 Stored values are one flat `Record<string, string>` per connector, held as plaintext JSON in the
 `connectors` table (`id` primary key, `type`, `settings jsonb`, `updated_at`, `updated_by`) — see
@@ -1488,7 +1498,7 @@ Five guarded routes, all behind `AzureJwtGuard`, form the admin surface:
 | DELETE | `/v1/admin/connectors/:connectorId` | Drops the stored row, leaving every key `unset`         |
 
 A response identifies the connector with the same `id` / `type` pair a workflow declaration uses:
-`id` is the adapter's own identifier (`twilio_verify`), `type` is its capability from
+`id` is the adapter's own identifier (`twilio_sms_otp`), `type` is its capability from
 `CONNECTOR_TYPES` (§2), so `sendgrid_email` and `smtp` are both `email_delivery`. `type` is declared
 by the adapter, never submitted by an operator — a capability is not a configuration choice, and the
 list endpoint has to report one for connectors that have no stored row at all. It is stamped onto
@@ -1507,7 +1517,7 @@ and `value` — `value` is present only when `secret` is `false`; a secret's val
 engine, not even masked. `PUT`'s body is `{ settings: Record<string, string> }` and rejects with
 `400 CONNECTOR_SETTINGS_INVALID` on an undeclared key, a missing
 required key, a non-string/empty value, a value that fails a field's declared `pattern` (for
-example `twilio_verify.verifyServiceSid` and `sendgrid_email.from`), or — because `PUT` replaces
+example `twilio_sms_otp`'s `messagingServiceSid` and `sendgrid_email.from`), or — because `PUT` replaces
 the map wholesale — a body that silently omits a key that is currently stored. That last case
 names every key that would be dropped and is refused unless the request carries `?replace=true`,
 the explicit opt-in to drop them. `smtp` additionally rejects `username` or `password` supplied
@@ -1552,20 +1562,108 @@ Every mock's connector id, class name and filename begin with `mock`, so a mock 
 recognisable wherever it appears — in a workflow declaration, an audit row or the
 adapters directory.
 
-| Type                                                 | Kind        | Notes                                                                                                                                                                                                           |
-| ---------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `http_request`                                       | **Generic** | Config-driven outbound JSON call. Env-configured secrets; see `packages/engine/docs/http-request-connector.md`.                                                                                                 |
-| `twilio_verify`                                      | Real        | Twilio Verify start/check; `TwilioVerifyUnavailableException` on provider failure.                                                                                                                              |
-| `sendgrid_email`                                     | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                                                                                        |
-| `smtp`                                               | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`.                                                                         |
-| `sumsub_kyc`                                         | Real        | KYC via Sumsub; `async: true`-only (park on `execute`, resume on the provider's callback). See "The KYC connector" below.                                                                                       |
-| `veriff_kyc`                                         | Real        | KYC via Veriff, API-only; the same kernel and the same `async: true`-only contract as `sumsub_kyc`. See "The KYC connector" below.                                                                              |
-| `mock_kyc_1`, `mock_kyc_2`                           | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                                                                                          |
-| `mock_phone_verification`, `mock_email_verification` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.                                                                           |
-| `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                                                                                                    |
-| `mock_sumsub_file_upload`                            | Mock        | Reads a completed document from object storage.                                                                                                                                                                 |
-| `mock_async_callback`                                | Mock        | The async/callback reference implementation; declares `callbackAuth: {kind: 'none'}` with a justification.                                                                                                      |
-| `mock_async_callback_2`                              | Mock        | The same adapter under a second id with its own initiations, declaring one callback field (`providerVerdict`); lets a slot be switched between two callback-capable adapters and shows the callback-only guard. |
+| Type                       | Kind        | Notes                                                                                                                                                                                                           |
+| -------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `http_request`             | **Generic** | Config-driven outbound JSON call. Env-configured secrets; see `packages/engine/docs/http-request-connector.md`.                                                                                                 |
+| `sendgrid_email`           | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                                                                                        |
+| `smtp`                     | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`.                                                                         |
+| `smtp_email_otp`           | Local       | Engine-owned one-time codes by email through `smtp`; extends `BaseOtpConnector`, see "The OTP connectors" below.                                                                                                |
+| `sumsub_kyc`               | Real        | KYC via Sumsub; `async: true`-only (park on `execute`, resume on the provider's callback). See "The KYC connector" below.                                                                                       |
+| `twilio_sms_otp`           | Real        | Engine-owned one-time codes by SMS through Twilio Programmable Messaging; extends `BaseOtpConnector`, see "The OTP connectors" below.                                                                           |
+| `veriff_kyc`               | Real        | KYC via Veriff, API-only; the same kernel and the same `async: true`-only contract as `sumsub_kyc`. See "The KYC connector" below.                                                                              |
+| `mock_kyc_1`, `mock_kyc_2` | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                                                                                          |
+| `mock_otp`                 | Mock        | In-memory OTP challenge with TTL and attempt budget, keyed by onboarding and channel; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.                                          |
+| `mock_email_delivery`      | Mock        | Keeps the templated message in memory instead of sending it.                                                                                                                                                    |
+| `mock_sumsub_file_upload`  | Mock        | Reads a completed document from object storage.                                                                                                                                                                 |
+| `mock_async_callback`      | Mock        | The async/callback reference implementation; declares `callbackAuth: {kind: 'none'}` with a justification.                                                                                                      |
+| `mock_async_callback_2`    | Mock        | The same adapter under a second id with its own initiations, declaring one callback field (`providerVerdict`); lets a slot be switched between two callback-capable adapters and shows the callback-only guard. |
+
+### The OTP connectors (`twilio_sms_otp`, `smtp_email_otp`)
+
+Every `otp_verification` connector extends the abstract `BaseOtpConnector`
+(`adapters/built-in/otp/base-otp.connector.ts`), and each provider is its own connector with its own
+id, settings row and audit trail. **The engine owns the code**: the base class generates it, stores
+it, checks it and expires it; a subclass names its `id` and its one `channel`, declares the
+`settingsSchema` it reads, and implements `deliver(recipient, code)` — the only provider-specific
+part. `deliver` returns `delivered`, or `invalid_recipient` when the provider refuses the address or
+number itself, and throws for everything else. The declaration it serves carries the derived
+`config: { operation: 'send' | 'check', channel: 'sms' | 'email' }` (§2.1), and its payload is
+`recipient` on a send and `recipient` plus `code` on a check. A declaration whose `operation` is
+neither value, or whose `channel` is not the connector's own, fails at startup through
+`validateDeclaration` (`OtpDeclarationInvalidError`), so an email connector bound to an `sms` step
+never boots.
+
+Because providers are ordinary connectors, switching one is an edit to the declaration's `id`, and
+failing over is the declaration's `fallback` chain and `errorHandler` (§4): a `deliver` that throws
+stores nothing, so the next provider in the chain sends a fresh code. Challenges are keyed by
+onboarding and channel, not by connector, so the check step's connector finds a code that any
+connector of the same channel sent — the primary checks what its fallback delivered.
+
+Named constants in the base class, not configuration: a six-digit code, a ten-minute lifetime, five
+check attempts per code, five sends per challenge.
+
+| Call                             | Result                                                                                    |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| send                             | `accepted`, after `deliver` returned                                                      |
+| send, past the fifth send        | `rejected` with `ATTEMPTS_EXHAUSTED`, nothing stored or delivered                         |
+| send, recipient refused          | `invalid_data` on the recipient field (`INVALID`), flagged retryable, nothing stored      |
+| send, provider not configured    | throws `ConnectorNotConfiguredException` (`503 CONNECTOR_NOT_CONFIGURED`), nothing stored |
+| send, provider could not deliver | throws `OtpDeliveryFailedException` (`500 OTP_DELIVERY_FAILED`), nothing stored           |
+| check, no challenge              | `rejected` with `CHALLENGE_NOT_FOUND`                                                     |
+| check, expired                   | `rejected` with `CHALLENGE_EXPIRED`                                                       |
+| check, wrong code, attempts left | `invalid_data` on the code field (`INVALID`), flagged retryable                           |
+| check, wrong code, fifth attempt | `rejected` with `ATTEMPTS_EXHAUSTED`                                                      |
+| check, right code                | `accepted`; the challenge row is deleted                                                  |
+| missing recipient or code        | `invalid`                                                                                 |
+| declaration of another channel   | `invalid`, nothing delivered (startup refuses such a declaration first)                   |
+
+The field named in an `INVALID` error is the source field of the `code` or `recipient` payload
+key, so a renamed `codeField` reports under its own name. `otp-verify` routes `CHALLENGE_EXPIRED` and
+`CHALLENGE_NOT_FOUND` to its re-send step and every other refusal to `refused` (§2.1). Its send and
+re-send declare `canReject` and route `rejected` to `refused` too, so the send past the budget ends
+the onboarding instead of leaving it on a step no submit can leave; the hand-written v1 revisions
+route their sends the same way.
+
+**What is stored.** One `otp_challenges` row per onboarding and channel (§9): a salted SHA-256 of
+the code, the salt, the expiry, the check attempts used and how many times the code was sent. The
+code itself is never stored, logged or returned, and is compared with `timingSafeEqual`. A send
+replaces the hash, salt and expiry, resets the attempts and adds one to `send_count`; the count
+survives every re-send — whichever provider sent it — which is what caps SMS cost per onboarding,
+and the row is deleted only when a check succeeds. The row is written only after `deliver`
+returned, so a delivery that fails — the provider is down, or its settings are missing — spends no
+send and leaves the previous code valid. The rows are written outside the submit's transaction, so a wrong code's spent
+attempt survives the rollback that ends that submit. They go through a pool of their own
+(`OtpChallengesConnection`, `OTP_DATABASE_POOL_SIZE`, §10), never the main one: the submit already
+holds a main-pool connection while the connector runs, and waiting on that same pool for a second
+is hold-and-wait — enough concurrent OTP submits would each hold one connection, wait forever for
+another, and stop the engine. A wrong code raises `attempts` with one atomic
+`UPDATE … SET attempts = attempts + 1 … RETURNING attempts`, so concurrent submits cannot overrun
+the budget. A hash does not protect a six-digit code from someone who can read the table; the short
+lifetime and the deletion on success do (decision record 0048).
+
+**Providers.** `ConnectorsModule` registers each subclass in `BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS`
+like any other adapter; a new provider is one class there (`docs/EXTENDING.md`).
+
+- `twilio_sms_otp` (`TwilioSmsOtpConnector`, channel `sms`) posts `To`, `MessagingServiceSid` and
+  `Body` ("Your verification code is NNNNNN.") to Twilio Programmable Messaging,
+  `…/Accounts/{accountSid}/Messages.json`, with Basic authentication from the stored `accountSid`
+  and `authToken`. All three settings are required; a missing one raises
+  `503 CONNECTOR_NOT_CONFIGURED` naming the key. A non-2xx answer whose Twilio error `code`
+  refuses the `To` number itself — 21211 invalid, 21610 opted out, 21612 unreachable by SMS, 21614
+  a landline — is `invalid_recipient`; any other non-2xx answer, a network failure or a timeout
+  (`OTP_SMS_TIMEOUT_MS`, §10) raises `OtpDeliveryFailedException`. The response body is read to the
+  end either way, so the connection goes back to undici's pool. Operators store the settings on
+  the `twilio_sms_otp` connector in the admin panel's Connectors tab.
+- `smtp_email_otp` (`SmtpEmailOtpConnector`, channel `email`) renders the built-in template
+  `email-templates/built-in/otp-code.html` with `SmtpConnector.renderBody` and sends it with the
+  subject "Your verification code" through `SmtpConnector.sendMail`, so it needs SMTP to be enabled
+  and configured (§10). It declares no settings of its own and so is not listed by
+  `/v1/admin/connectors`. `sendMail` reports a typed outcome, which it maps: an address that is not
+  a valid, header-safe email is `invalid_recipient`; `SMTP_ENABLED=false` or an invalid
+  `SMTP_FROM`, `SMTP_HOST`, `SMTP_PORT` or `SMTP_TIMEOUT_MS` raises `503 CONNECTOR_NOT_CONFIGURED`
+  with `connectorId: 'smtp'` and that key; a transport failure, or a server refusing the recipient,
+  raises `OtpDeliveryFailedException`. `SmtpConnector.execute` maps the same outcomes onto its
+  connector results for workflow email steps exactly as before.
 
 ### The generic HTTP connector
 
@@ -2415,6 +2513,7 @@ so a version is a row rather than half of a composite key — decision record
 | `onboarding_documents`          | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                                                                                         |
 | `client_webhook_outbox`         | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                                                                                  |
 | `audit_log`                     | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                                                                               |
+| `otp_challenges`                | one live code per `(onboarding_id, channel)` (`UNIQUE`): `code_hash` (hex SHA-256 of salt and code — never the code), `code_salt`, `expires_at`, `attempts`, `send_count`, timestamps; `onboarding_id` FK `fk_otp_challenges_onboarding` `ON DELETE CASCADE`                                                                                                                                            |
 | `connectors`                    | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                                                                                |
 | `workflows`                     | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below                                                                |
 | `workflow_versions`             | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                                                                               |
@@ -2469,7 +2568,9 @@ directions and fails if entity and database ever disagree; see decision record
 One migration, `0001_initial_schema` (class `InitialSchema0001`, `name` ending in a 13-digit
 timestamp — TypeORM parses the last 13 characters), creates the whole schema. A file under the
 migrations glob may export nothing but its class: TypeORM instantiates every export as a migration.
-A later migration continues the sequence as `0002_description.ts`.
+Later migrations continue the sequence as `0002_description.ts`: `0002_create_otp_challenges`
+creates `otp_challenges`, unique on `(onboarding_id, channel)`, then adds its foreign key to
+`onboardings` separately ([0048](decisions/0048-engine-owned-otp-with-channel-adapters.md)).
 
 No migration has ever run against a deployed environment, so the incremental history (fifteen
 files, `0001_init` to `0033_add_onboardings_created_at_index`) was folded into this one: it states
@@ -2665,8 +2766,16 @@ cannot express:
   key, so this only sets how promptly the engine notices. Applies under the same modes as the
   sweep.
 
+`OTP_SMS_TIMEOUT_MS` (default 10000, minimum 100, maximum 30000) is how long `twilio_sms_otp`
+waits for Twilio Programmable Messaging before raising `OTP_DELIVERY_FAILED`. The
+Twilio credentials themselves are connector settings, not configuration.
+
+`OTP_DATABASE_POOL_SIZE` (default 5, minimum 1, maximum 50) sizes the OTP challenges' own
+connection pool (§4, "The OTP connectors"), opened on the first OTP step beside the main pool, so a
+process holds up to that many connections more than the main pool's.
+
 Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_CONNECTOR_TIMEOUT_MS`,
-`TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`, `VERIFF_TIMEOUT_MS`: 100–30000).
+`OTP_SMS_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`, `VERIFF_TIMEOUT_MS`: 100–30000).
 `SUMSUB_BASE_URL` (default `https://api.sumsub.com`) and `SUMSUB_TIMEOUT_MS` are deployment
 settings on `AppConfig`, not credentials — `sumsub_kyc`'s `appToken`/`secretKey` are DB-backed
 like every other adapter's `settingsSchema` (§4). So are `VERIFF_BASE_URL` (default
@@ -2674,8 +2783,7 @@ like every other adapter's `settingsSchema` (§4). So are `VERIFF_BASE_URL` (def
 and `VERIFF_TIMEOUT_MS` (default 10000, as Sumsub's); `veriff_kyc`'s `apiKey`/`sharedSecretKey` are
 DB-backed.
 
-**No connector credential is declared in `AppConfig` any more.** `TWILIO_ACCOUNT_SID`,
-`TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY`, `SENDGRID_FROM`,
+**No connector credential is declared in `AppConfig` any more.** `SENDGRID_API_KEY`, `SENDGRID_FROM`,
 `SMTP_USERNAME` and `SMTP_PASSWORD` are all deleted outright. `HTTP_CONNECTOR_SECRETS` stays,
 because `http_request` is not an operator-configurable connector (§4). `ENCRYPTION_KEY` is the
 one setting the encryption of `onboardings.context` (§9) needs — the key-encryption key, absent by
@@ -2872,7 +2980,7 @@ enum:
 | `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 401 / 503 |
 | `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 410       |
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                                                                                                                                                                                                                                                                                    | 503       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | 500       |
+| `OTP_DELIVERY_FAILED`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the

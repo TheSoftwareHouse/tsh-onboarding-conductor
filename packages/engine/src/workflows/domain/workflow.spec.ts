@@ -1967,9 +1967,9 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_phone_verification',
-                id: 'mock_phone_verification',
-                type: 'phone_verification',
+                name: 'mock_otp',
+                id: 'mock_otp',
+                type: 'otp_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -2039,9 +2039,9 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_phone_verification',
-                id: 'mock_phone_verification',
-                type: 'phone_verification',
+                name: 'mock_otp',
+                id: 'mock_otp',
+                type: 'otp_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -2143,9 +2143,9 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_phone_verification',
-                id: 'mock_phone_verification',
-                type: 'phone_verification',
+                name: 'mock_otp',
+                id: 'mock_otp',
+                type: 'otp_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -2203,6 +2203,135 @@ describe('Workflow', () => {
     expect(result.isRejected()).toBe(true);
     expect(result.getRejectionReason()).toBe('ATTEMPTS_EXHAUSTED');
     expect(result.getNextState()?.context.verificationCode).toBeUndefined();
+  });
+
+  it('keeps rejectionReason out of the next state when a rejection routes to a non-terminal step', async () => {
+    const resendWorkflow = new Workflow(
+      normalizeUntypedSteps({
+        id: 'otp-resend',
+        version: 1,
+        initial: 'verify_code',
+        steps: [
+          {
+            name: 'verify_code',
+            status: 'awaiting_user',
+            data: { verificationCode: { type: 'text', required: true, persist: false } },
+            connectors: [
+              {
+                name: 'mock_otp',
+                id: 'mock_otp',
+                type: 'otp_verification',
+                canReject: true,
+                order: 1,
+                fieldMapping: { code: 'verificationCode' },
+                optionalFieldMapping: {},
+                config: { operation: 'check', channel: 'sms' },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'resend', reason: ['CHALLENGE_EXPIRED'] },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          {
+            name: 'resend',
+            status: 'awaiting_user',
+            data: {},
+            transitions: [{ status: 'success', target: 'verify_code' }],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest
+          .fn()
+          .mockResolvedValue(ConnectorExecutionResult.rejected('CHALLENGE_EXPIRED')),
+        resume: jest.fn(),
+      },
+    );
+
+    const result = await resendWorkflow.evaluate({
+      currentStep: 'verify_code',
+      submittedData: { verificationCode: '123456' },
+      onboardingContext: {},
+      onboardingId: 'onboarding-123',
+      onboardingScores: {},
+    });
+
+    expect(result.isRejected()).toBe(true);
+    expect(result.getRejectionReason()).toBe('CHALLENGE_EXPIRED');
+    expect(result.getNextState()).toMatchObject({
+      status: 'awaiting_user',
+      currentStep: 'resend',
+      completedAt: null,
+      rejectionReason: null,
+    });
+  });
+
+  it('keeps rejectionReason in the next state when a rejection routes to manual review', async () => {
+    const reviewWorkflow = new Workflow(
+      normalizeUntypedSteps({
+        id: 'kyc-review',
+        version: 1,
+        initial: 'collect_document',
+        steps: [
+          {
+            name: 'collect_document',
+            status: 'awaiting_user',
+            data: { email: { type: 'text', required: true } },
+            connectors: [
+              {
+                name: 'mock_kyc',
+                id: 'mock_kyc_1',
+                type: 'kyc',
+                canReject: true,
+                order: 1,
+                fieldMapping: { email: 'email' },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'manual_review', reason: ['CONNECTOR_REJECTED'] },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          {
+            name: 'manual_review',
+            status: 'awaiting_manual_review',
+            data: {},
+            transitions: [
+              { status: 'manual.approve', target: 'approved' },
+              { status: 'manual.reject', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest
+          .fn()
+          .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
+        resume: jest.fn(),
+      },
+    );
+
+    const result = await reviewWorkflow.evaluate({
+      currentStep: 'collect_document',
+      submittedData: { email: 'person@example.com' },
+      onboardingContext: {},
+      onboardingId: 'onboarding-123',
+      onboardingScores: {},
+    });
+
+    expect(result.getNextState()).toMatchObject({
+      status: 'awaiting_manual_review',
+      currentStep: 'manual_review',
+      completedAt: null,
+      rejectionReason: 'CONNECTOR_REJECTED',
+    });
   });
 
   it('routes rejected non-verifyCode connector outcome through rejected transition with accepted data persisted in context', async () => {
@@ -2643,9 +2772,9 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_phone_verification',
-                id: 'mock_phone_verification',
-                type: 'phone_verification',
+                name: 'mock_otp',
+                id: 'mock_otp',
+                type: 'otp_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -2709,9 +2838,9 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_phone_verification',
-                id: 'mock_phone_verification',
-                type: 'phone_verification',
+                name: 'mock_otp',
+                id: 'mock_otp',
+                type: 'otp_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -2777,9 +2906,9 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_phone_verification',
-                id: 'mock_phone_verification',
-                type: 'phone_verification',
+                name: 'mock_otp',
+                id: 'mock_otp',
+                type: 'otp_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },

@@ -5,7 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { MockAsyncCallbackConnector } from '../src/connectors/adapters/fixtures/mock-async-callback.connector';
-import { MockPhoneVerificationConnector } from '../src/connectors/adapters/fixtures/mock-verification.connector';
+import { MockOtpConnector } from '../src/connectors/adapters/fixtures/mock-otp.connector';
 import {
   ConnectorExecutionResult,
   type ConnectorRejectionReason,
@@ -63,9 +63,9 @@ type MockCallbackOptions = Readonly<{
 }>;
 
 const UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID = 'unresolved';
-const TWILIO_PHONE_NUMBER = '+15551234567';
-/** Twilio's own attempt budget, which the mock standing in for it reproduces. */
-const TWILIO_MAX_ATTEMPTS = 5;
+const OTP_PHONE_NUMBER = '+15551234567';
+/** The attempt budget the OTP connectors (and their mock) allow per challenge. */
+const OTP_MAX_ATTEMPTS = 5;
 
 let app: NestExpressApplication | null = null;
 let webhookServer: Server | null = null;
@@ -845,7 +845,7 @@ type LifecycleAuditExpectation = {
 };
 
 const startWorkflowOnboarding = async (
-  workflowId: 'base' | 'manual-review' | 'twilio-verify',
+  workflowId: 'base' | 'manual-review' | 'otp-sms',
   expectedCurrentStep: string,
   expectedStatus: 'awaiting_user' | 'awaiting_manual_review',
 ) => {
@@ -1000,8 +1000,8 @@ describe('Audit transaction slice (e2e)', () => {
     process.env.ADMIN_AUTH_ENABLED = 'false';
     process.env.CLIENT_WEBHOOK_BASE_URL = webhookBaseUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = '150';
-    // The OTP audit trail is driven through the mock standing in for twilio_verify, so the
-    // suite needs no Twilio account and sends no messages.
+    // The OTP audit trail is driven through the mock standing in for twilio_sms_otp, so the
+    // suite needs no SMS provider account and sends no messages.
 
     const { createApp } = await import('../src/main');
 
@@ -2102,16 +2102,16 @@ describe('Audit transaction slice (e2e)', () => {
     ]);
 
     const rejectedOnboardingId = await startWorkflowOnboarding(
-      'twilio-verify',
+      'otp-sms',
       'request_code',
       'awaiting_user',
     );
-    const twilioVerifyMockForRejected = getApp().get(MockPhoneVerificationConnector);
-    twilioVerifyMockForRejected.__resetForTests();
+    const otpMockForRejected = getApp().get(MockOtpConnector);
+    otpMockForRejected.__resetForTests();
 
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
-      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
+      .send({ phoneNumber: OTP_PHONE_NUMBER })
       .expect((result) => expect([200, 201]).toContain(result.status));
 
     const isLifecycleOrRejectedAttemptRow = (row: AuditLogRow) =>
@@ -2122,7 +2122,7 @@ describe('Audit transaction slice (e2e)', () => {
       (await readAuditRows(rejectedOnboardingId)) as AuditLogRow[]
     ).filter(isLifecycleOrRejectedAttemptRow);
 
-    for (let attempt = 1; attempt < TWILIO_MAX_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt < OTP_MAX_ATTEMPTS; attempt += 1) {
       await request(getApp().getHttpServer())
         .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
         .send({ verificationCode: String(attempt).repeat(6) })
@@ -2157,9 +2157,9 @@ describe('Audit transaction slice (e2e)', () => {
     );
 
     expect(rejectedRowsAfterAllAttempts).toHaveLength(
-      rejectedRowsBaseline.length + TWILIO_MAX_ATTEMPTS,
+      rejectedRowsBaseline.length + OTP_MAX_ATTEMPTS,
     );
-    expect(retryableInvalidAttemptRows).toHaveLength(TWILIO_MAX_ATTEMPTS - 1);
+    expect(retryableInvalidAttemptRows).toHaveLength(OTP_MAX_ATTEMPTS - 1);
 
     await expectLifecycleAuditRows(
       rejectedOnboardingId,
@@ -2168,7 +2168,7 @@ describe('Audit transaction slice (e2e)', () => {
           action: 'onboarding.state_transition',
           before: {
             id: rejectedOnboardingId,
-            workflowId: 'twilio-verify',
+            workflowId: 'otp-sms',
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'verify_code',
@@ -2176,14 +2176,14 @@ describe('Audit transaction slice (e2e)', () => {
           },
           after: {
             id: rejectedOnboardingId,
-            workflowId: 'twilio-verify',
+            workflowId: 'otp-sms',
             workflowVersion: 1,
             status: 'rejected',
             currentStep: null,
             scores: {},
           },
           metadata: {
-            workflowId: 'twilio-verify',
+            workflowId: 'otp-sms',
             workflowVersion: 1,
             appliedStep: 'verify_code',
             fromStatus: 'awaiting_user',
@@ -2198,7 +2198,7 @@ describe('Audit transaction slice (e2e)', () => {
           action: 'onboarding.state_transition',
           before: {
             id: rejectedOnboardingId,
-            workflowId: 'twilio-verify',
+            workflowId: 'otp-sms',
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'request_code',
@@ -2206,14 +2206,14 @@ describe('Audit transaction slice (e2e)', () => {
           },
           after: {
             id: rejectedOnboardingId,
-            workflowId: 'twilio-verify',
+            workflowId: 'otp-sms',
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'verify_code',
             scores: {},
           },
           metadata: {
-            workflowId: 'twilio-verify',
+            workflowId: 'otp-sms',
             workflowVersion: 1,
             appliedStep: 'request_code',
             fromStatus: 'awaiting_user',
@@ -2229,14 +2229,14 @@ describe('Audit transaction slice (e2e)', () => {
           before: null,
           after: {
             id: rejectedOnboardingId,
-            workflowId: 'twilio-verify',
+            workflowId: 'otp-sms',
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'request_code',
             scores: {},
           },
           metadata: {
-            workflowId: 'twilio-verify',
+            workflowId: 'otp-sms',
             workflowVersion: 1,
             appliedStep: null,
             fromStatus: null,
@@ -2535,16 +2535,16 @@ describe('Audit transaction slice (e2e)', () => {
     ]);
 
     const retryableInvalidOnboardingId = await startWorkflowOnboarding(
-      'twilio-verify',
+      'otp-sms',
       'request_code',
       'awaiting_user',
     );
-    const twilioVerifyMockForRetryableInvalid = getApp().get(MockPhoneVerificationConnector);
-    twilioVerifyMockForRetryableInvalid.__resetForTests();
+    const otpMockForRetryableInvalid = getApp().get(MockOtpConnector);
+    otpMockForRetryableInvalid.__resetForTests();
 
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${retryableInvalidOnboardingId}/submit`)
-      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
+      .send({ phoneNumber: OTP_PHONE_NUMBER })
       .expect((result) => expect([200, 201]).toContain(result.status));
 
     const retryableRowsBefore = (

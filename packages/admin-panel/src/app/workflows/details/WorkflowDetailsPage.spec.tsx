@@ -106,12 +106,12 @@ function definition(version: number, extraStep?: string): WorkflowDefinition {
         status: 'awaiting_manual_review',
         connectors: [
           {
-            id: 'twilio_verify',
-            authoredId: 'twilio_verify',
+            id: 'otp',
+            authoredId: 'otp',
             selected: false,
-            selectableIds: ['twilio_verify'],
+            selectableIds: ['otp'],
             versions: [],
-            name: 'twilio_verify',
+            name: 'otp',
             type: 'phone-verification',
             order: 1,
             canReject: true,
@@ -461,9 +461,10 @@ describe('WorkflowDetailsPage', () => {
       expect(name.className).not.toContain('uppercase');
       expect(name.closest('.uppercase')).toBeNull();
     }
-    expect(
-      screen.getByRole('link', { name: '→ Global settings for twilio_verify' }),
-    ).toHaveAttribute('href', ADMIN_ROUTES.connectors.root);
+    expect(screen.getByRole('link', { name: '→ Global settings for otp' })).toHaveAttribute(
+      'href',
+      ADMIN_ROUTES.connectors.root,
+    );
     expect(screen.queryByText('Config')).not.toBeInTheDocument();
     expect(within(screen.getByRole('complementary')).getByText('↻ retry')).toBeInTheDocument();
   });

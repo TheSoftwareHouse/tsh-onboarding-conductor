@@ -56,11 +56,11 @@ describe('resolveConnectorAdapterScopes', () => {
 
   it('reports a subclass of a built-in adapter registered as a user adapter as users', () => {
     const scopes = resolveConnectorAdapterScopes(
-      [new UserSubclassOfBuiltInConnector('twilio_verify_clone')],
+      [new UserSubclassOfBuiltInConnector('otp_clone')],
       groups,
     );
 
-    expect(scopes.get('twilio_verify_clone')).toBe('users');
+    expect(scopes.get('otp_clone')).toBe('users');
   });
 
   it('yields an empty map for an empty collection', () => {
