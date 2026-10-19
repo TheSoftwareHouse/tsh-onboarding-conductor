@@ -53,6 +53,9 @@ const createTestConfigModule = (overrides: Record<string, unknown> = {}) =>
         VERIFF_TIMEOUT_MS: 10000,
         ALGOAN_API_BASE_URL: 'https://api.algoan.com',
         ALGOAN_TIMEOUT_MS: 10000,
+        LEAN_AUTH_BASE_URL: 'https://auth.sandbox.sa.leantech.me',
+        LEAN_API_BASE_URL: 'https://sandbox.sa.leantech.me',
+        LEAN_TIMEOUT_MS: 15000,
         ...overrides,
       }),
     ],
@@ -584,6 +587,36 @@ describe('ConnectorsModule', () => {
       callbackAuth: { kind: 'hmac', signatureHeader: 'X-Hub-Signature', encoding: 'hex' },
     });
     expect(algoanAdapters[0].settingsSchema?.fields.map((field) => field.key)).toEqual([
+      'clientId',
+      'clientSecret',
+      'callbackSigningSecret',
+    ]);
+  });
+
+  it('registers both Lean adapters exactly once, with lean_bank_data signed over lean-signature', async () => {
+    const moduleRef = await compileConnectorsModule(testConfigModule);
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
+      strict: false,
+    }) as readonly ConnectorAdapter[];
+    const byId = (id: string) => adapterCollection.filter((adapter) => adapter.id === id);
+
+    expect(byId('lean_iban_verification')).toHaveLength(1);
+    expect(byId('lean_iban_verification')[0]).toMatchObject({ type: 'bank_verification' });
+    expect(byId('lean_iban_verification')[0].supportsAsyncCallback).toBeUndefined();
+
+    expect(byId('lean_bank_data')).toHaveLength(1);
+    expect(byId('lean_bank_data')[0]).toMatchObject({
+      type: 'credit',
+      supportsAsyncCallback: true,
+      callbackAuth: {
+        kind: 'hmac',
+        algorithm: 'sha512',
+        signatureHeader: 'lean-signature',
+        encoding: 'hex',
+      },
+    });
+    expect(byId('lean_bank_data')[0].settingsSchema?.fields.map((field) => field.key)).toEqual([
       'clientId',
       'clientSecret',
       'callbackSigningSecret',

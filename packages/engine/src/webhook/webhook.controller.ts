@@ -31,6 +31,7 @@ import { CreditProviderRejectedException } from '../connectors/errors/credit-pro
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
 import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
 import { AlgoanUnavailableException } from '../connectors/errors/algoan-unavailable.exception';
+import { LeanUnavailableException } from '../connectors/errors/lean-unavailable.exception';
 import { VeriffUnavailableException } from '../connectors/errors/veriff-unavailable.exception';
 import { TwilioVerifyUnavailableException } from '../connectors/errors/twilio-verify-unavailable.exception';
 import { InvalidStepDataException } from '../onboardings/errors/invalid-step-data.exception';
@@ -137,6 +138,7 @@ export class WebhookController {
       exception: CreditProviderRejectedException,
       args: ['algoan_credit', 429, 'TOO_MANY_REQUESTS'],
     },
+    LeanUnavailableException,
     WebhookDeliveryFailedException,
     // The callback is applied through the same submit path, so the same connector chain runs here
     // and the same plain-error propagation reaches the client: an adapter that raises an `Error`

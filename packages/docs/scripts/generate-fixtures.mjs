@@ -30,6 +30,8 @@ const DESCRIPTIONS = {
     'Fields that appear only when an earlier answer makes them relevant, transitions guarded by conditions, and a manual review fork.',
   'file-upload':
     'One document upload field, exercising the reserve-then-complete flow against object storage.',
+  'lean-ksa':
+    'A Saudi IBAN checked against the applicant’s national ID through Lean, then a bank linked through Lean’s widget, with income insights arriving on a signed webhook and deciding between approval and manual review.',
   'manual-review':
     'A step that parks the onboarding for an operator, with approve, reject and invalid each leading somewhere.',
   scoring:

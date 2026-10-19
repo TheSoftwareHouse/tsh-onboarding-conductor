@@ -89,8 +89,8 @@ A file is a list of typed steps — see the next section for the vocabulary — 
 quickest start is to copy the closest workflow from [workflows/fixtures/](../workflows/fixtures/),
 which holds the flows the e2e suites run against, each written as `custom` steps, one hand-written
 compiled step each (a new fixture is written in specialized step types): `base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`,
-`twilio-verify`, `sendgrid-email` and `scoring` — `scoring` is the one to copy for named scores and
-score-conditioned transitions. The production reference
+`twilio-verify`, `sendgrid-email`, `credit-check`, `lean-ksa` and `scoring` — `scoring` is the one to copy for named scores and
+score-conditioned transitions, `lean-ksa` for a provider that answers on a callback rather than in the same request. The production reference
 flow is [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), shipped built-in in both forms —
 revision 1 as `custom` steps, revision 2 (`-v2`) through the specialized types: EU B2C individual
 KYC across all 30 EEA states, where the applicant chooses between a passport and a national ID card.

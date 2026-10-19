@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lean LinkSDK harness (sandbox)</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+      input {
+        width: 100%;
+        padding: 0.4rem;
+        font-family: monospace;
+        box-sizing: border-box;
+      }
+      button {
+        margin-top: 0.75rem;
+        padding: 0.5rem 1rem;
+      }
+      pre {
+        background: #f4f4f4;
+        padding: 0.75rem;
+        overflow-x: auto;
+      }
+      .label {
+        font-weight: 600;
+        margin-top: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Lean LinkSDK harness</h1>
+    <p>Dev-only sandbox page. Connect a bank with one of the portal's mock-bank test users.</p>
+
+    <label for="onboardingId">Onboarding id</label>
+    <input id="onboardingId" autocomplete="off" />
+    <button id="connect" type="button">Connect bank</button>
+
+    <p class="label">SDK callback</p>
+    <pre id="sdk">not started</pre>
+    <p class="label">Onboarding state</p>
+    <pre id="state">not polling</pre>
+
+    <script src="https://cdn.leantech.me/link/loader/prod/sa/latest/lean-link-loader.min.js"></script>
+    <script>
+      const POLL_INTERVAL_MS = 3000;
+      const PARKED_STEP = 'bank_connect';
+      const PERMISSIONS = ['identity', 'accounts', 'balance', 'transactions'];
+      const ACCOUNT_TYPE = 'PERSONAL';
+      // Optional ?bank=<identifier> (e.g. LEA1_SAMAOB_SAU) skips the widget's bank list.
+      const BANK_IDENTIFIER = new URLSearchParams(window.location.search).get('bank') || undefined;
+
+      const idInput = document.getElementById('onboardingId');
+      const connectButton = document.getElementById('connect');
+      const sdkOutput = document.getElementById('sdk');
+      const stateOutput = document.getElementById('state');
+
+      const query = new URLSearchParams(window.location.search);
+      idInput.value = query.get('onboardingId') || '';
+
+      // KSA open-banking banks authenticate by redirecting to the bank; the widget only offers them
+      // when it has somewhere to send the customer back to. Lean appends its outcome parameters.
+      // ?redirect_base=https://... overrides where the bank sends the customer back, for a sandbox
+      // that refuses a plain-http loopback address.
+      function redirectUrl(outcome) {
+        const url = new URL(query.get('redirect_base') || window.location.href);
+        url.search = '';
+        url.searchParams.set('onboardingId', idInput.value.trim());
+        url.searchParams.set('lean_redirect', outcome);
+        return url.toString();
+      }
+
+      if (query.get('lean_redirect')) {
+        const returned = {};
+        for (const [key, value] of query.entries()) {
+          if (key !== 'onboardingId') returned[key] = value;
+        }
+        sdkOutput.textContent = JSON.stringify({ returnedFromBank: returned }, null, 2);
+      }
+
+      let pollTimer = null;
+
+      function showState(state) {
+        stateOutput.textContent = JSON.stringify(
+          { status: state.status, currentStep: state.currentStep, terminal: state.terminal },
+          null,
+          2,
+        );
+      }
+
+      // The webhook, not the SDK callback, is what resumes the step, so the page watches the engine
+      // until the onboarding leaves the parked step.
+      async function pollState(onboardingId) {
+        try {
+          const response = await fetch(
+            `/api/onboardings/${encodeURIComponent(onboardingId)}/state`,
+          );
+          const state = await response.json();
+
+          if (!response.ok) {
+            stateOutput.textContent = `state answered HTTP ${response.status}: ${state.message || state.code || ''}`;
+          } else {
+            showState(state);
+
+            if (state.terminal || state.currentStep !== PARKED_STEP) {
+              stateOutput.textContent += '\n(the step changed - done polling)';
+
+              return;
+            }
+          }
+        } catch (error) {
+          stateOutput.textContent = `state request failed: ${error.message}`;
+        }
+
+        pollTimer = setTimeout(() => pollState(onboardingId), POLL_INTERVAL_MS);
+      }
+
+      function startPolling(onboardingId) {
+        clearTimeout(pollTimer);
+        pollState(onboardingId);
+      }
+
+      connectButton.addEventListener('click', async () => {
+        const onboardingId = idInput.value.trim();
+
+        if (!onboardingId) {
+          sdkOutput.textContent = 'enter an onboarding id';
+
+          return;
+        }
+
+        connectButton.disabled = true;
+        sdkOutput.textContent = 'creating the session...';
+
+        try {
+          const response = await fetch('/api/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ onboardingId }),
+          });
+          const session = await response.json();
+
+          if (!response.ok) {
+            sdkOutput.textContent = `session failed (HTTP ${response.status}): ${session.message}`;
+
+            return;
+          }
+
+          sdkOutput.textContent = 'widget open';
+          startPolling(onboardingId);
+
+          Lean.connect({
+            app_token: session.appToken,
+            customer_id: session.customerId,
+            access_token: session.accessToken,
+            permissions: PERMISSIONS,
+            account_type: ACCOUNT_TYPE,
+            ...(BANK_IDENTIFIER ? { bank_identifier: BANK_IDENTIFIER } : {}),
+            success_redirect_url: redirectUrl('success'),
+            fail_redirect_url: redirectUrl('fail'),
+            sandbox: true,
+            callback: (result) => {
+              // The whole CallbackData: exit_point, last_api_response and lean_correlation_id are
+              // what Lean support asks for when a connection fails.
+              sdkOutput.textContent = JSON.stringify(result, null, 2);
+            },
+          });
+        } catch (error) {
+          sdkOutput.textContent = `failed: ${error.message}`;
+        } finally {
+          connectButton.disabled = false;
+        }
+      });
+
+      if (idInput.value) {
+        startPolling(idInput.value);
+      }
+    </script>
+  </body>
+</html>

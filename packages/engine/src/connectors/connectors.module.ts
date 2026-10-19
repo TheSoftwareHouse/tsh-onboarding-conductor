@@ -27,6 +27,9 @@ import { SmtpConnector } from './adapters/built-in/smtp.connector';
 import { SumsubKycConnector } from './adapters/built-in/sumsub-kyc.connector';
 import { SumsubClient } from './adapters/built-in/sumsub-kyc/sumsub-client';
 import { SumsubKycProvider } from './adapters/built-in/sumsub-kyc/sumsub-kyc.provider';
+import { LeanBankDataConnector } from './adapters/built-in/lean/lean-bank-data.connector';
+import { LeanClient } from './adapters/built-in/lean/lean-client';
+import { LeanIbanVerificationConnector } from './adapters/built-in/lean/lean-iban-verification.connector';
 import { VeriffKycConnector } from './adapters/built-in/veriff-kyc.connector';
 import { VeriffClient } from './adapters/built-in/veriff-kyc/veriff-client';
 import { VeriffKycProvider } from './adapters/built-in/veriff-kyc/veriff-kyc.provider';
@@ -84,6 +87,8 @@ const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
   SmtpConnector,
   SumsubKycConnector,
   VeriffKycConnector,
+  LeanIbanVerificationConnector,
+  LeanBankDataConnector,
   TwilioVerifyConnector,
 ] as const;
 
@@ -213,6 +218,7 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
     VeriffMediaFitter,
     VeriffKycProvider,
     MockCreditProvider,
+    LeanClient,
     ...CONNECTOR_ADAPTER_PROVIDERS,
     {
       provide: CONNECTOR_ADAPTER_COLLECTION,

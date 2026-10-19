@@ -35,6 +35,7 @@ import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavaila
 import { AlgoanUnavailableException } from '../connectors/errors/algoan-unavailable.exception';
 import { CreditProviderCredentialsRejectedException } from '../connectors/errors/credit-provider-credentials-rejected.exception';
 import { CreditProviderRejectedException } from '../connectors/errors/credit-provider-rejected.exception';
+import { LeanUnavailableException } from '../connectors/errors/lean-unavailable.exception';
 import { VeriffUnavailableException } from '../connectors/errors/veriff-unavailable.exception';
 import { TwilioVerifyUnavailableException } from '../connectors/errors/twilio-verify-unavailable.exception';
 import {
@@ -118,6 +119,7 @@ const CONNECTOR_EXECUTION_ERRORS = [
   AlgoanUnavailableException,
   { exception: CreditProviderCredentialsRejectedException, args: ['algoan_credit'] },
   { exception: CreditProviderRejectedException, args: ['algoan_credit', 429, 'TOO_MANY_REQUESTS'] },
+  LeanUnavailableException,
   frameworkError(
     HttpStatus.INTERNAL_SERVER_ERROR,
     'A connector failed in a way its adapter raises as a plain error rather than one of the codes ' +
