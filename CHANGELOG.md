@@ -9,6 +9,10 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ## Unreleased
 
+### Fixed
+
+- Docs — The API reference no longer lists an archived 0.1 version while 0.1 is still the current version.
+
 ## 0.1.2 — 2026-10-16
 
 ### Added
