@@ -9,6 +9,11 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ## Unreleased
 
+### Added
+
+- Unsaved-changes guard — Leaving a workflow draft with unsaved edits, for another page or another
+  version, now asks first; a reload or closing the tab gets the browser's own prompt.
+
 ## 0.1.2 — 2026-10-16
 
 ### Added
