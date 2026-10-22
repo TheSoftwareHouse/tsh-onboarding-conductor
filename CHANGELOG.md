@@ -14,6 +14,12 @@ One product version covers the whole monorepo. Every pull request adds its line 
 - Unsaved-changes guard — Leaving a workflow draft with unsaved edits, for another page or another
   version, now asks first; a reload or closing the tab gets the browser's own prompt.
 
+### Changed
+
+- Workflow validation — A failure in one step's connector field mappings, conditions, scoring or
+  transitions now carries that step's `path` (`steps[i]`) instead of none, so the admin panel and
+  `pnpm workflow:compile` name the step to fix.
+
 ## 0.1.2 — 2026-10-16
 
 ### Added

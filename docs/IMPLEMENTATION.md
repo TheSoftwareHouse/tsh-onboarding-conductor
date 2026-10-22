@@ -611,7 +611,9 @@ author can write — a `custom` step's or `connector-call`'s connectors and tran
 validated against the compiled schema's own definitions before compilation, so a failure the
 compiled schema reports afterwards (`steps[k]…`, indexing compiled steps) can only come from a
 type's `compile` and is restated as `steps[i]`, the authored step whose type produced compiled step
-`k`. The semantic invariants below carry a reason and no path, for either phase.
+`k`. A semantic invariant checked inside one step — its connectors' field mappings, field
+conditions, scoring and transitions — is located at that step (`steps[i]`); one spanning steps
+carries a reason and no path.
 
 **`compileWorkflowReport`** returns the compiled form _and_ each step's resolved shape — type,
 category, the compiled steps it owns (`compiledStepNames`), and per port the arms it leads along, in
@@ -763,8 +765,8 @@ runs it over each scope directory or the paths it is given, and reports the reas
 would report — plus the loader's own duplicate `(id, version)` check. A bare run resolves the user
 scope from `WORKFLOWS_USERS_DIR` exactly as the loader does, and paths that match no file exit `1`
 rather than reading as a pass. It carries none of the engine-level checks, which need a running
-engine. Reasons carry no path to the offending
-declaration; `.claude/skills/creating-workflows/references/startup-failures.md` maps each one back
+engine. A reason names at most the offending step, never the declaration
+inside it; `.claude/skills/creating-workflows/references/startup-failures.md` maps each one back
 to the checks that raise it.
 
 One further startup invariant crosses document boundaries and sits outside that per-document list:

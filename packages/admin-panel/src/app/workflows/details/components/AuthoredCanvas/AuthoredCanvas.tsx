@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type DragEvent,
   type ReactElement,
@@ -130,6 +131,8 @@ function isTyping(target: EventTarget | null): boolean {
 const NODE_TYPES: NodeTypes = { authoredStep: AuthoredStepNodeView };
 const EDGE_TYPES: EdgeTypes = { condition: ConditionEdge };
 const PLACE_GAP = 80;
+/** Screen pixels between the top-left overlay and the start step after the canvas opens. */
+const START_STEP_MARGIN = 24;
 const EDGE_RADIUS = 8;
 const BACK_EDGE_OFFSET = 28;
 /** Edges into and out of the selected step. */
@@ -201,7 +204,9 @@ function Canvas({
   const readOnly = onChange === undefined;
   const parsed = useMemo(() => parseDocument(text), [text]);
   const [selected, setSelected] = useState<string | null>(null);
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getNodes, getViewport, setViewport } = useReactFlow();
+  // The top-left overlay (counts, problems, settings): the start step is kept clear of it on open.
+  const overlayRef = useRef<HTMLDivElement>(null);
   const nodesInitialized = useNodesInitialized();
   const [fitted, setFitted] = useState(false);
   // The palette type being dragged, and the step it would be included into if dropped now.
@@ -345,12 +350,19 @@ function Canvas({
     [derivedNodes, setNodes],
   );
 
+  // Fit, then, when the zoom floor crops the top, pan down until the start step sits below the overlay.
   useEffect(() => {
-    if (nodesInitialized && nodes.length > 0 && !fitted) {
-      void fitView({ padding: 0.05, minZoom: 0.6 });
-      setFitted(true);
-    }
-  }, [nodesInitialized, nodes.length, fitted, fitView]);
+    if (!nodesInitialized || nodes.length === 0 || fitted) return;
+    setFitted(true);
+    void fitView({ padding: 0.05, minZoom: 0.6 }).then(() => {
+      const start = getNodes().find((node) => node.data.isInitial);
+      if (start === undefined) return;
+      const { x, y, zoom } = getViewport();
+      const top = start.position.y * zoom + y;
+      const clearance = (overlayRef.current?.offsetHeight ?? 0) + START_STEP_MARGIN;
+      if (top < clearance) void setViewport({ x, y: y + clearance - top, zoom });
+    });
+  }, [nodesInitialized, nodes.length, fitted, fitView, getNodes, getViewport, setViewport]);
 
   // Routed from the live nodes, so edges follow a step while it is dragged.
   const routes = useMemo(
@@ -631,7 +643,11 @@ function Canvas({
           <Panel position="top-right">
             <WorkflowZoomControls />
           </Panel>
-          <Panel position="top-left" className="flex flex-col gap-1 bg-tsh-white/90 p-2">
+          <Panel
+            ref={overlayRef}
+            position="top-left"
+            className="flex flex-col gap-1 bg-tsh-white/90 p-2"
+          >
             <Typography variant="meta">
               {projection.steps.length} steps · {projection.edges.length} edges
             </Typography>
