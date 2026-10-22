@@ -11,6 +11,9 @@ const PERCENT = 100;
 /** Share of the canvas Fit leaves empty around the graph. */
 const FIT_PADDING = 0.1;
 
+/** Fit never zooms past 100%, so a graph of one or two steps is not blown up. */
+export const FIT_MAX_ZOOM = 1;
+
 /** Zoom out, the current zoom, zoom in and fit-to-view, floating on the graph's canvas. */
 export function WorkflowZoomControls(): ReactElement {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
@@ -42,7 +45,7 @@ export function WorkflowZoomControls(): ReactElement {
       <Button
         size="md"
         className="font-normal tracking-normal text-fg-3"
-        onClick={() => void fitView({ padding: FIT_PADDING, duration: 0 })}
+        onClick={() => void fitView({ padding: FIT_PADDING, maxZoom: FIT_MAX_ZOOM, duration: 0 })}
       >
         Fit
       </Button>

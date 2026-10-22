@@ -21,12 +21,12 @@ export type AuthoredStepNodeData = ProjectedStep & {
 };
 export type AuthoredStepNode = Node<AuthoredStepNodeData, 'authoredStep'>;
 
-const MIN_NODE_WIDTH = 200;
+export const MIN_NODE_WIDTH = 200;
 const PORT_CHAR_WIDTH = 6.5;
 const PORT_PADDING = 20;
 /** Whole grid cells, so a snapped node's bottom edge lands on the grid too: the header, the summary
  *  and the port labels. */
-const BASE_NODE_HEIGHT = GRID_SIZE * 11;
+export const BASE_NODE_HEIGHT = GRID_SIZE * 11;
 /** One optional line — the included sections, or the first issue — in whole grid cells. */
 const EXTRA_LINE_HEIGHT = GRID_SIZE * 2;
 /** The node's `border` width; handles are positioned inside it. */

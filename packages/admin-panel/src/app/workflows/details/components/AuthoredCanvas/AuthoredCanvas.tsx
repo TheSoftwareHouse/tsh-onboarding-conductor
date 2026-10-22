@@ -20,6 +20,7 @@ import {
   useReactFlow,
   type Connection,
   type EdgeTypes,
+  type Node,
   type NodeTypes,
 } from '@xyflow/react';
 import { useQuery } from '@tanstack/react-query';
@@ -66,7 +67,9 @@ import {
 } from './authored-graph';
 import {
   AuthoredStepNodeView,
+  BASE_NODE_HEIGHT,
   listPortCenters,
+  MIN_NODE_WIDTH,
   nodeHeight,
   nodeWidth,
   type AuthoredStepNode,
@@ -77,7 +80,7 @@ import { PortArms } from './PortArms';
 import { StepSections } from './StepSections';
 import { WorkflowSettings } from './WorkflowSettings';
 import { EDGE_OFFSET, routeEdges } from './edge-routing';
-import { WorkflowZoomControls } from '../WorkflowGraph/WorkflowZoomControls';
+import { FIT_MAX_ZOOM, WorkflowZoomControls } from '../WorkflowGraph/WorkflowZoomControls';
 import { ConditionEdge, type ConditionEdgeType } from './ConditionEdge';
 import { layoutCanvas, NODE_GAP, RANK_GAP, type Positions } from './canvas-layout';
 import { FIELD_NAMES_LIST_ID } from './SchemaForm/schema-utils';
@@ -131,6 +134,10 @@ function isTyping(target: EventTarget | null): boolean {
 const NODE_TYPES: NodeTypes = { authoredStep: AuthoredStepNodeView };
 const EDGE_TYPES: EdgeTypes = { condition: ConditionEdge };
 const PLACE_GAP = 80;
+/** How long the canvas takes to pan to a step added out of view. */
+const PAN_DURATION_MS = 300;
+/** Screen pixels a new step must sit inside the pane's edges, or the canvas pans to it. */
+const PAN_MARGIN = 80;
 /** Screen pixels between the top-left overlay and the start step after the canvas opens. */
 const START_STEP_MARGIN = 24;
 const EDGE_RADIUS = 8;
@@ -204,9 +211,13 @@ function Canvas({
   const readOnly = onChange === undefined;
   const parsed = useMemo(() => parseDocument(text), [text]);
   const [selected, setSelected] = useState<string | null>(null);
-  const { screenToFlowPosition, fitView, getNodes, getViewport, setViewport } = useReactFlow();
+  // Held here because the edges are derived: React Flow can only delete an edge it sees as selected.
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  const { screenToFlowPosition, fitView, getNode, getNodes, getViewport, setViewport, setCenter } =
+    useReactFlow();
   // The top-left overlay (counts, problems, settings): the start step is kept clear of it on open.
   const overlayRef = useRef<HTMLDivElement>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
   const nodesInitialized = useNodesInitialized();
   const [fitted, setFitted] = useState(false);
   // The palette type being dragged, and the step it would be included into if dropped now.
@@ -354,7 +365,7 @@ function Canvas({
   useEffect(() => {
     if (!nodesInitialized || nodes.length === 0 || fitted) return;
     setFitted(true);
-    void fitView({ padding: 0.05, minZoom: 0.6 }).then(() => {
+    void fitView({ padding: 0.05, minZoom: 0.6, maxZoom: FIT_MAX_ZOOM }).then(() => {
       const start = getNodes().find((node) => node.data.isInitial);
       if (start === undefined) return;
       const { x, y, zoom } = getViewport();
@@ -379,7 +390,8 @@ function Canvas({
       .map((edge) => {
         const isBack = backEdges.has(edge.id);
         const highlighted =
-          selected !== null && (edge.source === selected || edge.target === selected);
+          edge.id === selectedEdge ||
+          (selected !== null && (edge.source === selected || edge.target === selected));
         // A loop back keeps its condition on the port's tooltip, so its label does not cross the graph.
         const condition = isBack ? '' : edge.condition;
         const key = `${edge.source}:${edge.handle}`;
@@ -392,6 +404,7 @@ function Canvas({
           target: edge.target,
           targetHandle: null,
           type: 'condition',
+          selected: edge.id === selectedEdge,
           markerEnd: {
             type: MarkerType.ArrowClosed,
             ...(highlighted ? { color: HIGHLIGHT_COLOR } : {}),
@@ -418,7 +431,7 @@ function Canvas({
           },
         };
       });
-  }, [projection, backEdges, selected, routes]);
+  }, [projection, backEdges, selected, selectedEdge, routes]);
 
   const write = useCallback(
     (next: AuthoredDocument) => onChange?.(JSON.stringify(next, null, JSON_INDENT)),
@@ -454,12 +467,53 @@ function Canvas({
     write(connect(doc, connection.source, connection.sourceHandle, connection.target));
   }
 
+  /** A step already covering where a new one would land at `spot`. */
+  function findBlocker(spot: { x: number; y: number }): Node | undefined {
+    return getNodes().find(
+      ({ position, measured }) =>
+        spot.x < position.x + (measured?.width ?? 0) &&
+        spot.x + MIN_NODE_WIDTH > position.x &&
+        spot.y < position.y + (measured?.height ?? 0) &&
+        spot.y + BASE_NODE_HEIGHT > position.y,
+    );
+  }
+
+  // Under the selected step (so repeated clicks build a column), else mid-pane; moved below any step
+  // already there, then panned into view so the new step is never added off-screen.
   function handleAdd(type: string): void {
-    if (!doc) return;
-    const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-    const { doc: next, name } = addStep(doc, type, center);
+    const pane = paneRef.current?.getBoundingClientRect();
+    if (!doc || !pane) return;
+    const anchor = selected === null ? undefined : getNode(selected);
+    const center = screenToFlowPosition({
+      x: pane.left + pane.width / 2,
+      y: pane.top + pane.height / 2,
+    });
+    let spot = anchor
+      ? { x: anchor.position.x, y: anchor.position.y + (anchor.measured?.height ?? 0) + RANK_GAP }
+      : { x: center.x - MIN_NODE_WIDTH / 2, y: center.y - BASE_NODE_HEIGHT / 2 };
+    for (let blocker = findBlocker(spot); blocker; blocker = findBlocker(spot)) {
+      spot = { x: spot.x, y: blocker.position.y + (blocker.measured?.height ?? 0) + NODE_GAP };
+    }
+    const { doc: next, name } = addStep(doc, type, spot);
     write(next);
     setSelected(name);
+    setSelectedEdge(null);
+
+    const { x, y, zoom } = getViewport();
+    const left = spot.x * zoom + x;
+    const top = spot.y * zoom + y;
+    // A margin, because the new card is taller than the base height once its warnings show.
+    const visible =
+      left >= PAN_MARGIN &&
+      top >= PAN_MARGIN &&
+      left + MIN_NODE_WIDTH * zoom <= pane.width - PAN_MARGIN &&
+      top + BASE_NODE_HEIGHT * zoom <= pane.height - PAN_MARGIN;
+    if (!visible) {
+      void setCenter(spot.x + MIN_NODE_WIDTH / 2, spot.y + BASE_NODE_HEIGHT / 2, {
+        zoom,
+        duration: PAN_DURATION_MS,
+      });
+    }
   }
 
   const composable = listComposableTypes();
@@ -593,12 +647,13 @@ function Canvas({
           ))}
           <Typography variant="meta">
             Click or drag onto the canvas to add a step. Drop a type tagged section onto a step to
-            include it there.
+            include it there. Click an edge and press Delete to remove it.
           </Typography>
         </aside>
       )}
 
       <div
+        ref={paneRef}
         className="relative min-h-0 flex-1"
         onDragOver={readOnly ? undefined : handleDragOver}
         onDrop={readOnly ? undefined : handleDrop}
@@ -627,13 +682,25 @@ function Canvas({
             }
             write(removedNodes.reduce((current, node) => deleteStep(current, node.id), next));
             if (removedNodes.length > 0) setSelected(null);
+            setSelectedEdge(null);
           }}
           onNodeClick={(_, node) => {
             setSelected(node.id);
+            setSelectedEdge(null);
             setShowSettings(false);
           }}
+          onEdgeClick={
+            readOnly
+              ? undefined
+              : (_, edge) => {
+                  setSelectedEdge(edge.id);
+                  setSelected(null);
+                  setShowSettings(false);
+                }
+          }
           onPaneClick={() => {
             setSelected(null);
+            setSelectedEdge(null);
             setShowSettings(false);
           }}
           snapToGrid
