@@ -141,7 +141,7 @@ function AtStartingUrl({
 let client: QueryClient;
 let startingUrl = STARTING_URL;
 
-function renderEditor({ staysMounted = false, search = '', strict = false } = {}): void {
+function renderEditor({ staysMounted = false, search = '&view=json', strict = false } = {}): void {
   startingUrl = `${STARTING_URL}${search}`;
   window.history.replaceState({}, '', startingUrl);
   const Root = strict ? StrictMode : Fragment;
@@ -272,7 +272,7 @@ describe('DraftEditor', () => {
     const SYNTAX_ERROR_TEXT = '{"id":';
 
     async function openGraph(): Promise<void> {
-      await userEvent.click(screen.getByRole('tab', { name: 'Graph' }));
+      await userEvent.click(screen.getByRole('tab', { name: 'Compiled graph' }));
     }
 
     async function openJson(): Promise<void> {
@@ -291,11 +291,13 @@ describe('DraftEditor', () => {
       mockedCompile.mockResolvedValue(COMPILATION);
     });
 
-    it('selects JSON by default', async () => {
-      renderEditor({ staysMounted: true });
-      await editorText();
+    it('selects the authored graph by default', async () => {
+      renderEditor({ staysMounted: true, search: '' });
 
-      expect(screen.getByRole('tab', { name: 'JSON' })).toHaveAttribute('aria-selected', 'true');
+      expect(await screen.findByRole('tab', { name: 'Authored graph' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
       expect(mockedCompile).not.toHaveBeenCalled();
     });
 
@@ -409,15 +411,15 @@ describe('DraftEditor', () => {
       expect(mockedCompile).not.toHaveBeenCalled();
     });
 
-    it('compiles straight away when mounted with ?view=graph', async () => {
-      renderEditor({ staysMounted: true, search: '&view=graph' });
+    it('compiles straight away when mounted with ?view=compiled', async () => {
+      renderEditor({ staysMounted: true, search: '&view=compiled' });
 
       expect(await screen.findByRole('complementary')).toBeInTheDocument();
       expect(mockedCompile).toHaveBeenCalledTimes(1);
     });
 
-    it('sends one compile under StrictMode when mounted with ?view=graph', async () => {
-      renderEditor({ staysMounted: true, search: '&view=graph', strict: true });
+    it('sends one compile under StrictMode when mounted with ?view=compiled', async () => {
+      renderEditor({ staysMounted: true, search: '&view=compiled', strict: true });
 
       expect(await screen.findByRole('complementary')).toBeInTheDocument();
       expect(mockedCompile).toHaveBeenCalledTimes(1);
@@ -448,7 +450,7 @@ describe('DraftEditor', () => {
     });
 
     it('shows the initial step when ?step names a step the edit removed', async () => {
-      renderEditor({ staysMounted: true, search: '&view=graph&step=gone' });
+      renderEditor({ staysMounted: true, search: '&view=compiled&step=gone' });
 
       expect(
         await within(await screen.findByRole('complementary')).findByRole('heading', {
@@ -710,7 +712,7 @@ describe('DraftEditor', () => {
       renderEditor({ staysMounted: true });
       await editorText();
       await clickPublish();
-      await userEvent.click(screen.getByRole('tab', { name: 'Graph' }));
+      await userEvent.click(screen.getByRole('tab', { name: 'Compiled graph' }));
 
       expect(mockedCompile).toHaveBeenCalledTimes(1);
     });

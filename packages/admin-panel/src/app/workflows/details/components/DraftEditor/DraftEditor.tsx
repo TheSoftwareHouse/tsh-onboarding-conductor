@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactElement, type ReactNode } from '
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HttpStatusCode } from 'axios';
 import type { ApiError } from '@/services/api/api-error';
+import { readDraftError } from '@/api/workflows/workflow-drafts';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
 import { WORKFLOW_VERSION_STATUS } from '@/api/workflows/workflow-versions';
 import { Button } from '@/components/ui/Button/Button';
@@ -14,12 +15,15 @@ import { useValidateDraft } from '../../hooks/useValidateDraft';
 import { useWorkflowDetailsSearchParams } from '../../hooks/useWorkflowDetailsSearchParams';
 import { JSON_INDENT } from '../../constants/json-indent';
 import { describePublishConnectorNotes } from '../../utils/describe-publish-connector-notes';
+import { findFailedStep } from '../../utils/find-failed-step';
 import { parseWorkflowDocument } from '../../utils/parse-workflow-document';
 import { DeleteDraftAction } from './DeleteDraftAction';
 import { DraftGraph } from './DraftGraph';
+import { AuthoredCanvas } from '../AuthoredCanvas/AuthoredCanvas';
 import { JsonEditor } from '../JsonEditor';
 import { VersionTabs } from '../VersionTabs/VersionTabs';
 import { PublishDraftDialog } from './PublishDraftDialog';
+import { useEditHistory } from './useEditHistory';
 import { ValidationResult, type ValidationOutcome } from './ValidationResult';
 
 export interface DraftHeaderSlots {
@@ -62,6 +66,13 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
   // `null` means the editor shows the saved document untouched.
   const [edited, setEdited] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<ValidationOutcome | null>(null);
+  // The last Validate failure, pinned to its step by name, so editing toward a fix keeps it in view.
+  const [failure, setFailure] = useState<{
+    step: string | null;
+    reason: string | null;
+    path: string | null;
+  } | null>(null);
+  const editHistory = useEditHistory();
   // Bumped on every edit, so a compile that was sent for older text is dropped when it lands.
   const textRevision = useRef(0);
   // The revision a compile is in flight for, so a repeated request for the same text is dropped.
@@ -119,16 +130,35 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
     deleteMutation.isPending ||
     publishMutation.isPending;
 
-  function handleChange(next: string): void {
+  function showText(next: string): void {
     textRevision.current += 1;
     setEdited(next);
     setOutcome(null);
+  }
+
+  function handleChange(next: string): void {
+    // The JSON editor echoes text it was handed (an undo, a canvas edit) back as a change; not an edit.
+    if (next === text) return;
+    editHistory.record(text);
+    showText(next);
+  }
+
+  function handleUndo(): void {
+    const previous = editHistory.undo(text);
+    if (previous !== null) showText(previous);
+  }
+
+  function handleRedo(): void {
+    const next = editHistory.redo(text);
+    if (next !== null) showText(next);
   }
 
   function handleDiscard(): void {
     textRevision.current += 1;
     setEdited(null);
     setOutcome(null);
+    setFailure(null);
+    editHistory.clear();
   }
 
   // Validate, Publish and the Graph tab share this: the result is kept only if the text has not changed since.
@@ -139,6 +169,7 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
       return;
     }
     const sentRevision = textRevision.current;
+    const sentText = text;
     const isCurrent = (): boolean => textRevision.current === sentRevision;
     compilingRevision.current = sentRevision;
     validateMutation.mutate(parsed.document, {
@@ -150,12 +181,23 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
       onSuccess: ({ stepCount, workflow }) => {
         if (isCurrent()) {
           setOutcome({ kind: 'valid', stepCount, workflow });
+          setFailure(null);
           onValid?.();
         }
       },
-      onError: (failure) => {
+      onError: (error) => {
         if (isCurrent()) {
-          setOutcome({ kind: 'invalid', error: failure });
+          setOutcome({ kind: 'invalid', error });
+          const read = readDraftError(error);
+          setFailure(
+            read === null
+              ? null
+              : {
+                  step: findFailedStep(sentText, read.path),
+                  reason: read.reason ?? null,
+                  path: read.path ?? null,
+                },
+          );
         }
       },
     });
@@ -226,9 +268,24 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
       })}
       <ValidationResult outcome={outcome} />
       <VersionTabs
-        value={view ?? 'json'}
+        value={view ?? 'authored'}
         onValueChange={setView}
         keepJsonMounted
+        canvas={
+          <AuthoredCanvas
+            text={text}
+            onChange={handleChange}
+            errorStep={failure?.step ?? null}
+            errorPath={failure?.path ?? null}
+            errorReason={failure?.reason ?? null}
+            history={{
+              canUndo: editHistory.canUndo,
+              canRedo: editHistory.canRedo,
+              onUndo: handleUndo,
+              onRedo: handleRedo,
+            }}
+          />
+        }
         json={<JsonEditor value={text} onChange={handleChange} label="Workflow document (JSON)" />}
         graph={
           <DraftGraph

@@ -57,7 +57,21 @@ export type WorkflowNodeData = {
   transitionCount: number | null;
   /** Statuses of the transitions onto the step itself, drawn as lines rather than edges. */
   selfTransitions: string[];
+  /** The authored step type's category, for the node's tint; null when the engine sent no source. */
+  category: string | null;
 };
+
+/** A frame around the compiled steps one authored step produced, drawn only when it produced several. */
+export type WorkflowGroupData = {
+  /** The authored step name. */
+  step: string;
+  type: string;
+  category: string;
+  width: number;
+  height: number;
+};
+
+export type WorkflowGroupNode = Node<WorkflowGroupData, 'workflowGroup'>;
 
 export type WorkflowEdgeData = {
   /** The route dagre laid the edge along, in the same coordinate space as the node positions. */
@@ -79,7 +93,10 @@ export type WorkflowGraphEdge = Edge<WorkflowEdgeData, 'workflowTransition'>;
 export interface WorkflowGraph {
   nodes: WorkflowStepNode[];
   edges: WorkflowGraphEdge[];
+  groups: WorkflowGroupNode[];
 }
+
+const GROUP_ID_PREFIX = 'group:';
 
 /** Cuts a label to the width dagre reserves for it; the full text stays in `data.label`. */
 export function truncateLabel(label: string): string {
@@ -516,9 +533,18 @@ export function layoutWorkflowGraph(definition: WorkflowDefinition): WorkflowGra
         selfTransitions: step.transitions
           .filter((transition) => isSelfTransition(step, transition.target))
           .map((transition) => transition.status),
+        category: step.source?.category ?? null,
       },
     ]),
   );
+
+  // Authored steps that compiled to more than one step, each with the steps it produced.
+  const bySource = new Map<string, WorkflowStepDefinition[]>();
+  for (const step of definition.steps) {
+    if (step.source === null) continue;
+    bySource.set(step.source.step, [...(bySource.get(step.source.step) ?? []), step]);
+  }
+  const grouped = [...bySource.values()].filter((steps) => steps.length > 1);
 
   // One entry per ordered pair, carrying every transition that joins it.
   const pairs = new Map<
@@ -552,8 +578,9 @@ export function layoutWorkflowGraph(definition: WorkflowDefinition): WorkflowGra
     id: `${pair.from}->${pair.to}`,
   }));
 
-  // Multigraph, so the two directions between one pair of steps stay distinct edges.
-  const graph = new dagre.graphlib.Graph({ multigraph: true });
+  // Multigraph, so the two directions between one pair of steps stay distinct edges. Compound only
+  // when there is a group, so a workflow without one lays out exactly as before.
+  const graph = new dagre.graphlib.Graph({ multigraph: true, compound: grouped.length > 0 });
   graph.setGraph({
     rankdir: 'TB',
     nodesep: NODE_GAP,
@@ -568,6 +595,12 @@ export function layoutWorkflowGraph(definition: WorkflowDefinition): WorkflowGra
       width: NODE_WIDTH,
       height: data === undefined ? NODE_HEIGHT : nodeHeight(data),
     });
+  }
+  // dagre sizes a parent to enclose its children with padding, which leaves room for the frame's label.
+  for (const steps of grouped) {
+    const groupId = `${GROUP_ID_PREFIX}${steps[0]!.source!.step}`;
+    graph.setNode(groupId, {});
+    for (const step of steps) graph.setParent(step.name, groupId);
   }
   for (const transition of transitions) {
     const label = truncateLabel(transition.conditions.join(' · '));
@@ -638,5 +671,21 @@ export function layoutWorkflowGraph(definition: WorkflowDefinition): WorkflowGra
 
   const spread = spreadEdgePorts(mergeOpposedEdges(drawn), nodes, heights);
 
-  return { nodes, edges: placeLabels(spread, nodes, heights) };
+  const groups: WorkflowGroupNode[] = grouped.map((steps) => {
+    const source = steps[0]!.source!;
+    const id = `${GROUP_ID_PREFIX}${source.step}`;
+    const { x, y, width, height } = graph.node(id);
+    return {
+      id,
+      type: 'workflowGroup',
+      position: { x: x - width / 2 - minX, y: y - height / 2 - minY },
+      draggable: false,
+      connectable: false,
+      selectable: false,
+      zIndex: -1,
+      data: { step: source.step, type: source.type, category: source.category, width, height },
+    };
+  });
+
+  return { nodes, edges: placeLabels(spread, nodes, heights), groups };
 }

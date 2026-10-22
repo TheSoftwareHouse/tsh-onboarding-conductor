@@ -9,6 +9,8 @@ export interface VersionTabsProps {
   onValueChange: (value: WorkflowView) => void;
   graph: ReactNode;
   json: ReactNode;
+  /** PoC: the authored-graph canvas; editable on a draft, read-only on a stored version. */
+  canvas?: ReactNode;
   /** Keeps the JSON panel in the DOM while hidden, so an editor's undo history and scroll survive. */
   keepJsonMounted?: boolean;
 }
@@ -27,12 +29,13 @@ function isWorkflowView(value: unknown): value is WorkflowView {
   return WORKFLOW_VIEWS.some((view) => view === value);
 }
 
-/** The details page's Graph | JSON switch, styled like `FilterTabs`. */
+/** The details page's Authored graph | Compiled graph | JSON switch, styled like `FilterTabs`. */
 export function VersionTabs({
   value,
   onValueChange,
   graph,
   json,
+  canvas,
   keepJsonMounted = false,
 }: VersionTabsProps): ReactElement {
   return (
@@ -46,9 +49,16 @@ export function VersionTabs({
       className="flex min-h-0 flex-1 flex-col"
     >
       <Tabs.List className="flex items-end border-b border-border-rule px-8">
-        <Tabs.Tab value="graph" className={tab({ active: value === 'graph' })}>
+        {canvas !== undefined && (
+          <Tabs.Tab value="authored" className={tab({ active: value === 'authored' })}>
+            <Typography variant="body-md" as="span">
+              Authored graph
+            </Typography>
+          </Tabs.Tab>
+        )}
+        <Tabs.Tab value="compiled" className={tab({ active: value === 'compiled' })}>
           <Typography variant="body-md" as="span">
-            Graph
+            Compiled graph
           </Typography>
         </Tabs.Tab>
         <Tabs.Tab value="json" className={tab({ active: value === 'json' })}>
@@ -57,7 +67,7 @@ export function VersionTabs({
           </Typography>
         </Tabs.Tab>
       </Tabs.List>
-      <Tabs.Panel value="graph" className="flex min-h-0 flex-1 flex-col">
+      <Tabs.Panel value="compiled" className="flex min-h-0 flex-1 flex-col">
         {graph}
       </Tabs.Panel>
       <Tabs.Panel
@@ -67,6 +77,11 @@ export function VersionTabs({
       >
         {json}
       </Tabs.Panel>
+      {canvas !== undefined && (
+        <Tabs.Panel value="authored" className="flex min-h-0 flex-1 flex-col">
+          {canvas}
+        </Tabs.Panel>
+      )}
     </Tabs.Root>
   );
 }

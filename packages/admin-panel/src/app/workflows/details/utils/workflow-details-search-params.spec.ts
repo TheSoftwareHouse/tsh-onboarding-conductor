@@ -4,7 +4,7 @@ import { stripDetailsParams, workflowDetailsSearchParams } from './workflow-deta
 describe('workflowDetailsSearchParams.view', () => {
   const { view } = workflowDetailsSearchParams;
 
-  it.each(['graph', 'json'])('parses %s', (value) => {
+  it.each(['authored', 'compiled', 'json'])('parses %s', (value) => {
     expect(view.parse(value)).toBe(value);
   });
 
@@ -21,6 +21,6 @@ describe('stripDetailsParams', () => {
   });
 
   it('returns an empty string when nothing else remains', () => {
-    expect(stripDetailsParams('?version=2&step=review&view=graph')).toBe('');
+    expect(stripDetailsParams('?version=2&step=review&view=compiled')).toBe('');
   });
 });

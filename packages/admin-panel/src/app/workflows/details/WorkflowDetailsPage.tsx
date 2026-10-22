@@ -20,6 +20,7 @@ import { DraftEditor, type DraftHeaderSlots } from './components/DraftEditor/Dra
 import { VersionDocument } from './components/VersionDocument/VersionDocument';
 import { VersionGraph } from './components/VersionGraph';
 import { VersionTabs } from './components/VersionTabs/VersionTabs';
+import { VersionCanvas } from './components/AuthoredCanvas/AuthoredCanvas';
 import { WorkflowDetailsHeader } from './components/WorkflowDetailsHeader';
 import { WorkflowStats } from './components/WorkflowStats';
 import { useWorkflowDetailsSearchParams } from './hooks/useWorkflowDetailsSearchParams';
@@ -260,8 +261,13 @@ export function WorkflowDetailsPage(): ReactElement {
       {isVersionsSuccess && !isVersionsStale && missingVersionMessage === null && (
         <VersionTabs
           key={version}
-          value={params.view ?? 'graph'}
+          value={params.view ?? 'compiled'}
           onValueChange={params.setView}
+          canvas={
+            version === null ? undefined : (
+              <VersionCanvas workflowId={workflowId} version={version} />
+            )
+          }
           graph={
             <ReactFlowProvider>
               <WorkflowStats definition={details} />

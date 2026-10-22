@@ -3,6 +3,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { cn } from '@/lib/cn';
 import { tv } from '@/lib/tv';
+import { STEP_CATEGORY_TONES } from '../../constants/step-category-tones';
 import { NODE_HEIGHT, NODE_WIDTH, type WorkflowStepNode } from '../../utils/workflow-graph-layout';
 
 const HIDDEN_HANDLE = { opacity: 0, pointerEvents: 'none' } as const;
@@ -32,7 +33,16 @@ export function WorkflowGraphNode({ data, selected }: NodeProps<WorkflowStepNode
   const kind = approved ? 'approved' : data.terminal ? 'terminal' : 'step';
 
   return (
-    <div className={node({ kind, selected })} style={{ width: NODE_WIDTH, minHeight: NODE_HEIGHT }}>
+    <div
+      className={cn(
+        node({ kind, selected }),
+        // A bar, not a fill, so the node keeps its text contrast; the approved terminal stays all black.
+        !approved &&
+          data.category !== null &&
+          cn('border-l-8', STEP_CATEGORY_TONES[data.category]?.accent),
+      )}
+      style={{ width: NODE_WIDTH, minHeight: NODE_HEIGHT }}
+    >
       <Handle type="target" position={Position.Top} style={HIDDEN_HANDLE} />
       <Typography
         variant="mono"

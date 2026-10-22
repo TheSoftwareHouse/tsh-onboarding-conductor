@@ -2,7 +2,7 @@ import { parseAsStringLiteral, type inferParserType } from 'nuqs';
 import { parseAsTrimmedString } from '@/lib/search-params';
 import { workflowVersionSearchParams } from '@/lib/workflow-search-params';
 
-export const WORKFLOW_VIEWS = ['graph', 'json'] as const;
+export const WORKFLOW_VIEWS = ['authored', 'compiled', 'json'] as const;
 
 export type WorkflowView = (typeof WORKFLOW_VIEWS)[number];
 

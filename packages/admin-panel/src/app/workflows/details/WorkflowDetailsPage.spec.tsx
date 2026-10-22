@@ -474,7 +474,7 @@ describe('WorkflowDetailsPage', () => {
     renderPage();
 
     expect(await findInspectorHeading('collect')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Graph', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Compiled graph', selected: true })).toBeInTheDocument();
     expect(screen.getByText('3 steps')).toBeInTheDocument();
     expect(mockedFetchDocument).not.toHaveBeenCalled();
   });
@@ -518,12 +518,12 @@ describe('WorkflowDetailsPage', () => {
 
     expect(await findInspectorHeading('collect')).toBeInTheDocument();
     expect(window.location.search).not.toContain('view=');
-    expect(screen.getByRole('tab', { name: 'Graph', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Compiled graph', selected: true })).toBeInTheDocument();
   });
 
   it('keeps the list search on the breadcrumb and drops version, step and view', async () => {
     mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
-    renderPage('?search=kyc&version=1&step=verify&view=graph');
+    renderPage('?search=kyc&version=1&step=verify&view=compiled');
     await findInspectorHeading('verify');
 
     expect(screen.getByRole('link', { name: 'Workflows' })).toHaveAttribute(
@@ -594,7 +594,7 @@ describe('WorkflowDetailsPage', () => {
     it('renders the editor, not the graph, and never reads the compiled definition', async () => {
       mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [3, 'draft']));
       mockedFetchDocument.mockResolvedValue(draftDocument);
-      renderPage('?version=3');
+      renderPage('?version=3&view=json');
 
       expect(
         await screen.findByRole('textbox', { name: 'Workflow document (JSON)' }),
@@ -609,7 +609,7 @@ describe('WorkflowDetailsPage', () => {
     it('does not link to onboardings', async () => {
       mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [3, 'draft']));
       mockedFetchDocument.mockResolvedValue(draftDocument);
-      renderPage('?version=3');
+      renderPage('?version=3&view=json');
 
       await screen.findByRole('textbox', { name: 'Workflow document (JSON)' });
       expect(screen.queryByRole('link', { name: /View onboardings/ })).not.toBeInTheDocument();
@@ -618,7 +618,7 @@ describe('WorkflowDetailsPage', () => {
     it('opens the draft without ?version= when the family has no published version', async () => {
       mockedFetchVersions.mockResolvedValue(versions([3, 'draft'], [1, 'retired']));
       mockedFetchDocument.mockResolvedValue(draftDocument);
-      renderPage();
+      renderPage('?view=json');
 
       expect(
         await screen.findByRole('textbox', { name: 'Workflow document (JSON)' }),
@@ -722,7 +722,7 @@ describe('WorkflowDetailsPage', () => {
         updatedAt: '2026-01-01T00:00:00.000Z',
         document: { id: WORKFLOW_ID, version: 3, steps: [] },
       });
-      renderPage('?version=3');
+      renderPage('?version=3&view=json');
 
       await screen.findByRole('textbox', { name: 'Workflow document (JSON)' });
       expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
