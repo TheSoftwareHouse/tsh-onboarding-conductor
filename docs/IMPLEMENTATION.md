@@ -3260,9 +3260,11 @@ parser for that key, so a control and the URL cannot disagree about what is requ
 has to resolve to absent at the boundary rather than be filtered out downstream. Zod plays no part
 in either section's filter path, only in response-payload validation under `api/*.ts`. See
 `docs/decisions/0018-nuqs-for-admin-panel-search-params.md`. `NuqsAdapter` (from
-`nuqs/adapters/react-router/v8`) is mounted in `src/app/App.tsx` inside `BrowserRouter`, wrapping
-`Routes`, not in `AppProviders` — the adapter reads react-router's own hooks, which
-`AppProviders`, rendered above the router, cannot give it.
+`nuqs/adapters/react-router/v8`) is mounted in `src/app/App.tsx` as the data router's root route
+element, wrapping an `<Outlet />`, not in `AppProviders` — the adapter reads react-router's own
+hooks, which `AppProviders`, rendered above the router, cannot give it. The router is built with
+`createBrowserRouter` inside a component under `AuthGate`, so pages can call `useBlocker`
+(`docs/decisions/0050-admin-panel-data-router.md`).
 
 The page header carries the design's **Export CSV** button: an outline button with a download icon
 calls `GET /v1/onboardings/export` with the applied filters (never the draft, and without
@@ -3624,6 +3626,11 @@ refetched list moves the page to the read-only tabs. The text is edited in `Json
 themed from `@theme` variables. The header's `actions` slot holds, for a draft:
 
 - **Discard** resets the text to the last fetched document; it and Save are disabled while clean.
+- **Leaving with unsaved changes** (`UnsavedChangesGuard`, `useBlocker`): a navigation to another
+  path or another `?version=` while dirty opens "Leave without saving?" with **Stay** and
+  **Discard and leave**; a tab or step change is not blocked, nor is a navigation made while a
+  mutation is pending (a save that moves the draft, a delete). While dirty, a reload or tab close
+  gets the browser's `beforeunload` prompt.
 - **Publish**, after Save draft, is `variant="primary"` and disabled while a request is pending,
   and while the buffer is dirty. The engine publishes the stored
   row, so only a saved buffer can be published; while dirty, the header note reads "Unsaved changes ·

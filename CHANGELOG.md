@@ -9,6 +9,11 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ## Unreleased
 
+### Added
+
+- Unsaved-changes guard — Leaving a workflow draft with unsaved edits, for another page or another
+  version, now asks first; a reload or closing the tab gets the browser's own prompt.
+
 ### Changed
 
 - Fonts — The commercial TWK Everett files are no longer in the repository and the typeface is no

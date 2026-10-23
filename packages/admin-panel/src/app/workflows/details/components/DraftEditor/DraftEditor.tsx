@@ -20,6 +20,7 @@ import { DraftGraph } from './DraftGraph';
 import { JsonEditor } from '../JsonEditor';
 import { VersionTabs } from '../VersionTabs/VersionTabs';
 import { PublishDraftDialog } from './PublishDraftDialog';
+import { UnsavedChangesGuard } from './UnsavedChangesGuard';
 import { ValidationResult, type ValidationOutcome } from './ValidationResult';
 
 export interface DraftHeaderSlots {
@@ -242,6 +243,7 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
           />
         }
       />
+      <UnsavedChangesGuard when={dirty} />
       <PublishDraftDialog
         open={isPublishModalOpen}
         onOpenChange={setIsPublishModalOpen}

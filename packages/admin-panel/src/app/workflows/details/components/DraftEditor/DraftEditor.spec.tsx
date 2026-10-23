@@ -1,12 +1,18 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Fragment, StrictMode } from 'react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/services/api/api-error';
 import { createQueryClient } from '@/services/query-client/create-query-client';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
-import { BrowserRouter, Route, Routes, useLocation } from 'react-router';
+import {
+  createBrowserRouter,
+  Outlet,
+  RouterProvider,
+  useLocation,
+  type DataRouter,
+} from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   compileWorkflowDocument,
@@ -141,38 +147,48 @@ function AtStartingUrl({
 let client: QueryClient;
 let startingUrl = STARTING_URL;
 
+let router: DataRouter | null = null;
+
 function renderEditor({ staysMounted = false, search = '', strict = false } = {}): void {
   startingUrl = `${STARTING_URL}${search}`;
   window.history.replaceState({}, '', startingUrl);
   const Root = strict ? StrictMode : Fragment;
+  router = createBrowserRouter([
+    {
+      element: (
+        <NuqsAdapter>
+          <Location />
+          <Outlet />
+        </NuqsAdapter>
+      ),
+      children: [
+        {
+          path: ADMIN_ROUTES.workflows.detailsPattern,
+          element: (
+            <AtStartingUrl gated={!staysMounted}>
+              <DraftEditor
+                workflowId={WORKFLOW_ID}
+                version={VERSION}
+                renderHeader={({ actions, note }) => (
+                  <header>
+                    {note}
+                    {actions}
+                  </header>
+                )}
+              />
+            </AtStartingUrl>
+          ),
+        },
+        // Where a write leaves for, so the location stays readable after the editor is gone.
+        { path: '*', element: null },
+      ],
+    },
+  ]);
   render(
     <Root>
-      <BrowserRouter>
-        <NuqsAdapter>
-          <QueryClientProvider client={client}>
-            <Location />
-            <Routes>
-              <Route
-                path={ADMIN_ROUTES.workflows.detailsPattern}
-                element={
-                  <AtStartingUrl gated={!staysMounted}>
-                    <DraftEditor
-                      workflowId={WORKFLOW_ID}
-                      version={VERSION}
-                      renderHeader={({ actions, note }) => (
-                        <header>
-                          {note}
-                          {actions}
-                        </header>
-                      )}
-                    />
-                  </AtStartingUrl>
-                }
-              />
-            </Routes>
-          </QueryClientProvider>
-        </NuqsAdapter>
-      </BrowserRouter>
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
     </Root>,
   );
 }
@@ -194,6 +210,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  router?.dispose();
   vi.clearAllMocks();
 });
 
@@ -962,6 +979,55 @@ describe('DraftEditor', () => {
       await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
       expect((await editorText()).value).toBe(SAVED_TEXT);
+    });
+  });
+
+  describe('leaving with unsaved changes', () => {
+    async function editAndLeave(): Promise<void> {
+      renderEditor();
+      type(await editorText(), JSON.stringify({ ...DOCUMENT, name: 'Edited' }));
+      await act(() => router?.navigate(ADMIN_ROUTES.workflows.root));
+    }
+
+    it('asks before leaving, and Stay keeps the edits', async () => {
+      await editAndLeave();
+
+      expect(await screen.findByRole('dialog', { name: 'Leave without saving?' })).toBeVisible();
+      await userEvent.click(screen.getByRole('button', { name: 'Stay' }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(screen.getByLabelText('location')).toHaveTextContent(startingUrl);
+      expect((await editorText()).value).toContain('Edited');
+    });
+
+    it('leaves on Discard and leave', async () => {
+      await editAndLeave();
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Discard and leave' }));
+
+      await waitFor(() =>
+        expect(screen.getByLabelText('location')).toHaveTextContent(ADMIN_ROUTES.workflows.root),
+      );
+    });
+
+    it('does not ask when switching tab', async () => {
+      renderEditor({ staysMounted: true });
+      type(await editorText(), JSON.stringify({ ...DOCUMENT, name: 'Edited' }));
+      await userEvent.click(screen.getByRole('tab', { name: 'Graph' }));
+
+      await waitFor(() =>
+        expect(screen.getByLabelText('location')).toHaveTextContent('view=graph'),
+      );
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('does not ask without edits', async () => {
+      renderEditor();
+      await editorText();
+      await act(() => router?.navigate(ADMIN_ROUTES.workflows.root));
+
+      expect(screen.getByLabelText('location')).toHaveTextContent(ADMIN_ROUTES.workflows.root);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
   });
 });
