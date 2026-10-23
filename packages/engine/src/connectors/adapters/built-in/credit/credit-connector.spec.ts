@@ -207,6 +207,27 @@ describe('CreditConnector', () => {
       expect(deps.provider.startAssessment).not.toHaveBeenCalled();
     });
 
+    it('answers retryable invalid-data on the selection field when it keeps no account', async () => {
+      const deps = createDeps();
+      jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      deps.objectStoragePort.readObject.mockResolvedValue(Buffer.from('{"accounts":[{}]}'));
+
+      const result = await createConnector(deps).execute({
+        ...createInput(),
+        payload: { bankData: 'document-1', accountSelection: ['account-05'] },
+        payloadFieldSources: { bankData: 'bankDataDocument', accountSelection: 'selectedAccounts' },
+      });
+
+      expect(result).toEqual(
+        ConnectorExecutionResult.invalidData(
+          { selectedAccounts: ['NO_ACCOUNTS_SELECTED'] },
+          { [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true },
+        ),
+      );
+      expect(deps.provider.validateBankData).not.toHaveBeenCalled();
+      expect(deps.provider.startAssessment).not.toHaveBeenCalled();
+    });
+
     it('answers retryable invalid-data when the provider rejects the bank data', async () => {
       const deps = createDeps();
       jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);

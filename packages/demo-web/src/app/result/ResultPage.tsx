@@ -1,9 +1,13 @@
 import { Link } from 'react-router';
 
+import { KSA_JOURNEY } from '@/api/bnpl/bnpl.client';
 import { Button } from '@/components/ui/button';
 
 import { DecisionBanner } from './DecisionBanner';
+import { LeanIncomePanel } from './LeanIncomePanel';
+import { MoneyProvider } from './money';
 import { ResultTabs } from './ResultTabs';
+import { StartOverButton } from '../session/StartOver';
 import { SessionGate, useSessionView } from '../session/useSessionView';
 
 export function ResultPage() {
@@ -13,7 +17,7 @@ export function ResultPage() {
     return <SessionGate state={state} />;
   }
 
-  const { view } = state;
+  const { token, view } = state;
   const { creditScore, creditScoreBand } = view.data;
 
   return (
@@ -23,10 +27,14 @@ export function ResultPage() {
         score={typeof creditScore === 'number' ? creditScore : undefined}
         band={typeof creditScoreBand === 'string' ? creditScoreBand : undefined}
       />
-      <ResultTabs view={view} />
-      <div>
+      {view.journey === KSA_JOURNEY ? <LeanIncomePanel data={view.data} /> : null}
+      <MoneyProvider journey={view.journey}>
+        <ResultTabs view={view} />
+      </MoneyProvider>
+      <div className="flex gap-2">
+        <StartOverButton token={token} variant="default" size="default" />
         <Button variant="outline" asChild>
-          <Link to="/">Run another scenario</Link>
+          <Link to="/">Home</Link>
         </Button>
       </div>
     </div>

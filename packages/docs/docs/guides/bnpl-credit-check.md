@@ -190,6 +190,59 @@ $ curl -X POST localhost:3100/v1/bnpl/sessions/<token>/submit -H 'Content-Type: 
 
 `bank-login` answers `409 SESSION_HAS_NO_BANK` when the engine is not on `bank_connection`, and `POST …/run` answers `409 ACCOUNTS_NOT_SELECTED` when `/state.data.selectedAccounts` is missing and `409 STEP_NOT_READY` when the onboarding is not on the credit step yet. `run` pushes only the selected accounts to Algoan.
 
+## The KSA journey: Lean, then Algoan
+
+`ksa-bnpl-lean-algoan` (its local fork `ksa-bnpl-lean-algoan-local`) replaces the simulated bank with a real one: the applicant links a Saudi sandbox bank in [Lean](https://www.leantech.me)'s widget, the engine's `lean_bank_data` connector reads the accounts, balances and six months of transactions, converts them to the bank-data document Algoan accepts (every amount in GBP at a fixed rate of 0.197 per riyal, the mid-market rate on 2026-10-19) and stores it on the onboarding; the credit step then scores that document, narrowed to the accounts the applicant selected. Lean's own salary verdict is shown on the result beside Algoan's and routes nothing.
+
+| Step                  | Type                | What happens                                                                                                                                                                                   |
+| --------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `applicant`           | `contact-details`   | As the UK journey.                                                                                                                                                                             |
+| `credit_consent`      | `consents`          | As the UK journey.                                                                                                                                                                             |
+| `bank_connect`        | `connector-call`    | `{ leanCustomerId }` parks the step on Lean; Lean's `FINISHED` webhook resumes it with the income fields, the exported document (`bankDataDocument`) and the account summary (`bankAccounts`). |
+| `bank_data_gate`      | `decision`          | `bankConnectOutcome = connected` goes on; anything else goes to `manual_review`. The demo BFF submits it.                                                                                      |
+| `account_selection`   | `form`              | `selectedAccounts`, positions in the exported document (`account-01`, …).                                                                                                                      |
+| `bank_access_consent` | `consents`          | As the UK journey.                                                                                                                                                                             |
+| `credit_check`        | `credit-assessment` | `bankDataFrom: "bankDataDocument"`, `accountSelection: "selectedAccounts"`: the client submits `{}`, the engine narrows the stored document and starts Algoan.                                 |
+| `manual_review`, …    |                     | As the UK journey.                                                                                                                                                                             |
+
+### Before the first run
+
+1. **Lean portal.** A sandbox application with at least one test user per mock bank (`LEA1_SAMAOB_SAU`, `LEA2_SAMAOB_SAU`). Store the app token, client secret and webhook secret as the engine's `lean_bank_data` connector settings (`clientId`, `clientSecret`, `callbackSigningSecret`), and set the portal's webhook URL once to `https://<NGROK_DOMAIN>/v1/webhooks/lean_bank_data/callback`.
+2. **`.env`.** `BNPL_WORKFLOW_ID=ksa-bnpl-lean-algoan`, `BNPL_JOURNEY=ksa-lean-algoan`, the `LEAN_*` block and `NGROK_DOMAIN`; `.env.dist` has the commented block. `DEMO_WEB_PUBLIC_ORIGIN` and `VITE_BNPL_BFF_BASE_URL` stay as they are: the script sets both to the cloudflared URL for the run. There are no personae on this journey: keep the portal's test usernames to hand; no password is stored anywhere.
+3. **ngrok and cloudflared.** An ngrok account with its free static domain and the agent installed (`ngrok config add-authtoken …`, or `NGROK_AUTHTOKEN` in the environment), and `cloudflared` installed (`brew install cloudflared`).
+
+### Running it
+
+```bash
+$ pnpm stack:up            # the engine, with ksa-bnpl-lean-algoan published
+$ pnpm demo:dev:tunnel     # ngrok on NGROK_DOMAIN to the engine, cloudflared to the web app, the Algoan subscriptions, the BFF and the web app
+```
+
+Two tunnels: the ngrok domain reaches the engine and admits only `/v1/webhooks/*` and `/v1/health/*` (Lean's and Algoan's callbacks; the Lean webhook URL never changes), and a cloudflared quick tunnel reaches the web app's dev server, which proxies `/v1/bnpl/*` and `/health` to the BFF so the page and its API share one origin. The script prints the cloudflared URL and hands it to the BFF as `DEMO_WEB_PUBLIC_ORIGIN` and to the web app as `VITE_BNPL_BFF_BASE_URL`. Open the demo on that URL, not on `localhost`: the mock bank redirects the applicant back to the origin the session started on, over HTTPS. A free ngrok account has one domain and a request quota, which is why the demo's own traffic does not go through it.
+
+| Page                      | Step                                  | What the customer sees                                                                                                                                                         |
+| ------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/s/<token>/details`      | `applicant`                           | Name and email.                                                                                                                                                                |
+| `/s/<token>/consent`      | `credit_consent`                      | The credit-check consent.                                                                                                                                                      |
+| `/s/<token>/bank/link`    | `bank_connect`                        | "Connect bank", which calls `POST /v1/bnpl/sessions/<token>/bank-link` and opens Lean's widget; the applicant picks a mock bank there and signs in with a portal test user (). |
+| `/s/<token>/bank/waiting` | `bank_connect` (parked)               | "Waiting for your bank" while Lean reads the accounts (about twenty seconds in the sandbox). The bank's redirect lands here; `?lean_redirect=fail` offers the link again.      |
+| `/s/<token>/accounts`     | `account_selection`                   | The exported accounts (current and savings, GBP balances); the current account is required.                                                                                    |
+| `/s/<token>/bank/consent` | `bank_access_consent`, `credit_check` | "Authorise access" submits the consent and starts the assessment with an empty submit.                                                                                         |
+| `/s/<token>/processing`   | `credit_check` (parked)               | Waits for Algoan.                                                                                                                                                              |
+| `/s/<token>/result`       | terminal, `manual_review`             | Lean's income panel above Algoan's tabs, every figure in SAR (Algoan's GBP amounts converted back at the fixed rate), and "Start over".                                        |
+
+"Start over" in the header of every page starts a fresh session and leaves the old onboarding where it is, for the admin panel to show. The outcome is whatever the test user's data produces: the portal's users all come from one sandbox generator (eight accounts, a monthly payroll pattern, random history depth; in the 2026-10-19 inventory five of seven showed a detectable salary and two a thin history), so "approved" and "review" are the outcomes to expect, and a "declined" only comes from Algoan's bands or an operator. `GET /v1/bnpl/personas` answers an empty list on this journey.
+
+### The BFF's bank-link call
+
+```bash
+$ curl -X POST localhost:3100/v1/bnpl/sessions/<token>/bank-link -H 'Content-Type: application/json' \
+    -d '{}'
+{"appToken":"<app token>","customerId":"<uuid>","accessToken":"<customer token>","sandbox":true,"permissions":["identity","accounts","balance","transactions"],"accountType":"PERSONAL","successRedirectUrl":"https://<domain>/s/<token>/bank/waiting?lean_redirect=success","failRedirectUrl":"https://<domain>/s/<token>/bank/waiting?lean_redirect=fail"}
+```
+
+The BFF holds Lean's secret for this call alone; it answers `409 SESSION_HAS_NO_BANK` off the `bank_connect` step and `502 LEAN_UNAVAILABLE` when Lean refuses. A `400 INVALID_STEP_DATA` on `selectedAccounts` coded `NO_ACCOUNTS_SELECTED` from `run` means the selection named no account of the exported document; the web app points at "Start over".
+
 ## Limits
 
 | Limit              | Value                                                                                                                                                                                                                                                            |

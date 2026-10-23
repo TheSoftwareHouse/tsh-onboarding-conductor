@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
-import { runSession, submitSession } from '@/api/bnpl/bnpl.client';
+import { BffError, runSession, submitSession } from '@/api/bnpl/bnpl.client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 import { sessionPath } from '../session/session-routes';
+import { StartOverButton } from '../session/StartOver';
 import { SessionGate, useSessionView } from '../session/useSessionView';
+import { selectionMessage } from './account-selection';
 
 const BANK_ACCESS_VERSION = '2026-10';
 
@@ -30,7 +32,10 @@ export function BankConsentPage() {
   }
 
   const { token, view } = state;
-  const bankName = typeof view.data.bankName === 'string' ? view.data.bankName : 'Your bank';
+  const bankName =
+    typeof view.data.bankName === 'string'
+      ? view.data.bankName
+      : (view.accounts?.[0]?.bankName ?? 'Your bank');
 
   async function onAuthorise() {
     setSubmitting(true);
@@ -47,7 +52,17 @@ export function BankConsentPage() {
       await runSession(token);
       void navigate(sessionPath(token, 'processing'));
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not start the credit check.');
+      // The engine kept no account of the selection (`NO_ACCOUNTS_SELECTED`): the step holds and
+      // the selection cannot be resubmitted from here, so the way on is to start over.
+      const codes = failure instanceof BffError ? failure.errors?.selectedAccounts : undefined;
+
+      setError(
+        codes !== undefined
+          ? `${selectionMessage(codes)} Start over to pick your accounts again.`
+          : failure instanceof Error
+            ? failure.message
+            : 'Could not start the credit check.',
+      );
       setSubmitting(false);
     }
   }
@@ -58,12 +73,13 @@ export function BankConsentPage() {
         <CardHeader>
           <CardTitle>Access refused</CardTitle>
           <CardDescription>
-            Nothing was shared with Algoan. Start a new session to try again.
+            Nothing was shared with Algoan. Start over to try again.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Button asChild>
-            <Link to="/">Choose a scenario</Link>
+        <CardContent className="flex gap-2">
+          <StartOverButton token={token} variant="default" size="default" />
+          <Button variant="outline" asChild>
+            <Link to="/">Home</Link>
           </Button>
         </CardContent>
       </Card>

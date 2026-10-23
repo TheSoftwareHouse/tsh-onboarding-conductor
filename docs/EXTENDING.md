@@ -648,6 +648,17 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
    write an adapter from scratch — [add a KYC provider](#add-a-kyc-provider) below.** The same goes
    for a credit score: [add a credit provider](#add-a-credit-provider).
 
+   An adapter that produces a document for a later step — a bank-data export another connector will
+   score — stores it through `ConnectorDocumentStore`
+   ([connector-document.store.ts](../packages/engine/src/connectors/documents/connector-document.store.ts)):
+   give it the onboarding, the step that is parked, a `file` field that step declares, a content
+   type and the bytes, and it writes the object and the completed `onboarding_documents` row the
+   way an upload would have ended, capped at 1 MiB. Put the document id in `submittedData` under
+   that field; a later step reaches it through its connector's `fieldMapping` under the
+   guaranteed-predecessor rule, as the `credit-assessment` step's `bankDataFrom` does
+   ([decision 0050](decisions/0050-connector-stored-documents-and-lean-bank-data-export.md);
+   `lean_bank_data` is the worked example).
+
 5. **Make it selectable (optional, nothing to register).** An operator can switch a workflow step's
    connector on one published version or on all of them from the workflow details page
    ([decision 0038](decisions/0038-runtime-connector-selection.md)). One set of rules
@@ -768,7 +779,8 @@ adapter of type `credit`, so a third provider needs no step-type or DDL change.
      provider cannot take, before any provider call; the kernel answers it as a retryable
      `INVALID_BANK_DATA` error on the `bankData` field, so the applicant uploads again;
    - `startAssessment(settings, submission) → {providerReference}` — the applicant roles the workflow
-     bound, the document bytes (`bankData.document`, format `json`) and the 1-based `attempt` arrive
+     bound, the document bytes (`bankData.document`, format `json`, already narrowed to the accounts
+     an `accountSelection` named, when the step maps one) and the 1-based `attempt` arrive
      built. Start one provider analysis per attempt and return the reference to park on. Classify
      what the provider refuses with the port's errors rather than letting a transport error through:
      `CreditProviderCredentialsRejectedError` for refused credentials (the kernel answers

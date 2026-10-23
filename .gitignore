@@ -31,3 +31,6 @@ packages/docs/docs/fixtures/*.mdx
 !packages/docs/docs/fixtures/index.mdx
 packages/docs/docs/fixtures/fixtures.manifest.json
 packages/docs/static/openapi/
+
+#NGRok
+policy.yaml

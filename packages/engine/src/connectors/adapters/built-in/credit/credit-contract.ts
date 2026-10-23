@@ -25,8 +25,24 @@ export const CREDIT_ATTEMPT_COUNT_FIELD = 'creditAttemptCount';
 export const CREDIT_PROVIDER_REFERENCE_FIELD = 'creditProviderReference';
 export const CREDIT_REPORT_FIELD = 'creditReport';
 
-/** The step's own input field: the bank-data document the client uploads. */
+/**
+ * The payload key the bank-data document arrives under: the step's own upload field, or — with
+ * the step's `bankDataFrom` — a `file` field of an earlier step mapped to this key (0051).
+ */
 export const CREDIT_BANK_DATA_FIELD = 'bankData';
+
+/**
+ * The payload key an account selection arrives under (the step's `accountSelection`, 0051): the
+ * positions of the document's top-level `accounts` to submit, `account-01`, `account-02`, …
+ */
+export const CREDIT_ACCOUNT_SELECTION_FIELD = 'accountSelection';
+export const CREDIT_ACCOUNT_POSITION_PREFIX = 'account-';
+
+/**
+ * The field error on the selection's source field when it names no account of the document. The
+ * step holds, and the client's step is the selection's, so a demo service shows it and starts over.
+ */
+export const CREDIT_NO_ACCOUNTS_SELECTED_ERROR = 'NO_ACCOUNTS_SELECTED';
 
 /** Upper bound of the compact-JSON size of `creditReport` written into the context. */
 export const CREDIT_REPORT_MAX_BYTES = 262144;

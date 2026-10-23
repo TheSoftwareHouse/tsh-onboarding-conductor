@@ -16,16 +16,21 @@ import {
   toggle,
   type AccountSelectionValues,
 } from './account-selection';
+import { moneyFor, type Money } from '../result/money';
 import { BankBadge } from './BankPage';
 
-function formatBalance(account: SessionAccount): string {
+/** The journey's currency (riyals on the KSA journey); a UK persona's own currency stays. */
+function formatBalance(account: SessionAccount, money: Money): string {
   if (account.balance === null) {
     return 'n/a';
+  }
+  if (account.currency === null || account.currency === 'GBP') {
+    return money.format(account.balance);
   }
   try {
     return new Intl.NumberFormat('en-GB', {
       style: 'currency',
-      currency: account.currency ?? 'GBP',
+      currency: account.currency,
     }).format(account.balance);
   } catch {
     return String(account.balance);
@@ -45,6 +50,7 @@ export function AccountsPage() {
   }
 
   const { token, view } = state;
+  const money = moneyFor(view.journey);
   const accounts = view.accounts ?? [];
   const bankName = accounts[0]?.bankName ?? view.data.bankName;
   const selected = form.watch('selectedAccounts');
@@ -122,7 +128,7 @@ export function AccountsPage() {
                     {account.accountNumber === null ? '' : `**** ${account.accountNumber}`}
                   </span>
                 </Label>
-                <span className="tabular-nums">{formatBalance(account)}</span>
+                <span className="tabular-nums">{formatBalance(account, money)}</span>
               </li>
             ))}
           </ul>

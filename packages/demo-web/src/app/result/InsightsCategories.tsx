@@ -1,14 +1,12 @@
 import { NotComputed } from './NotComputed';
-import {
-  type CalendarEntry,
-  type CategoryRow,
-  type InsightTiles,
-  formatGbp,
-} from './report-selectors';
+import { useMoney } from './money';
+import { type CalendarEntry, type CategoryRow, type InsightTiles } from './report-selectors';
 
 const MIN_BAR_PERCENT = 6;
 
 function Tile({ label, value }: { label: string; value: number | null }) {
+  const money = useMoney();
+
   return (
     <div className="grid gap-1 rounded-lg border border-border bg-card p-4">
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -16,13 +14,15 @@ function Tile({ label, value }: { label: string; value: number | null }) {
         className="text-xl font-semibold tabular-nums text-card-foreground"
         style={value !== null && value < 0 ? { color: '#d92d20' } : undefined}
       >
-        {value === null ? 'Not computed' : formatGbp(value)}
+        {value === null ? 'Not computed' : money.format(value)}
       </span>
     </div>
   );
 }
 
 function Calendar({ entries }: { entries: CalendarEntry[] }) {
+  const money = useMoney();
+
   if (entries.length === 0) {
     return <span className="text-xs text-muted-foreground">No monthly data</span>;
   }
@@ -32,8 +32,8 @@ function Calendar({ entries }: { entries: CalendarEntry[] }) {
       {entries.map((entry) => (
         <li
           key={entry.month}
-          title={`${entry.month}: ${formatGbp(entry.amount)}`}
-          aria-label={`${entry.month}: ${formatGbp(entry.amount)}`}
+          title={`${entry.month}: ${money.format(entry.amount)}`}
+          aria-label={`${entry.month}: ${money.format(entry.amount)}`}
           className="w-3 rounded-t-sm bg-primary"
           style={{ height: `${Math.max((Math.abs(entry.amount) / peak) * 100, MIN_BAR_PERCENT)}%` }}
         />
@@ -43,6 +43,8 @@ function Calendar({ entries }: { entries: CalendarEntry[] }) {
 }
 
 function CategoryList({ title, rows }: { title: string; rows: CategoryRow[] }) {
+  const money = useMoney();
+
   return (
     <section className="grid gap-2">
       <h4 className="text-sm font-medium text-card-foreground">{title}</h4>
@@ -60,7 +62,7 @@ function CategoryList({ title, rows }: { title: string; rows: CategoryRow[] }) {
               <span className="w-28 text-right text-sm tabular-nums">
                 {row.monthlyAmount === null
                   ? 'Not computed'
-                  : `${formatGbp(row.monthlyAmount)} / mo`}
+                  : `${money.format(row.monthlyAmount)} / mo`}
               </span>
             </li>
           ))}

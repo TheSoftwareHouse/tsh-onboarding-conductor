@@ -1,13 +1,14 @@
 import { NotComputed } from './NotComputed';
-import { type LoanSummary, type RiskRow, formatGbp } from './report-selectors';
+import { useMoney, type Money } from './money';
+import { type LoanSummary, type RiskRow } from './report-selectors';
 
-function formatRisk(row: RiskRow): string {
+function formatRisk(row: RiskRow, money: Money): string {
   if (row.value === null) {
     return 'Not computed';
   }
   switch (row.unit) {
     case 'money':
-      return formatGbp(row.value);
+      return money.format(row.value);
     case 'days':
       return `${row.value} days`;
     case 'flag':
@@ -28,6 +29,8 @@ export function InsightsIndicators({
   risks: RiskRow[] | null;
   loans: LoanSummary[] | null;
 }) {
+  const money = useMoney();
+
   return (
     <div className="grid gap-6">
       <section className="grid gap-2">
@@ -44,7 +47,7 @@ export function InsightsIndicators({
                   style={isAlert(row) ? { color: '#d92d20', fontWeight: 600 } : undefined}
                 >
                   {isAlert(row) && <span aria-hidden="true">!</span>}
-                  {formatRisk(row)}
+                  {formatRisk(row, money)}
                 </dd>
               </div>
             ))}
@@ -62,7 +65,7 @@ export function InsightsIndicators({
                 <dt className="capitalize text-muted-foreground">{loan.kind}</dt>
                 <dd className="tabular-nums">
                   {loan.count === null ? 'Not computed' : `${loan.count} loans`}
-                  {loan.totalAmount !== null && `, ${formatGbp(loan.totalAmount)} total`}
+                  {loan.totalAmount !== null && `, ${money.format(loan.totalAmount)} total`}
                 </dd>
               </div>
             ))}

@@ -3,6 +3,8 @@ import type { NormalizedWorkflowConnectorFallback } from '@tsh/ddl-schema';
 import { isUUID } from 'class-validator';
 import type { ResolvedConnectorSettings } from '../../../connector-settings.service';
 import { ConnectorSettingsService } from '../../../connector-settings.service';
+import { ConnectorDocumentTooLargeError } from '../../../documents/connector-document-too-large.error';
+import { ConnectorDocumentStore } from '../../../documents/connector-document.store';
 import { ConnectorCallbackAlreadyAppliedError } from '../../../errors/connector-callback-already-applied.error';
 import { LeanUnavailableException } from '../../../errors/lean-unavailable.exception';
 import { PendingConnectorReconcileUnsupportedException } from '../../../errors/pending-connector-reconcile-unsupported.exception';
@@ -30,16 +32,28 @@ import {
   parseLeanCallback,
   parseLeanSignatureHeader,
 } from './lean-bank-data-callback';
+import {
+  buildLeanBankDataExport,
+  isExportEmpty,
+  isExportableAccount,
+  type LeanExportBank,
+  type LeanExportedAccount,
+} from './lean-bank-data-export';
 import { LeanClient } from './lean-client';
 import { LEAN_BANK_DATA_SETTINGS } from './lean-config';
 import {
+  LEAN_BANK_CONNECT_OUTCOME_CONNECTED,
   LEAN_BANK_CONNECT_OUTCOME_DATA_UNAVAILABLE,
   LEAN_BANK_CONNECT_OUTCOME_NOT_CONNECTED,
   LEAN_BANK_DATA_CONNECTOR_ID,
   LEAN_CONNECT_ABANDONED_AFTER_MS,
   LEAN_ERROR_STATUS_UNKNOWN_CUSTOMER,
   LEAN_FIELD_BANK_CONNECT_OUTCOME,
+  LEAN_CONFIG_EXPORT_FIELD,
   LEAN_CONFIG_MIN_MONTHLY_SALARY,
+  LEAN_DATA_MAX_PAGES_PER_ACCOUNT,
+  LEAN_DATA_PAGE_SIZE,
+  LEAN_FIELD_BANK_ACCOUNTS,
   LEAN_FIELD_EMPLOYER_NAME,
   LEAN_FIELD_LEAN_CUSTOMER_ID,
   LEAN_FIELD_NON_SALARY_MONTHLY_AVERAGE,
@@ -51,6 +65,7 @@ import {
   type LeanBankDataCallbackFields,
   type LeanCredentials,
   type LeanCustomer,
+  type LeanTransaction,
 } from './lean-contract';
 
 /** The "no onboarding" an unrelated or unreadable callback is acknowledged against. */
@@ -83,7 +98,40 @@ const getMinMonthlySalary = (
   return value;
 };
 
-/** Every key a callback may put in `submittedData`; the `bank_connect` step declares them all. */
+/**
+ * The `file` field the exported document goes to, when the declaration opts into the export (0050).
+ * Read like the threshold: from the declaration the park resolves to, on every callback.
+ */
+const getExportField = (
+  connectorId: string,
+  config: Readonly<Record<string, unknown>>,
+): string | undefined => {
+  const value = config[LEAN_CONFIG_EXPORT_FIELD];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(
+      `config.${LEAN_CONFIG_EXPORT_FIELD} must be a non-empty string naming a file field for connector id=${connectorId}`,
+    );
+  }
+
+  return value;
+};
+
+const EXPORT_CONTENT_TYPE = 'application/json';
+const UNKNOWN_BANK_ID = 'unknown';
+const UNKNOWN_BANK_NAME = 'Unknown bank';
+const DATE_PART_LENGTH = 10;
+
+/**
+ * Every key a callback may put in `submittedData`; the `bank_connect` step declares them all. The
+ * two export keys are not here: they are emitted only when `config.exportField` is set, and the
+ * registry holds every async step to this list, so listing them would break a declaration that
+ * does not export. A step that sets `exportField` declares that field and `bankAccounts` itself.
+ */
 const CALLBACK_FIELDS: readonly string[] = [
   LEAN_FIELD_BANK_CONNECT_OUTCOME,
   LEAN_FIELD_SALARY_MONTHLY_AVERAGE,
@@ -134,10 +182,12 @@ export class LeanBankDataConnector implements ConnectorAdapter {
     private readonly leanClient: LeanClient,
     private readonly connectorSettingsService: ConnectorSettingsService,
     private readonly awaitingCallbackConnectorResolver: AwaitingCallbackConnectorResolver,
+    private readonly connectorDocumentStore: ConnectorDocumentStore,
   ) {}
 
   validateDeclaration(declaration: NormalizedWorkflowConnectorFallback): void {
     getMinMonthlySalary(this.id, declaration.config);
+    getExportField(this.id, declaration.config);
   }
 
   /**
@@ -238,7 +288,8 @@ export class LeanBankDataConnector implements ConnectorAdapter {
       credentials,
       event.entityId,
       onboardingId,
-      getMinMonthlySalary(this.id, resolvedConnector.connector.config),
+      event.customerId,
+      resolvedConnector,
     );
 
     // A webhook cannot settle an unsupported read; the park stays for the operator's reconcile.
@@ -294,7 +345,8 @@ export class LeanBankDataConnector implements ConnectorAdapter {
       credentials,
       latestEntity.id,
       input.onboardingId,
-      getMinMonthlySalary(this.id, resolvedConnector.connector.config),
+      customerId,
+      resolvedConnector,
     );
 
     if (insights.kind === 'pending') {
@@ -346,16 +398,21 @@ export class LeanBankDataConnector implements ConnectorAdapter {
   }
 
   /**
-   * Income and employment for one entity. Still computing is `pending` and unsupported
-   * synchronously is `unsupported`; the caller decides what each means. A refused request (the data
-   * cannot be had) is `data_unavailable`, which the workflow routes to review.
+   * Income and employment for one entity, then — when the declaration names an `exportField` —
+   * the accounts, balances and transactions as a stored document (0050). Still computing is
+   * `pending` and unsupported synchronously is `unsupported`; the caller decides what each means.
+   * A refused request (the data cannot be had) is `data_unavailable`, which the workflow routes to
+   * review; so is an export that cannot be completed, since nothing is decided on a partial read.
    */
   private async pullInsights(
     credentials: LeanCredentials,
     entityId: string,
     onboardingId: string,
-    minMonthlySalary: number,
+    customerId: string,
+    resolvedConnector: AwaitingCallbackConnectorResolution,
   ): Promise<LeanInsightsOutcome> {
+    const minMonthlySalary = getMinMonthlySalary(this.id, resolvedConnector.connector.config);
+    const exportField = getExportField(this.id, resolvedConnector.connector.config);
     const request = { entityId, startDate: buildLeanInsightsStartDate(new Date()) };
     const income = await this.leanClient.getIncome(credentials, request);
 
@@ -371,9 +428,30 @@ export class LeanBankDataConnector implements ConnectorAdapter {
     }
 
     if (income.kind === 'ok' && employment?.kind === 'ok') {
+      const fields = mapLeanInsights(income.body, employment.body, minMonthlySalary);
+
+      if (
+        exportField === undefined ||
+        fields.bankConnectOutcome !== LEAN_BANK_CONNECT_OUTCOME_CONNECTED
+      ) {
+        return { kind: 'decided', fields };
+      }
+
+      const exported = await this.exportBankData(credentials, {
+        entityId,
+        customerId,
+        onboardingId,
+        stepName: resolvedConnector.onboarding.currentStep,
+        exportField,
+        startDate: request.startDate,
+      });
+
       return {
         kind: 'decided',
-        fields: mapLeanInsights(income.body, employment.body, minMonthlySalary),
+        fields:
+          exported === undefined
+            ? { bankConnectOutcome: LEAN_BANK_CONNECT_OUTCOME_DATA_UNAVAILABLE }
+            : { ...fields, ...exported },
       };
     }
 
@@ -387,6 +465,137 @@ export class LeanBankDataConnector implements ConnectorAdapter {
       kind: 'decided',
       fields: { bankConnectOutcome: LEAN_BANK_CONNECT_OUTCOME_DATA_UNAVAILABLE },
     };
+  }
+
+  /**
+   * Reads the entity's accounts, each one's balances and its transactions over the insights window,
+   * converts them and stores the document under the parked step's `exportField`. `undefined` is an
+   * export that cannot be completed: a read Lean refused, no account a provider could score, or a
+   * document over the store's cap. A `5xx` or a timeout throws, as the insights reads do.
+   */
+  private async exportBankData(
+    credentials: LeanCredentials,
+    input: Readonly<{
+      entityId: string;
+      customerId: string;
+      onboardingId: string;
+      stepName: string | null;
+      exportField: string;
+      startDate: string;
+    }>,
+  ): Promise<Pick<LeanBankDataCallbackFields, 'bankAccounts'> | undefined> {
+    const refused = (what: string, status: string): undefined => {
+      this.logger.log(
+        `LEAN_EXPORT_REFUSED connectorId=${this.id} onboardingId=${input.onboardingId} ` +
+          `read=${what} status=${status}`,
+      );
+
+      return undefined;
+    };
+
+    if (input.stepName === null) {
+      throw new Error(`onboarding ${input.onboardingId} is parked on no step`);
+    }
+
+    const entities = await this.leanClient.listCustomerEntities(credentials, input.customerId);
+
+    if (entities.kind !== 'ok') {
+      return refused('entities', entities.body.status);
+    }
+
+    const entity = entities.body.find((candidate) => candidate.id === input.entityId);
+    const bank: LeanExportBank = {
+      id: entity?.bank_identifier ?? UNKNOWN_BANK_ID,
+      name: entity?.bank_details?.name ?? entity?.bank_identifier ?? UNKNOWN_BANK_NAME,
+    };
+    const accounts = await this.leanClient.listAccounts(credentials, input.entityId);
+
+    if (accounts.kind !== 'ok') {
+      return refused('accounts', accounts.body.status);
+    }
+
+    const exportedAt = new Date();
+    const endDate = exportedAt.toISOString().slice(0, DATE_PART_LENGTH);
+    const exportedAccounts: LeanExportedAccount[] = [];
+
+    for (const account of accounts.body.data.accounts.filter(isExportableAccount)) {
+      const balances = await this.leanClient.listBalances(
+        credentials,
+        input.entityId,
+        account.account_id,
+      );
+
+      if (balances.kind !== 'ok') {
+        return refused('balances', balances.body.status);
+      }
+
+      const transactions: LeanTransaction[] = [];
+
+      for (let page = 0; page < LEAN_DATA_MAX_PAGES_PER_ACCOUNT; page += 1) {
+        const listed = await this.leanClient.listTransactions(credentials, {
+          entityId: input.entityId,
+          accountId: account.account_id,
+          startDate: input.startDate,
+          endDate,
+          page,
+        });
+
+        if (listed.kind !== 'ok') {
+          return refused('transactions', listed.body.status);
+        }
+
+        transactions.push(...listed.body.data.transactions);
+
+        const totalPages = listed.body.data.page?.total_pages;
+
+        if (
+          listed.body.data.transactions.length < LEAN_DATA_PAGE_SIZE ||
+          (totalPages !== undefined && page + 1 >= totalPages)
+        ) {
+          break;
+        }
+      }
+
+      exportedAccounts.push({ account, balances: balances.body.data.balances, transactions });
+    }
+
+    const exported = buildLeanBankDataExport(exportedAccounts, bank, exportedAt);
+
+    if (isExportEmpty(exported)) {
+      this.logger.log(
+        `LEAN_EXPORT_EMPTY connectorId=${this.id} onboardingId=${input.onboardingId} ` +
+          `accounts=${accounts.body.data.accounts.length}`,
+      );
+
+      return undefined;
+    }
+
+    try {
+      const stored = await this.connectorDocumentStore.store({
+        connectorId: this.id,
+        onboardingId: input.onboardingId,
+        stepName: input.stepName,
+        fieldName: input.exportField,
+        contentType: EXPORT_CONTENT_TYPE,
+        body: Buffer.from(JSON.stringify(exported.document)),
+      });
+
+      this.logger.log(
+        `LEAN_EXPORT_STORED connectorId=${this.id} onboardingId=${input.onboardingId} ` +
+          `accounts=${exported.document.accounts.length} bytes=${stored.sizeBytes}`,
+      );
+
+      return {
+        [input.exportField]: stored.documentId,
+        [LEAN_FIELD_BANK_ACCOUNTS]: exported.summary,
+      };
+    } catch (error: unknown) {
+      if (error instanceof ConnectorDocumentTooLargeError) {
+        return refused('document', `too_large:${error.sizeBytes}`);
+      }
+
+      throw error;
+    }
   }
 
   private isAbandoned(parkedAt: string | undefined): boolean {

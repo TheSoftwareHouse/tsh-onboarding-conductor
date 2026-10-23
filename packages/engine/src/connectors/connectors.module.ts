@@ -11,6 +11,7 @@ import { EmailTemplatesModule } from '../email-templates/email-templates.module'
 import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
+import { ConnectorDocumentStore } from './documents/connector-document.store';
 import { CompletedOnboardingDocumentResolver } from './resolvers/completed-onboarding-document.resolver';
 import { AwaitingCallbackConnectorResolver } from './resolvers/awaiting-callback-connector.resolver';
 import { ConnectorSettingsAdminService } from './connector-settings-admin.service';
@@ -206,6 +207,7 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
   controllers: [ConnectorsController],
   providers: [
     CompletedOnboardingDocumentResolver,
+    ConnectorDocumentStore,
     AwaitingCallbackConnectorResolver,
     ConnectorsRepository,
     ConnectorSettingsService,

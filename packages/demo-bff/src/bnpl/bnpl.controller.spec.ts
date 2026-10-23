@@ -5,6 +5,8 @@ import { BnplController } from './bnpl.controller';
 import { BnplService } from './bnpl.service';
 import { PersonaService, PersonaSummary } from '../personas/persona.service';
 
+const UK_SERVICE = { journeyOf: () => 'uk-algoan' } as unknown as BnplService;
+
 describe('BnplController', () => {
   it('lists the personae through GET /v1/bnpl/personas', () => {
     const summaries: PersonaSummary[] = [
@@ -20,12 +22,14 @@ describe('BnplController', () => {
     ];
     const personas = { list: jest.fn().mockReturnValue(summaries) };
     const controller = new BnplController(
-      {} as BnplService,
+      UK_SERVICE,
       personas as unknown as PersonaService,
       {} as ConfigService<AppConfig, true>,
     );
 
     expect(controller.listPersonas()).toBe(summaries);
+    expect(controller.journey()).toEqual({ journey: 'uk-algoan' });
+    expect(Reflect.getMetadata('path', BnplController.prototype.journey)).toBe('journey');
     expect(Reflect.getMetadata('path', BnplController)).toBe('v1/bnpl');
     expect(Reflect.getMetadata('path', BnplController.prototype.listPersonas)).toBe('personas');
   });
@@ -44,6 +48,22 @@ describe('BnplController', () => {
     expect(bankLogin).toHaveBeenCalledWith('tok', 'james_watson', 'qr');
     expect(Reflect.getMetadata('path', BnplController.prototype.bankLogin)).toBe(
       'sessions/:token/bank-login',
+    );
+  });
+
+  it('lists no personae and forwards the bank link on the KSA journey', async () => {
+    const bankLink = jest.fn().mockResolvedValue({ customerId: 'c1' });
+    const controller = new BnplController(
+      { journeyOf: () => 'ksa-lean-algoan', bankLink } as unknown as BnplService,
+      { list: jest.fn().mockReturnValue([{ id: 'sherlock_holmes' }]) } as unknown as PersonaService,
+      {} as ConfigService<AppConfig, true>,
+    );
+
+    expect(controller.listPersonas()).toEqual([]);
+    await expect(controller.bankLink('tok')).resolves.toEqual({ customerId: 'c1' });
+    expect(bankLink).toHaveBeenCalledWith('tok');
+    expect(Reflect.getMetadata('path', BnplController.prototype.bankLink)).toBe(
+      'sessions/:token/bank-link',
     );
   });
 

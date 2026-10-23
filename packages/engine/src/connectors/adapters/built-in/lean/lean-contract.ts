@@ -16,6 +16,10 @@ export const LEAN_PATH_CUSTOMER_BY_APP_USER_ID = '/customers/v1/app-user-id';
 export const LEAN_PATH_CUSTOMER_ENTITIES_SUFFIX = 'entities';
 export const LEAN_PATH_INCOME = '/insights/v2/income';
 export const LEAN_PATH_EMPLOYMENT = '/insights/v2/income/employment';
+export const LEAN_PATH_ACCOUNTS = '/data/v2/accounts';
+/** `/data/v2/accounts/{account_id}/balances` and `/transactions`. */
+export const LEAN_PATH_ACCOUNT_BALANCES_SUFFIX = 'balances';
+export const LEAN_PATH_ACCOUNT_TRANSACTIONS_SUFFIX = 'transactions';
 
 export const LEAN_GRANT_TYPE_CLIENT_CREDENTIALS = 'client_credentials';
 export const LEAN_SCOPE_API = 'api';
@@ -41,6 +45,22 @@ export const LEAN_ERROR_STATUS_UNRECOGNIZED = 'UNRECOGNIZED_ERROR';
 export const LEAN_ERROR_STATUS_UNKNOWN_CUSTOMER = 'UNKNOWN_CUSTOMER';
 
 export const LEAN_ACCOUNT_STATUS_ACTIVE = 'ACTIVE';
+
+/** Account vocabulary of the data API, as the KSA sandbox answers it. */
+export const LEAN_ACCOUNT_SUB_TYPE_CURRENT = 'CURRENT';
+export const LEAN_ACCOUNT_SUB_TYPE_SAVINGS = 'SAVINGS';
+export const LEAN_CURRENCY_SAR = 'SAR';
+export const LEAN_CREDIT_DEBIT_INDICATOR_CREDIT = 'CREDIT';
+export const LEAN_CREDIT_DEBIT_INDICATOR_DEBIT = 'DEBIT';
+export const LEAN_BALANCE_TYPE_INTERIM_AVAILABLE = 'INTERIM_AVAILABLE';
+export const LEAN_BALANCE_TYPE_CLOSING_AVAILABLE = 'CLOSING_AVAILABLE';
+export const LEAN_TRANSACTION_STATUS_BOOKED = 'BOOKED';
+export const LEAN_ACCOUNT_SCHEME_IBAN = 'IBAN';
+
+/** The data API's largest page; the export reads transactions in pages of this size. */
+export const LEAN_DATA_PAGE_SIZE = 100;
+/** Pages of transactions the export reads per account before it stops. */
+export const LEAN_DATA_MAX_PAGES_PER_ACCOUNT = 50;
 
 export const LEAN_EVENT_ENTITY_CREATED = 'entity.created';
 export const LEAN_EVENT_ENTITY_UPDATED = 'entity.updated';
@@ -89,6 +109,14 @@ export const LEAN_FIELD_SALARY_THRESHOLD_MET = 'salaryThresholdMet';
 
 /** The `lean_bank_data` declaration's `config` key holding the workflow's salary threshold (SAR). */
 export const LEAN_CONFIG_MIN_MONTHLY_SALARY = 'minMonthlySalary';
+/**
+ * The `lean_bank_data` declaration's optional `config` key naming the `file` field of the parked
+ * step that receives the exported bank-data document (0050). When set, the step must also declare
+ * `bankAccounts`.
+ */
+export const LEAN_CONFIG_EXPORT_FIELD = 'exportField';
+/** The client-visible `json` summary of the exported accounts, for an account-selection page. */
+export const LEAN_FIELD_BANK_ACCOUNTS = 'bankAccounts';
 
 export const LEAN_BANK_CONNECT_OUTCOME_CONNECTED = 'connected';
 export const LEAN_BANK_CONNECT_OUTCOME_DATA_UNAVAILABLE = 'data_unavailable';
@@ -113,7 +141,28 @@ export type LeanBankDataCallbackFields = {
   employerName?: string;
   /** `salaryMonthlyAverage` reached the declaration's `config.minMonthlySalary`. */
   salaryThresholdMet?: boolean;
+  /** `{ accounts: [...] }`, set with the export; see `LeanBankAccountsSummary`. */
+  bankAccounts?: LeanBankAccountsSummary;
+  /** The exported document's id, under the field `config.exportField` names. */
+  [exportField: string]: unknown;
 };
+
+/** One exported account as the applicant sees it: a position, never an account number. */
+export type LeanBankAccountSummary = Readonly<{
+  /** `account-01`, `account-02`, …: the account's position in the document. */
+  id: string;
+  /** The document's `type`: `CHECKING` or `SAVINGS`. */
+  type: string;
+  name: string;
+  /** The last four characters of the IBAN, when Lean reported one. */
+  accountNumber: string | null;
+  /** In the document's currency, after conversion. */
+  balance: number;
+  currency: string;
+  bankName: string;
+}>;
+
+export type LeanBankAccountsSummary = Readonly<{ accounts: readonly LeanBankAccountSummary[] }>;
 
 const MILLISECONDS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
@@ -184,6 +233,66 @@ export type LeanEntity = Readonly<{
   customer_id: string;
   bank_identifier: string;
   created_at: string;
+  bank_details?: Readonly<{ name?: string | null; identifier?: string | null }> | null;
+}>;
+
+export type LeanAmount = Readonly<{ amount: number; currency: string }>;
+
+/** `GET /data/v2/accounts?entity_id=` → `data.accounts[]`. */
+export type LeanAccount = Readonly<{
+  account_id: string;
+  account_holder_name?: string | null;
+  currency: string;
+  /** `PERSONAL` or `BUSINESS`. */
+  account_type: string;
+  /** `CURRENT`, `SAVINGS`, `CREDIT`, `PREPAID`, `EMONEY`, `CHARGE_CARD`, … */
+  account_sub_type: string;
+  status?: string;
+  account?: ReadonlyArray<Readonly<{ scheme_name: string; identification: string }>> | null;
+}>;
+
+/** `GET /data/v2/accounts/{account_id}/balances?entity_id=` → `data.balances[]`. */
+export type LeanBalance = Readonly<{
+  type: string;
+  credit_debit_indicator: string;
+  amount: LeanAmount;
+  date_time?: string | null;
+}>;
+
+/** `GET /data/v2/accounts/{account_id}/transactions?entity_id=&page=&size=` → `data.transactions[]`. */
+export type LeanTransaction = Readonly<{
+  transaction_id?: string;
+  amount: LeanAmount;
+  credit_debit_indicator: string;
+  status?: string;
+  booking_date_time?: string | null;
+  value_date_time?: string | null;
+  transaction_information?: string | null;
+  insights?: Readonly<{ description_cleansed?: string | null }> | null;
+}>;
+
+export type LeanAccountsResponse = Readonly<{
+  data: Readonly<{ accounts: readonly LeanAccount[] }>;
+}>;
+
+export type LeanBalancesResponse = Readonly<{
+  data: Readonly<{ balances: readonly LeanBalance[] }>;
+}>;
+
+export type LeanTransactionsResponse = Readonly<{
+  data: Readonly<{
+    transactions: readonly LeanTransaction[];
+    page?: Readonly<{ total_elements?: number; total_pages?: number }>;
+  }>;
+}>;
+
+export type LeanTransactionsRequest = Readonly<{
+  entityId: string;
+  accountId: string;
+  /** `YYYY-MM-DD`, both inclusive. */
+  startDate: string;
+  endDate: string;
+  page: number;
 }>;
 
 export type LeanIncomeRequest = Readonly<{

@@ -37,6 +37,29 @@ describe('validateConfig', () => {
     expect(findRepoRoot()).toBe(resolve(__dirname, '../../../..'));
   });
 
+  it('defaults to the UK journey and accepts the KSA one with its Lean settings', () => {
+    expect(validateConfig(valid).BNPL_JOURNEY).toBe('uk-algoan');
+
+    const ksa = validateConfig({
+      ...valid,
+      BNPL_JOURNEY: 'ksa-lean-algoan',
+      LEAN_CLIENT_ID: 'app-token',
+      LEAN_CLIENT_SECRET: 'secret',
+      LEAN_AUTH_BASE_URL: 'https://auth.sandbox.sa.leantech.me',
+      LEAN_API_BASE_URL: 'https://sandbox.sa.leantech.me',
+      DEMO_WEB_PUBLIC_ORIGIN: 'https://demo.example.ngrok-free.dev',
+    });
+
+    expect(ksa.BNPL_JOURNEY).toBe('ksa-lean-algoan');
+  });
+
+  it('refuses the KSA journey without the Lean settings, naming them', () => {
+    expect(() => validateConfig({ ...valid, BNPL_JOURNEY: 'ksa-lean-algoan' })).toThrow(
+      'LEAN_CLIENT_ID, LEAN_CLIENT_SECRET, LEAN_AUTH_BASE_URL, LEAN_API_BASE_URL, DEMO_WEB_PUBLIC_ORIGIN',
+    );
+    expect(() => validateConfig({ ...valid, BNPL_JOURNEY: 'mars' })).toThrow('BNPL_JOURNEY');
+  });
+
   it('rejects a base URL without a protocol', () => {
     expect(() => validateConfig({ ...valid, ENGINE_BASE_URL: 'engine:3000' })).toThrow(
       'ENGINE_BASE_URL',

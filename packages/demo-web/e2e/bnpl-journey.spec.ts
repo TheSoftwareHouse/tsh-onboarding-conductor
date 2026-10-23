@@ -48,7 +48,7 @@ async function fillDetails(page: Page, first: string, last: string): Promise<voi
 async function giveConsent(page: Page): Promise<void> {
   await expect(page.getByText('Share your bank data', { exact: true })).toBeVisible();
   await page.getByLabel(CONSENT_LABEL).click();
-  await page.getByRole('button', { name: 'Go to bank selection' }).click();
+  await page.getByRole('button', { name: 'Continue to your bank' }).click();
 }
 
 /** Bank selection -> the bank's login. `profile` is clicked unless the session preselects one. */

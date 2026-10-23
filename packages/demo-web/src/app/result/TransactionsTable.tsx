@@ -11,9 +11,11 @@ import {
 } from '@/components/ui/table';
 
 import { NotComputed } from './NotComputed';
-import { type TransactionRow, formatGbp, sortTransactionsByDate } from './report-selectors';
+import { useMoney } from './money';
+import { type TransactionRow, sortTransactionsByDate } from './report-selectors';
 
 export function TransactionsTable({ rows }: { rows: TransactionRow[] }) {
+  const money = useMoney();
   const [direction, setDirection] = useState<'asc' | 'desc'>('desc');
   const sorted = useMemo(() => sortTransactionsByDate(rows, direction), [rows, direction]);
 
@@ -51,7 +53,7 @@ export function TransactionsTable({ rows }: { rows: TransactionRow[] }) {
               style={{ color: row.amount < 0 ? '#d92d20' : '#1a8f4c' }}
             >
               {row.amount > 0 ? '+' : ''}
-              {formatGbp(row.amount)}
+              {money.format(row.amount)}
             </TableCell>
           </TableRow>
         ))}

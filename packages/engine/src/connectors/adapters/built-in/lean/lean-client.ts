@@ -8,6 +8,7 @@ import {
   LEAN_ACCOUNT_HOLDER_TYPE_PERSONAL,
   LEAN_ASYNC_DISABLED,
   LEAN_COUNTRY_CODE_SAUDI_ARABIA,
+  LEAN_DATA_PAGE_SIZE,
   LEAN_ERROR_STATUS_UNRECOGNIZED,
   LEAN_GRANT_TYPE_CLIENT_CREDENTIALS,
   LEAN_HTTP_STATUS_ACCEPTED,
@@ -16,6 +17,9 @@ import {
   LEAN_HTTP_STATUS_UNAUTHORIZED,
   LEAN_IDENTIFICATION_TYPE_NATIONAL_ID,
   LEAN_INCOME_TYPE_ALL,
+  LEAN_PATH_ACCOUNT_BALANCES_SUFFIX,
+  LEAN_PATH_ACCOUNT_TRANSACTIONS_SUFFIX,
+  LEAN_PATH_ACCOUNTS,
   LEAN_PATH_CUSTOMER_BY_APP_USER_ID,
   LEAN_PATH_CUSTOMER_ENTITIES_SUFFIX,
   LEAN_PATH_CUSTOMERS,
@@ -26,6 +30,8 @@ import {
   LEAN_SCOPE_API,
   LEAN_TOKEN_REFRESH_MARGIN_MS,
   type LeanAccountVerification,
+  type LeanAccountsResponse,
+  type LeanBalancesResponse,
   type LeanCredentials,
   type LeanCustomer,
   type LeanEmployment,
@@ -36,6 +42,8 @@ import {
   type LeanIncomeRequest,
   type LeanPendingBody,
   type LeanTokenResponse,
+  type LeanTransactionsRequest,
+  type LeanTransactionsResponse,
   type LeanVerifyAccountRequest,
 } from './lean-contract';
 
@@ -218,6 +226,55 @@ export class LeanClient {
           entity_id: request.entityId,
           start_date: request.startDate,
           async: LEAN_ASYNC_DISABLED,
+        },
+      }),
+    );
+  }
+
+  /** `GET /data/v2/accounts?entity_id=` — every account the entity's consent covers. */
+  async listAccounts(
+    credentials: LeanCredentials,
+    entityId: string,
+  ): Promise<LeanResult<LeanAccountsResponse>> {
+    return this.toResult(
+      await this.call(credentials, {
+        method: 'GET',
+        path: LEAN_PATH_ACCOUNTS,
+        query: { entity_id: entityId, size: String(LEAN_DATA_PAGE_SIZE) },
+      }),
+    );
+  }
+
+  /** `GET /data/v2/accounts/{account_id}/balances?entity_id=`. */
+  async listBalances(
+    credentials: LeanCredentials,
+    entityId: string,
+    accountId: string,
+  ): Promise<LeanResult<LeanBalancesResponse>> {
+    return this.toResult(
+      await this.call(credentials, {
+        method: 'GET',
+        path: `${LEAN_PATH_ACCOUNTS}/${encodeURIComponent(accountId)}/${LEAN_PATH_ACCOUNT_BALANCES_SUFFIX}`,
+        query: { entity_id: entityId },
+      }),
+    );
+  }
+
+  /** `GET /data/v2/accounts/{account_id}/transactions?entity_id=&start_date=&end_date=&page=&size=`, one page. */
+  async listTransactions(
+    credentials: LeanCredentials,
+    request: LeanTransactionsRequest,
+  ): Promise<LeanResult<LeanTransactionsResponse>> {
+    return this.toResult(
+      await this.call(credentials, {
+        method: 'GET',
+        path: `${LEAN_PATH_ACCOUNTS}/${encodeURIComponent(request.accountId)}/${LEAN_PATH_ACCOUNT_TRANSACTIONS_SUFFIX}`,
+        query: {
+          entity_id: request.entityId,
+          start_date: request.startDate,
+          end_date: request.endDate,
+          page: String(request.page),
+          size: String(LEAN_DATA_PAGE_SIZE),
         },
       }),
     );

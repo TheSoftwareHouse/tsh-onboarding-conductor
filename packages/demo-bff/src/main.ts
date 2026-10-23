@@ -11,9 +11,14 @@ async function bootstrap() {
   const config = app.get<ConfigService<AppConfig, true>>(ConfigService);
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  // The demo web app is the only browser origin; no admin or engine route is exposed here.
+  // The demo web app is the only browser origin (its dev-server origin and, on the KSA journey,
+  // the public HTTPS origin the tunnel serves it on); no admin or engine route is exposed here.
+  const publicOrigin = config.get('DEMO_WEB_PUBLIC_ORIGIN', { infer: true });
   app.enableCors({
-    origin: config.get('DEMO_WEB_ORIGIN', { infer: true }),
+    origin: [
+      config.get('DEMO_WEB_ORIGIN', { infer: true }),
+      ...(publicOrigin === undefined ? [] : [publicOrigin]),
+    ],
     methods: ['GET', 'POST', 'OPTIONS'],
   });
 

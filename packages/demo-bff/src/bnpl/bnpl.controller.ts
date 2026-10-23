@@ -1,13 +1,14 @@
 import { ConfigService } from '@nestjs/config';
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 
-import { AppConfig } from '../config/app.config';
+import { AppConfig, KSA_JOURNEY } from '../config/app.config';
+import { LeanLink } from '../lean/lean-link.service';
 import { PersonaService, PersonaSummary } from '../personas/persona.service';
 import { BnplService } from './bnpl.service';
 import { BankLoginDto } from './dto/bank-login.dto';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { GetSessionQuery } from './dto/get-session.query';
-import { CreatedSession, ProcessingView, SessionView } from './dto/session-view';
+import { CreatedSession, JourneyView, ProcessingView, SessionView } from './dto/session-view';
 import { SessionNotFoundException } from './errors/session-not-found.exception';
 import { SubmitSessionDto } from './dto/submit-session.dto';
 
@@ -19,9 +20,16 @@ export class BnplController {
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
+  /** Which journey this BFF runs, so the web app can pick its page table before any session. */
+  @Get('journey')
+  journey(): JourneyView {
+    return { journey: this.service.journeyOf() };
+  }
+
+  /** The UK personae; the KSA journey has none (the Lean mock-bank login decides the data). */
   @Get('personas')
   listPersonas(): PersonaSummary[] {
-    return this.personas.list();
+    return this.service.journeyOf() === KSA_JOURNEY ? [] : this.personas.list();
   }
 
   @Post('sessions')
@@ -57,6 +65,13 @@ export class BnplController {
   @HttpCode(200)
   bankLogin(@Param('token') token: string, @Body() dto: BankLoginDto): Promise<SessionView> {
     return this.service.bankLogin(token, dto.persona, dto.method);
+  }
+
+  /** KSA journey: creates the Lean customer, parks the step and answers the widget's parameters. */
+  @Post('sessions/:token/bank-link')
+  @HttpCode(200)
+  bankLink(@Param('token') token: string): Promise<LeanLink> {
+    return this.service.bankLink(token);
   }
 
   @Post('sessions/:token/run')

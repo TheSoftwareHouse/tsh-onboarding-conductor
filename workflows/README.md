@@ -50,6 +50,12 @@ fails.
 `uk-bnpl-credit-check-algoan-local.workflow.json`; `fixtures/credit-check.workflow.json` is the
 same layout on `mock_credit`.
 
+`built-in/ksa-bnpl-lean-algoan.workflow.json` is the KSA BNPL flow: the bank is linked through
+`lean_bank_data` (Lean's widget, parked until Lean's webhook), which exports the linked accounts
+as a document the `credit-assessment` step then scores on `algoan_credit` through `bankDataFrom`
+and `accountSelection`; its `users/` fork is `ksa-bnpl-lean-algoan-local.workflow.json`, and
+`fixtures/lean-ksa-export.workflow.json` is the same hand-off on `mock_credit` for the e2e suite.
+
 `fixtures/` is skipped when `NODE_ENV=production`, so test workflows never
 reach a production deployment.
 

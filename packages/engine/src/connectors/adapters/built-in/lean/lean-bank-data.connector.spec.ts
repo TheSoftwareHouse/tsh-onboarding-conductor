@@ -1,3 +1,4 @@
+import { ConnectorDocumentTooLargeError } from '../../../documents/connector-document-too-large.error';
 import { ConnectorCallbackAlreadyAppliedError } from '../../../errors/connector-callback-already-applied.error';
 import { LeanUnavailableException } from '../../../errors/lean-unavailable.exception';
 import { PendingConnectorReconcileUnsupportedException } from '../../../errors/pending-connector-reconcile-unsupported.exception';
@@ -15,6 +16,7 @@ const ONBOARDING_ID = '33333333-3333-4333-8333-333333333333';
 const CUSTOMER_ID = '22222222-2222-4222-8222-222222222222';
 const OTHER_CUSTOMER_ID = '44444444-4444-4444-8444-444444444444';
 const ENTITY_ID = '11111111-1111-4111-8111-111111111111';
+const DOCUMENT_ID = '55555555-5555-4555-8555-555555555555';
 const PARKED_AT_MS = Date.parse('2026-10-13T10:00:00.000Z');
 const MIN_MONTHLY_SALARY = 4000;
 const DECLARATION_CONFIG = { minMonthlySalary: MIN_MONTHLY_SALARY };
@@ -135,6 +137,12 @@ const createDeps = (
       listCustomerEntities: jest.fn(),
       getIncome: jest.fn().mockResolvedValue(incomeBody),
       getEmployment: jest.fn().mockResolvedValue(employmentBody),
+      listAccounts: jest.fn(),
+      listBalances: jest.fn(),
+      listTransactions: jest.fn(),
+    },
+    connectorDocumentStore: {
+      store: jest.fn().mockResolvedValue({ documentId: DOCUMENT_ID, sizeBytes: 123 }),
     },
     connectorSettingsService: { resolve: jest.fn().mockResolvedValue(settings) },
     awaitingCallbackConnectorResolver: {
@@ -154,7 +162,65 @@ const createConnector = (deps: ReturnType<typeof createDeps>) =>
     deps.leanClient as never,
     deps.connectorSettingsService as never,
     deps.awaitingCallbackConnectorResolver as never,
+    deps.connectorDocumentStore as never,
   );
+
+const EXPORT_FIELD = 'bankDataDocument';
+const EXPORT_CONFIG = { ...DECLARATION_CONFIG, exportField: EXPORT_FIELD };
+
+const leanEntity = (id = ENTITY_ID, bankIdentifier = 'LEA1_SAMAOB_SAU') => ({
+  id,
+  customer_id: CUSTOMER_ID,
+  bank_identifier: bankIdentifier,
+  bank_details: { name: 'Mockbank 1', identifier: bankIdentifier },
+  created_at: '2026-10-13T10:20:00Z',
+});
+
+const leanAccount = (accountId: string, overrides: Record<string, unknown> = {}) => ({
+  account_id: accountId,
+  account_holder_name: 'Inventory User',
+  currency: 'SAR',
+  account_type: 'PERSONAL',
+  account_sub_type: 'CURRENT',
+  status: 'ACTIVE',
+  account: [{ scheme_name: 'IBAN', identification: `SA00${accountId}1309` }],
+  ...overrides,
+});
+
+const leanTransaction = (amount: number) => ({
+  amount: { amount, currency: 'SAR' },
+  credit_debit_indicator: 'CREDIT',
+  status: 'BOOKED',
+  booking_date_time: '2026-09-25T00:00:00Z',
+  transaction_information: 'PAYROLL PAYMENT',
+});
+
+/** Wires the data API answers for one current account and one USD account the export must skip. */
+const stubExport = (deps: ReturnType<typeof createDeps>) => {
+  deps.leanClient.listCustomerEntities.mockResolvedValue(okResult([leanEntity()]));
+  deps.leanClient.listAccounts.mockResolvedValue(
+    okResult({
+      data: { accounts: [leanAccount('cur'), leanAccount('usd', { currency: 'USD' })] },
+    }),
+  );
+  deps.leanClient.listBalances.mockResolvedValue(
+    okResult({
+      data: {
+        balances: [
+          {
+            type: 'INTERIM_AVAILABLE',
+            credit_debit_indicator: 'CREDIT',
+            amount: { amount: 1000, currency: 'SAR' },
+            date_time: '2026-10-18T00:00:00Z',
+          },
+        ],
+      },
+    }),
+  );
+  deps.leanClient.listTransactions.mockResolvedValue(
+    okResult({ data: { transactions: [leanTransaction(30000)], page: { total_pages: 1 } } }),
+  );
+};
 
 const executionInput = (
   payload: Record<string, unknown> = { leanCustomerId: CUSTOMER_ID },
@@ -228,6 +294,180 @@ describe('LeanBankDataConnector', () => {
       ['not a number', { minMonthlySalary: '4000' }],
     ])('refuses a minMonthlySalary that is %s', (_label, config) => {
       expect(() => declare(config)).toThrow('minMonthlySalary');
+    });
+
+    it('accepts an exportField naming a field, and refuses one that names nothing', () => {
+      expect(() => declare(EXPORT_CONFIG)).not.toThrow();
+      expect(() => declare({ ...DECLARATION_CONFIG, exportField: '' })).toThrow('exportField');
+      expect(() => declare({ ...DECLARATION_CONFIG, exportField: 7 })).toThrow('exportField');
+    });
+  });
+
+  describe('export', () => {
+    const callback = (rawBody: Uint8Array) => ({ rawBody, headers: {} });
+
+    it('reads nothing from the data API when the declaration names no exportField', async () => {
+      const deps = createDeps();
+
+      const mapped = await createConnector(deps).mapCallbackResult(
+        callback(refreshUpdated('FINISHED')),
+      );
+
+      expect(mapped.submittedData).toEqual(CONNECTED_FIELDS);
+      expect(deps.leanClient.listAccounts).not.toHaveBeenCalled();
+      expect(deps.connectorDocumentStore.store).not.toHaveBeenCalled();
+    });
+
+    it('stores the converted document under the export field and summarises the accounts', async () => {
+      const deps = createDeps(CUSTOMER_ID, EXPORT_CONFIG);
+      stubExport(deps);
+
+      const mapped = await createConnector(deps).mapCallbackResult(
+        callback(refreshUpdated('FINISHED')),
+      );
+
+      expect(mapped.submittedData).toEqual({
+        ...CONNECTED_FIELDS,
+        [EXPORT_FIELD]: DOCUMENT_ID,
+        bankAccounts: {
+          accounts: [
+            {
+              id: 'account-01',
+              type: 'CHECKING',
+              name: 'Current account',
+              accountNumber: '1309',
+              balance: 197,
+              currency: 'GBP',
+              bankName: 'Mockbank 1',
+            },
+          ],
+        },
+      });
+      // The USD account is skipped before any read of its balances or transactions.
+      expect(deps.leanClient.listBalances).toHaveBeenCalledTimes(1);
+      expect(deps.leanClient.listTransactions).toHaveBeenCalledWith(
+        CREDENTIALS,
+        expect.objectContaining({ entityId: ENTITY_ID, accountId: 'cur', page: 0 }),
+      );
+      expect(deps.connectorDocumentStore.store).toHaveBeenCalledWith({
+        connectorId: 'lean_bank_data',
+        onboardingId: ONBOARDING_ID,
+        stepName: 'bank_connect',
+        fieldName: EXPORT_FIELD,
+        contentType: 'application/json',
+        body: expect.any(Buffer),
+      });
+      const document = JSON.parse(
+        (deps.connectorDocumentStore.store.mock.calls[0][0] as { body: Buffer }).body.toString(),
+      ) as { accounts: Array<Record<string, unknown>> };
+      expect(document.accounts).toHaveLength(1);
+      expect(document.accounts[0]).toMatchObject({
+        type: 'CHECKING',
+        usage: 'PERSONAL',
+        currency: 'GBP',
+        balance: 197,
+        bank: { id: 'LEA1_SAMAOB_SAU', name: 'Mockbank 1' },
+        transactions: [expect.objectContaining({ amount: 5910, currency: 'GBP' })],
+      });
+    });
+
+    it('pages transactions until a short page or the last page', async () => {
+      const deps = createDeps(CUSTOMER_ID, EXPORT_CONFIG);
+      stubExport(deps);
+      const fullPage = Array.from({ length: 100 }, () => leanTransaction(10));
+      deps.leanClient.listTransactions
+        .mockResolvedValueOnce(
+          okResult({ data: { transactions: fullPage, page: { total_pages: 3 } } }),
+        )
+        .mockResolvedValueOnce(
+          okResult({ data: { transactions: fullPage, page: { total_pages: 3 } } }),
+        )
+        .mockResolvedValueOnce(okResult({ data: { transactions: [leanTransaction(10)] } }));
+
+      await createConnector(deps).mapCallbackResult(callback(refreshUpdated('FINISHED')));
+
+      expect(deps.leanClient.listTransactions).toHaveBeenCalledTimes(3);
+      expect(
+        deps.leanClient.listTransactions.mock.calls.map(([, request]) => request.page),
+      ).toEqual([0, 1, 2]);
+    });
+
+    it.each([
+      ['entities', 'listCustomerEntities'],
+      ['accounts', 'listAccounts'],
+      ['balances', 'listBalances'],
+      ['transactions', 'listTransactions'],
+    ] as const)(
+      'reports data_unavailable when Lean refuses the %s read',
+      async (_label, method) => {
+        const deps = createDeps(CUSTOMER_ID, EXPORT_CONFIG);
+        stubExport(deps);
+        deps.leanClient[method].mockResolvedValue(forbiddenCustomer);
+
+        const mapped = await createConnector(deps).mapCallbackResult(
+          callback(refreshUpdated('FINISHED')),
+        );
+
+        expect(mapped.submittedData).toEqual({ bankConnectOutcome: 'data_unavailable' });
+        expect(deps.connectorDocumentStore.store).not.toHaveBeenCalled();
+      },
+    );
+
+    it('reports data_unavailable when no account can be exported', async () => {
+      const deps = createDeps(CUSTOMER_ID, EXPORT_CONFIG);
+      stubExport(deps);
+      deps.leanClient.listAccounts.mockResolvedValue(
+        okResult({ data: { accounts: [leanAccount('usd', { currency: 'USD' })] } }),
+      );
+
+      const mapped = await createConnector(deps).mapCallbackResult(
+        callback(refreshUpdated('FINISHED')),
+      );
+
+      expect(mapped.submittedData).toEqual({ bankConnectOutcome: 'data_unavailable' });
+    });
+
+    it('reports data_unavailable when the document is over the store cap', async () => {
+      const deps = createDeps(CUSTOMER_ID, EXPORT_CONFIG);
+      stubExport(deps);
+      deps.connectorDocumentStore.store.mockRejectedValue(
+        new ConnectorDocumentTooLargeError('lean_bank_data', 2, 1),
+      );
+
+      const mapped = await createConnector(deps).mapCallbackResult(
+        callback(refreshUpdated('FINISHED')),
+      );
+
+      expect(mapped.submittedData).toEqual({ bankConnectOutcome: 'data_unavailable' });
+    });
+
+    it('lets a storage failure surface rather than deciding on it', async () => {
+      const deps = createDeps(CUSTOMER_ID, EXPORT_CONFIG);
+      stubExport(deps);
+      deps.connectorDocumentStore.store.mockRejectedValue(new Error('storage down'));
+
+      await expect(
+        createConnector(deps).mapCallbackResult(callback(refreshUpdated('FINISHED'))),
+      ).rejects.toThrow('storage down');
+    });
+
+    it('exports on reconcile too, for the newest entity', async () => {
+      const deps = createDeps(CUSTOMER_ID, EXPORT_CONFIG);
+      stubExport(deps);
+
+      const reconciled = await createConnector(deps).reconcilePending({
+        onboardingId: ONBOARDING_ID,
+      });
+
+      expect(reconciled).toMatchObject({
+        outcome: 'resolved',
+        callback: {
+          submittedData: expect.objectContaining({
+            bankConnectOutcome: 'connected',
+            [EXPORT_FIELD]: DOCUMENT_ID,
+          }),
+        },
+      });
     });
   });
 

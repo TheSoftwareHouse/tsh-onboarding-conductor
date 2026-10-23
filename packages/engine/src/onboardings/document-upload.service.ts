@@ -16,6 +16,7 @@ import { DocumentUploadConflictException } from './errors/document-upload-confli
 import { DocumentUploadExpiredException } from './errors/document-upload-expired.exception';
 import { DocumentUploadNotFoundException } from './errors/document-upload-not-found.exception';
 import { InvalidDocumentUploadException } from './errors/invalid-document-upload.exception';
+import { buildFinalObjectKey, buildStagingObjectKey } from './onboarding-document-keys';
 import { OnboardingDocumentsRepository } from './onboarding-documents.repository';
 import { OnboardingsRepository } from './onboardings.repository';
 
@@ -99,7 +100,7 @@ export class DocumentUploadService {
       }
 
       const documentId = generateUuidV7();
-      const stagingObjectKey = this.buildStagingObjectKey(onboarding.id, documentId);
+      const stagingObjectKey = buildStagingObjectKey(onboarding.id, documentId);
       const expiresAt = new Date(Date.now() + DOCUMENT_RESERVATION_EXPIRY_SECONDS * 1000);
 
       const upload = await this.objectStoragePort.issueUploadTicket({
@@ -248,7 +249,7 @@ export class DocumentUploadService {
           }
         }
 
-        const finalObjectKey = this.buildFinalObjectKey(onboarding.id, currentReservation.id);
+        const finalObjectKey = buildFinalObjectKey(onboarding.id, currentReservation.id);
 
         await this.promoteReservationObject(
           currentReservation.stagingObjectKey,
@@ -267,7 +268,7 @@ export class DocumentUploadService {
       if (promotionSucceeded) {
         try {
           await this.objectStoragePort.deleteStagedObject({
-            objectKey: this.buildFinalObjectKey(onboardingId, documentId),
+            objectKey: buildFinalObjectKey(onboardingId, documentId),
           });
         } catch {
           // Best-effort cleanup; preserve the original persistence error.
@@ -299,20 +300,12 @@ export class DocumentUploadService {
     return error instanceof Error && error.message === 'ONBOARDING_LOCK_REFRESH_FAILED';
   }
 
-  private buildStagingObjectKey(onboardingId: string, documentId: string): string {
-    return `onboardings/${onboardingId}/${documentId}/staged`;
-  }
-
   private normalizeContentType(contentType: string): string {
     return contentType.trim().toLowerCase();
   }
 
   private isAcceptedContentType(contentTypes: readonly string[], contentType: string): boolean {
     return contentTypes.includes(contentType);
-  }
-
-  private buildFinalObjectKey(onboardingId: string, documentId: string): string {
-    return `onboardings/${onboardingId}/${documentId}/final`;
   }
 
   private resolveActiveFileField(

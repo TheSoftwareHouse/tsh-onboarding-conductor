@@ -3,9 +3,11 @@ import { Route, Routes } from 'react-router';
 
 import { AccountsPage } from './bank/AccountsPage';
 import { BankConsentPage } from './bank/BankConsentPage';
+import { BankLinkPage } from './bank/BankLinkPage';
 import { BankLoginPage } from './bank/BankLoginPage';
 import { BankPage } from './bank/BankPage';
 import { BankTransferPage } from './bank/BankTransferPage';
+import { BankWaitingPage } from './bank/BankWaitingPage';
 import { ConsentPage } from './consent/ConsentPage';
 import { DetailsPage } from './details/DetailsPage';
 import { HomePage } from './home/HomePage';
@@ -26,6 +28,8 @@ export function AppRoutes({ layout }: { layout: ReactElement }) {
         <Route path="s/:token/bank" element={<BankPage />} />
         <Route path="s/:token/bank/login" element={<BankLoginPage />} />
         <Route path="s/:token/bank/transfer" element={<BankTransferPage />} />
+        <Route path="s/:token/bank/link" element={<BankLinkPage />} />
+        <Route path="s/:token/bank/waiting" element={<BankWaitingPage />} />
         <Route path="s/:token/accounts" element={<AccountsPage />} />
         <Route path="s/:token/bank/consent" element={<BankConsentPage />} />
         <Route path="s/:token/processing" element={<ProcessingPage />} />

@@ -14,7 +14,11 @@ headless, no retries; serves the production build itself unless `BASE_URL` is se
 
 ## Runtime configuration
 
-One value, the BFF origin: `VITE_BNPL_BFF_BASE_URL` (default `http://localhost:3100`).
+One value, the BFF origin: `VITE_BNPL_BFF_BASE_URL` (default `http://localhost:3100`). Through the
+KSA journey's cloudflared tunnel it is the tunnel's own URL (`pnpm demo:dev:tunnel` sets it for the
+dev server): `vite.config.ts` proxies `/v1/bnpl/*` and `/health` to the BFF on `DEMO_BFF_PORT`, so
+the page and its API share one origin, and allows any `*.trycloudflare.com` host plus
+`DEMO_WEB_PUBLIC_ORIGIN`'s in `server.allowedHosts`.
 
 - `pnpm dev` reads it from the repository's `.env` (`envDir: '../..'`) via `import.meta.env`.
 - The container serves a static build behind nginx and renders `/config.js`
@@ -27,10 +31,23 @@ One value, the BFF origin: `VITE_BNPL_BFF_BASE_URL` (default `http://localhost:3
 
 ## Journey
 
-Pages live under `src/app/` (`details`, `consent`, `bank`, `result`, ...). One table in
+Pages live under `src/app/` (`details`, `consent`, `bank`, `result`, ...). One table per journey in
 `src/app/session/session-routes.ts` maps each engine step to the pages that may show while it is
-current (`stepPath(step)` is the default); `useSessionView(page)` loads the session and redirects
-to `pageFor(view)` when the page does not match. The home page offers one "Start a credit check"
+current (`stepPath(step, journey)` is the default); the BFF reports `journey` on every view and
+`useSessionView(page)` loads the session and redirects to `pageFor(view)` when the page does not
+match. "Start over" (`src/app/session/StartOver.tsx`) sits in the header of every session page and
+is the result page's primary action: it starts a fresh session (on the same UK persona, if the
+browser remembered one) and goes to `details`; the old onboarding is left where it is.
+
+**KSA journey** (`ksa-lean-algoan`, ADR 0052): `details`, `consent`, then `bank/link` (no cards: whichever
+mock-bank test user the applicant signs in as is the data; Lean's LinkSDK, loaded from Lean's CDN by
+`src/app/lean/lean-widget.ts` and opened with what `POST …/bank-link` answered; the password goes
+to the mock bank, never here), `bank/waiting` (long-polls while the view is `processing` with
+`waitingFor: 'bank'`; the bank's redirect lands here with `?lean_redirect=success|fail`, and `fail`
+offers the link again), `accounts` (from the BFF's `accounts`, which it reads from Lean's export),
+`bank/consent`, `processing`, `result` with the Lean income panel (`LeanIncomePanel`, SAR figures
+and the fixed-rate note) above Algoan's tabs. `bank_data_gate` never shows: the BFF walks it. A
+`NO_ACCOUNTS_SELECTED` on the authorise button says so and points at "Start over". The home page offers one "Start a credit check"
 and no scenario: the customer types their details, and the profile they sign in with at the
 simulated bank (`bank/login`: High, Medium or Low score, one per visible persona) decides the
 outcome. `/start/:persona` is a test-only link that preselects a persona (the hidden `fail_case`).

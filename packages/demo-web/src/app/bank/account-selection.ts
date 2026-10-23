@@ -9,6 +9,7 @@ export type AccountSelectionValues = z.infer<typeof accountSelectionSchema>;
 /** The BFF's field codes for `selectedAccounts`, in words. */
 const CODE_MESSAGES: Record<string, string> = {
   CHECKING_ACCOUNT_REQUIRED: 'Select your current account: the analysis needs it.',
+  NO_ACCOUNTS_SELECTED: 'None of the selected accounts is in the data your bank shared.',
 };
 
 export function selectionMessage(codes: readonly string[]): string {

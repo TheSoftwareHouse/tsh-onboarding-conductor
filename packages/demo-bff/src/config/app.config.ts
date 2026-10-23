@@ -4,6 +4,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 
 import { plainToInstance, Type } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -15,6 +16,26 @@ import {
 } from 'class-validator';
 
 const URL_OPTIONS = { require_tld: false, require_protocol: true, protocols: ['http', 'https'] };
+
+/**
+ * The two demo journeys (ADR 0052): the UK one on a simulated bank and a persona document pushed
+ * to Algoan, and the KSA one where Lean's widget links a real sandbox bank and the engine exports
+ * the data for Algoan. `BNPL_WORKFLOW_ID` names the workflow, `BNPL_JOURNEY` which pages and
+ * routes the BFF and the web app run.
+ */
+export const BNPL_JOURNEYS = ['uk-algoan', 'ksa-lean-algoan'] as const;
+export type BnplJourney = (typeof BNPL_JOURNEYS)[number];
+export const UK_JOURNEY: BnplJourney = 'uk-algoan';
+export const KSA_JOURNEY: BnplJourney = 'ksa-lean-algoan';
+
+/** What the KSA journey cannot run without; checked after validation, only for that journey. */
+const KSA_REQUIRED_KEYS = [
+  'LEAN_CLIENT_ID',
+  'LEAN_CLIENT_SECRET',
+  'LEAN_AUTH_BASE_URL',
+  'LEAN_API_BASE_URL',
+  'DEMO_WEB_PUBLIC_ORIGIN',
+] as const;
 
 /**
  * Every setting the BFF reads. There are no defaults on purpose: a missing variable fails at
@@ -50,6 +71,42 @@ export class AppConfig {
   @IsString()
   @IsNotEmpty()
   BNPL_WORKFLOW_ID: string;
+
+  /** Which journey `BNPL_WORKFLOW_ID` is; the UK one unless said otherwise. */
+  @IsOptional()
+  @IsIn(BNPL_JOURNEYS)
+  BNPL_JOURNEY: BnplJourney = UK_JOURNEY;
+
+  /**
+   * Lean's "app token" and secret: the BFF is the host service of Lean's widget on the KSA journey
+   * (ADR 0049, 0052) and mints the customer-scoped token with them. Required for that journey
+   * only; never logged.
+   */
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  LEAN_CLIENT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  LEAN_CLIENT_SECRET?: string;
+
+  @IsOptional()
+  @IsUrl(URL_OPTIONS)
+  LEAN_AUTH_BASE_URL?: string;
+
+  @IsOptional()
+  @IsUrl(URL_OPTIONS)
+  LEAN_API_BASE_URL?: string;
+
+  /**
+   * The HTTPS origin the demo web app is opened on through the tunnel: Lean's mock banks redirect
+   * the customer back to it, and it is a second origin CORS allows. KSA journey only.
+   */
+  @IsOptional()
+  @IsUrl(URL_OPTIONS)
+  DEMO_WEB_PUBLIC_ORIGIN?: string;
 
   /**
    * Origin that replaces the host of a presigned upload URL, which the engine signs against its
@@ -104,6 +161,14 @@ export function validateConfig(config: Record<string, unknown>): AppConfig {
 
   if (!isAbsolute(validated.PERSONAS_DIR)) {
     validated.PERSONAS_DIR = resolve(findRepoRoot(), validated.PERSONAS_DIR);
+  }
+
+  if (validated.BNPL_JOURNEY === KSA_JOURNEY) {
+    const absent = KSA_REQUIRED_KEYS.filter((key) => validated[key] === undefined);
+
+    if (absent.length > 0) {
+      throw new Error(`BNPL_JOURNEY=${KSA_JOURNEY} needs ${absent.join(', ')}`);
+    }
   }
 
   return validated;

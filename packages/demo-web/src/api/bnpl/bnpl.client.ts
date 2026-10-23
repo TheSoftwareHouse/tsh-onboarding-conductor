@@ -7,6 +7,12 @@ export type JsonValue =
 
 export type Phase = 'collect' | 'processing' | 'result';
 export type Decision = 'approved' | 'review' | 'declined';
+/** The two demo journeys (ADR 0052); the BFF reports which one it runs. */
+export type Journey = 'uk-algoan' | 'ksa-lean-algoan';
+export const UK_JOURNEY: Journey = 'uk-algoan';
+export const KSA_JOURNEY: Journey = 'ksa-lean-algoan';
+/** What a `processing` session waits on: the bank link (Lean) or the credit check. */
+export type WaitingFor = 'bank' | 'credit';
 
 export interface SessionField {
   name: string;
@@ -41,6 +47,8 @@ export interface CreatedSession {
 
 export interface SessionView {
   phase: Phase;
+  journey: Journey;
+  waitingFor?: WaitingFor;
   /** Name of the current step; `null` once the onboarding has ended. */
   step: string | null;
   /** Active fields of the current step; empty outside `collect`. */
@@ -157,6 +165,32 @@ export function bankLogin(
 
 export function runSession(token: string, signal?: AbortSignal): Promise<ProcessingView> {
   return request<ProcessingView>(sessionPath(token, '/run'), { method: 'POST', signal });
+}
+
+/** What `Lean.connect` is called with on the KSA journey; the BFF minted the tokens. */
+export interface LeanLink {
+  appToken: string;
+  customerId: string;
+  accessToken: string;
+  sandbox: boolean;
+  permissions: string[];
+  accountType: string;
+  successRedirectUrl: string;
+  failRedirectUrl: string;
+}
+
+/** KSA journey: parks the session on Lean and answers the widget's parameters. */
+export function bankLink(token: string, signal?: AbortSignal): Promise<LeanLink> {
+  return request<LeanLink>(sessionPath(token, '/bank-link'), {
+    method: 'POST',
+    body: {},
+    signal,
+  });
+}
+
+/** Which journey the BFF runs (`GET /v1/bnpl/journey`). */
+export function getJourney(signal?: AbortSignal): Promise<{ journey: Journey }> {
+  return request<{ journey: Journey }>('/v1/bnpl/journey', { signal });
 }
 
 export interface WaitForResultOptions {

@@ -8,6 +8,7 @@ import {
   readConnectorBinding,
   readEnum,
   readOptionalBoolean,
+  readOptionalString,
   readPositiveInteger,
   readStringList,
   type StepConnectorBinding,
@@ -34,6 +35,8 @@ import type {
  */
 export const CREDIT_OUTCOME_FIELD = 'creditOutcome';
 export const CREDIT_BANK_DATA_FIELD = 'bankData';
+/** The payload key an account selection reaches the kernel under; the kernel owns the name. */
+export const CREDIT_ACCOUNT_SELECTION_FIELD = 'accountSelection';
 
 /** Must equal `CREDIT_OUTCOMES` in `workflow-contract.ts`. */
 export const CREDIT_APPROVED_PORT = 'approved';
@@ -75,7 +78,10 @@ export type CreditAssessmentStepConfig = {
   readonly applicant: readonly (typeof CREDIT_APPLICANT_ROLES)[number][];
   readonly products: readonly string[];
   readonly report: CreditReportMode;
-  readonly bankData: FileValidation;
+  /** The step's own upload; absent when `bankDataFrom` names an earlier step's document. */
+  readonly bankData?: FileValidation;
+  readonly bankDataFrom?: string;
+  readonly accountSelection?: string;
 };
 
 const readBandScore = (value: unknown, fallback: number, fail: FailWorkflow): number => {
@@ -132,7 +138,10 @@ const readApplicant = (
  * Submitting a bank-data document to a credit provider and routing on the assessed outcome. The
  * step owns the one input the client gives it — the uploaded `bankData` file — and declares every
  * field the provider's callback fills, so the author names the provider, the score bands and the
- * attempt cap, and wires four ports.
+ * attempt cap, and wires four ports. With `bankDataFrom` the document is a `file` field of a step
+ * every path passes through (the connector mapping rule enforces that), the step declares no
+ * upload of its own, and the client starts the assessment by submitting `{}`; `accountSelection`
+ * names an earlier `array` field of `account-NN` positions the kernel narrows the document to.
  */
 export const creditAssessmentStepTypeDefinition = {
   type: 'credit-assessment',
@@ -164,13 +173,24 @@ export const creditAssessmentStepTypeDefinition = {
         products: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } },
         report: { enum: [...CREDIT_REPORT_MODES] },
         bankDataMaxSizeBytes: uploadValidationSchema().maxSizeBytes,
+        bankDataFrom: { type: 'string', minLength: 1 },
+        accountSelection: { type: 'string', minLength: 1 },
       },
     };
   },
   parseConfig(config, fail): CreditAssessmentStepConfig {
     const source = asConfigObject(config, fail);
+    const bankDataFrom = readOptionalString(source.bankDataFrom, fail);
+    const accountSelection = readOptionalString(source.accountSelection, fail);
+
+    // With no upload of its own there is no reserve for a cap to apply to.
+    if (bankDataFrom !== undefined && source.bankDataMaxSizeBytes !== undefined) {
+      fail('INVALID_VALUE');
+    }
 
     return {
+      ...(bankDataFrom === undefined ? {} : { bankDataFrom }),
+      ...(accountSelection === undefined ? {} : { accountSelection }),
       connector: readConnectorBinding(source.connector, CREDIT_CONNECTOR_SLOT, fail),
       bands: readBands(source.bands, fail),
       maxAttempts:
@@ -181,12 +201,16 @@ export const creditAssessmentStepTypeDefinition = {
       products:
         source.products === undefined ? DEFAULT_PRODUCTS : readStringList(source.products, fail),
       report: readEnum(source.report, CREDIT_REPORT_MODES, 'full', fail),
-      bankData: resolveUploadValidation(
-        ['application/json'],
-        source.bankDataMaxSizeBytes ?? DEFAULT_BANK_DATA_MAX_BYTES,
-        ['application/json'],
-        fail,
-      ),
+      ...(bankDataFrom === undefined
+        ? {
+            bankData: resolveUploadValidation(
+              ['application/json'],
+              source.bankDataMaxSizeBytes ?? DEFAULT_BANK_DATA_MAX_BYTES,
+              ['application/json'],
+              fail,
+            ),
+          }
+        : {}),
     };
   },
   listPorts(): readonly WorkflowStepPort[] {
@@ -197,7 +221,15 @@ export const creditAssessmentStepTypeDefinition = {
   },
   buildFields(config: CreditAssessmentStepConfig): StepFieldMap {
     return {
-      [CREDIT_BANK_DATA_FIELD]: { type: 'file', required: true, validation: config.bankData },
+      ...(config.bankData === undefined
+        ? {}
+        : {
+            [CREDIT_BANK_DATA_FIELD]: {
+              type: 'file',
+              required: true,
+              validation: config.bankData,
+            },
+          }),
       [CREDIT_OUTCOME_FIELD]: {
         type: 'text',
         required: false,
@@ -224,7 +256,10 @@ export const creditAssessmentStepTypeDefinition = {
   ): CompiledWorkflowStep[] {
     const { config, contract, fail } = context;
     const fieldMapping: Record<string, string> = {
-      [CREDIT_BANK_DATA_FIELD]: CREDIT_BANK_DATA_FIELD,
+      [CREDIT_BANK_DATA_FIELD]: config.bankDataFrom ?? CREDIT_BANK_DATA_FIELD,
+      ...(config.accountSelection === undefined
+        ? {}
+        : { [CREDIT_ACCOUNT_SELECTION_FIELD]: config.accountSelection }),
     };
 
     for (const role of config.applicant) {

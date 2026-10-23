@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../config/app.config';
 import { EngineError } from '../engine/engine-error';
 import { EngineClient, OnboardingState, StateField } from '../engine/engine.client';
+import { LeanLinkService } from '../lean/lean-link.service';
 import { PersonaNotFoundError, PersonaService } from '../personas/persona.service';
 import { BankDataPusher } from './bank-data-pusher';
 import { BnplService, ENGINE_ERROR_MAP } from './bnpl.service';
@@ -44,13 +45,45 @@ const ACCOUNTS = [
   { id: 'account-02', type: 'SAVINGS' },
 ];
 
+const UK_CONFIG: Record<string, string | undefined> = {
+  BNPL_WORKFLOW_ID: 'wf',
+  BNPL_JOURNEY: 'uk-algoan',
+  DEMO_WEB_PUBLIC_ORIGIN: undefined,
+};
+const KSA_CONFIG: Record<string, string | undefined> = {
+  BNPL_WORKFLOW_ID: 'wf-ksa',
+  BNPL_JOURNEY: 'ksa-lean-algoan',
+  DEMO_WEB_PUBLIC_ORIGIN: 'https://demo.example.ngrok-free.dev/',
+};
+
+const LINK = {
+  appToken: 'app',
+  customerId: '22222222-2222-4222-8222-222222222222',
+  accessToken: 'customer-token',
+  sandbox: true,
+  permissions: ['identity'],
+  accountType: 'PERSONAL',
+};
+
 describe('BnplService', () => {
   let engine: { startOnboarding: jest.Mock; getState: jest.Mock; submit: jest.Mock };
   let personas: { accounts: jest.Mock; summary: jest.Mock };
+  let leanLink: { createLink: jest.Mock };
   let pusher: { push: jest.Mock };
   let store: BnplSessionStore;
   let service: BnplService;
   let token: string;
+
+  const build = (config: Record<string, string | undefined>) =>
+    new BnplService(
+      { get: (key: string) => config[key] } as unknown as ConfigService<AppConfig, true>,
+      engine as unknown as EngineClient,
+      store,
+      new StateWaiter(),
+      personas as unknown as PersonaService,
+      pusher as unknown as BankDataPusher,
+      leanLink as unknown as LeanLinkService,
+    );
 
   beforeEach(async () => {
     engine = { startOnboarding: jest.fn(), getState: jest.fn(), submit: jest.fn() };
@@ -58,16 +91,16 @@ describe('BnplService', () => {
       accounts: jest.fn().mockReturnValue(ACCOUNTS),
       summary: jest.fn().mockReturnValue({ id: 'sherlock_holmes', profile: 'high' }),
     };
+    leanLink = {
+      createLink: jest
+        .fn()
+        .mockImplementation((_id: string, redirects: unknown) =>
+          Promise.resolve({ ...LINK, redirects }),
+        ),
+    };
     pusher = { push: jest.fn().mockResolvedValue(undefined) };
     store = new BnplSessionStore();
-    service = new BnplService(
-      { get: () => 'wf' } as unknown as ConfigService<AppConfig, true>,
-      engine as unknown as EngineClient,
-      store,
-      new StateWaiter(),
-      personas as unknown as PersonaService,
-      pusher as unknown as BankDataPusher,
-    );
+    service = build(UK_CONFIG);
     engine.startOnboarding.mockResolvedValue({ onboardingId: 'o1' });
     // Every submit reads the step first; the applicant step is submittable.
     engine.getState.mockResolvedValue(state());
@@ -111,6 +144,7 @@ describe('BnplService', () => {
 
       await expect(service.getSession(token)).resolves.toEqual({
         phase: 'collect',
+        journey: 'uk-algoan',
         step: 'applicant',
         fields: [{ name: 'firstName', type: 'text', required: true, value: null }],
         data: {},
@@ -126,6 +160,7 @@ describe('BnplService', () => {
 
       await expect(service.getSession(token)).resolves.toMatchObject({
         phase: 'processing',
+        waitingFor: 'credit',
         fields: [],
       });
     });
@@ -564,6 +599,263 @@ describe('BnplService', () => {
       engine.submit.mockRejectedValue(new EngineError(409, 'SOMETHING_NEW', 'm'));
 
       await expect(service.submit(token, {})).rejects.toMatchObject({ status: 502 });
+    });
+  });
+
+  describe('KSA journey', () => {
+    const BANK_ACCOUNTS = {
+      accounts: [
+        {
+          id: 'account-01',
+          type: 'CHECKING',
+          name: 'Current account',
+          accountNumber: '1309',
+          balance: 197,
+          currency: 'GBP',
+          bankName: 'Mockbank 1',
+        },
+        {
+          id: 'account-02',
+          type: 'SAVINGS',
+          name: 'Savings account',
+          accountNumber: null,
+          balance: 10,
+          currency: 'GBP',
+          bankName: 'Mockbank 1',
+        },
+      ],
+    };
+    const atStep = (name: string, overrides: Partial<OnboardingState> = {}) =>
+      state({ currentStep: name, step: { ...state().step!, name }, ...overrides });
+    let ksaToken: string;
+
+    beforeEach(async () => {
+      service = build(KSA_CONFIG);
+      ({ token: ksaToken } = await service.createSession());
+    });
+
+    it('starts the KSA workflow and reports the journey on every view', async () => {
+      expect(engine.startOnboarding).toHaveBeenLastCalledWith('wf-ksa');
+      expect(service.journeyOf()).toBe('ksa-lean-algoan');
+      await expect(service.getSession(ksaToken)).resolves.toMatchObject({
+        journey: 'ksa-lean-algoan',
+        persona: null,
+      });
+      expect(await service.getSession(ksaToken)).not.toHaveProperty('accounts');
+    });
+
+    it('refuses any persona: the KSA journey has none', async () => {
+      personas.summary.mockClear();
+
+      await expect(service.createSession('sherlock_holmes')).rejects.toMatchObject({
+        response: { code: 'UNKNOWN_PERSONA' },
+      });
+      expect(personas.summary).not.toHaveBeenCalled();
+    });
+
+    describe('bankLink', () => {
+      it('mints the link and parks bank_connect on the customer', async () => {
+        engine.getState.mockResolvedValue(atStep('bank_connect'));
+        engine.submit.mockResolvedValue({});
+
+        const link = await service.bankLink(ksaToken);
+
+        expect(leanLink.createLink).toHaveBeenCalledWith('o1', {
+          success: `https://demo.example.ngrok-free.dev/s/${encodeURIComponent(ksaToken)}/bank/waiting?lean_redirect=success`,
+          fail: `https://demo.example.ngrok-free.dev/s/${encodeURIComponent(ksaToken)}/bank/waiting?lean_redirect=fail`,
+        });
+        expect(engine.submit).toHaveBeenCalledWith('o1', { leanCustomerId: LINK.customerId });
+        expect(link).toMatchObject({ customerId: LINK.customerId, accessToken: 'customer-token' });
+        expect(store.get(ksaToken)?.persona).toBeNull();
+      });
+
+      it('mints a fresh token without a second submit while the step is already parked', async () => {
+        engine.getState.mockResolvedValue(
+          atStep('bank_connect', { pending: { connectorId: 'lean_bank_data', parkedAt: null } }),
+        );
+
+        await service.bankLink(ksaToken);
+
+        expect(engine.submit).not.toHaveBeenCalled();
+        expect(store.get(ksaToken)?.persona).toBeNull();
+      });
+
+      it('tolerates the engine answering that the step is already parked', async () => {
+        engine.getState.mockResolvedValue(atStep('bank_connect'));
+        engine.submit.mockRejectedValue(
+          new EngineError(409, 'ONBOARDING_AWAITING_CONNECTOR', 'parked'),
+        );
+
+        await expect(service.bankLink(ksaToken)).resolves.toMatchObject({ appToken: 'app' });
+      });
+
+      it('answers 409 SESSION_HAS_NO_BANK away from bank_connect, before touching Lean', async () => {
+        engine.getState.mockResolvedValue(state());
+
+        await expect(service.bankLink(ksaToken)).rejects.toMatchObject({
+          status: 409,
+          response: { code: 'SESSION_HAS_NO_BANK' },
+        });
+        expect(leanLink.createLink).not.toHaveBeenCalled();
+      });
+
+      it('maps an engine refusal of the customer id to the BFF contract', async () => {
+        engine.getState.mockResolvedValue(atStep('bank_connect'));
+        engine.submit.mockRejectedValue(
+          new EngineError(400, 'INVALID_STEP_DATA', 'no', { leanCustomerId: ['invalid'] }),
+        );
+
+        await expect(service.bankLink(ksaToken)).rejects.toMatchObject({
+          status: 400,
+          response: { code: 'INVALID_STEP_DATA', errors: { leanCustomerId: ['invalid'] } },
+        });
+      });
+    });
+
+    it('refuses bank_connect and credit_check on submit, naming bank-link and run', async () => {
+      for (const [step, route] of [
+        ['bank_connect', 'bank-link'],
+        ['credit_check', 'run'],
+      ]) {
+        engine.getState.mockResolvedValue(atStep(step));
+
+        await expect(service.submit(ksaToken, {})).rejects.toMatchObject({
+          response: { code: 'SESSION_STEP_NOT_SUBMITTABLE', step, route },
+        });
+      }
+      expect(engine.submit).not.toHaveBeenCalled();
+    });
+
+    it('reports waiting for the bank while parked on lean_bank_data', async () => {
+      engine.getState.mockResolvedValue(
+        atStep('bank_connect', { pending: { connectorId: 'lean_bank_data', parkedAt: null } }),
+      );
+
+      await expect(service.getSession(ksaToken)).resolves.toMatchObject({
+        phase: 'processing',
+        waitingFor: 'bank',
+      });
+    });
+
+    it('walks bank_data_gate with an empty submit so the web app never sees it', async () => {
+      engine.getState
+        .mockResolvedValueOnce(
+          atStep('bank_data_gate', { data: { bankConnectOutcome: 'connected' } }),
+        )
+        .mockResolvedValueOnce(
+          atStep('account_selection', {
+            data: { bankConnectOutcome: 'connected', bankAccounts: BANK_ACCOUNTS },
+          }),
+        );
+      engine.submit.mockResolvedValue({});
+
+      const view = await service.getSession(ksaToken);
+
+      expect(engine.submit).toHaveBeenCalledWith('o1', {});
+      expect(view.step).toBe('account_selection');
+      expect(view.accounts).toEqual([
+        expect.objectContaining({ id: 'account-01', type: 'CHECKING', owner: null, balance: 197 }),
+        expect.objectContaining({ id: 'account-02', type: 'SAVINGS', accountNumber: null }),
+      ]);
+    });
+
+    it('does not walk a gate that is parked or finished', async () => {
+      engine.getState.mockResolvedValue(
+        atStep('bank_data_gate', { pending: { connectorId: 'lean_bank_data', parkedAt: null } }),
+      );
+
+      await service.getSession(ksaToken);
+
+      expect(engine.submit).not.toHaveBeenCalled();
+    });
+
+    it('mirrors the checking-account rule from the exported summary', async () => {
+      engine.getState.mockResolvedValue(
+        atStep('account_selection', { data: { bankAccounts: BANK_ACCOUNTS } }),
+      );
+
+      await expect(
+        service.submit(ksaToken, { selectedAccounts: ['account-02'] }),
+      ).rejects.toMatchObject({
+        response: { errors: { selectedAccounts: ['CHECKING_ACCOUNT_REQUIRED'] } },
+      });
+      expect(engine.submit).not.toHaveBeenCalled();
+
+      engine.submit.mockResolvedValue({});
+      await service.submit(ksaToken, { selectedAccounts: ['account-01'] });
+      expect(engine.submit).toHaveBeenCalledWith('o1', { selectedAccounts: ['account-01'] });
+      expect(personas.accounts).not.toHaveBeenCalled();
+    });
+
+    describe('run', () => {
+      const selected = () =>
+        atStep('credit_check', {
+          data: { selectedAccounts: ['account-01'], bankAccounts: BANK_ACCOUNTS },
+        });
+
+      it('starts the credit check with an empty submit and answers processing', async () => {
+        engine.getState.mockResolvedValue(selected());
+        engine.submit.mockRejectedValue(
+          new EngineError(409, 'ONBOARDING_AWAITING_CONNECTOR', 'parked'),
+        );
+
+        await expect(service.run(ksaToken)).resolves.toEqual({ phase: 'processing' });
+        expect(engine.submit).toHaveBeenCalledWith('o1', {});
+        expect(pusher.push).not.toHaveBeenCalled();
+      });
+
+      it('answers 409 ACCOUNTS_NOT_SELECTED when the engine holds no selection', async () => {
+        engine.getState.mockResolvedValue(atStep('credit_check'));
+
+        await expect(service.run(ksaToken)).rejects.toMatchObject({
+          response: { code: 'ACCOUNTS_NOT_SELECTED' },
+        });
+        expect(engine.submit).not.toHaveBeenCalled();
+      });
+
+      it('passes NO_ACCOUNTS_SELECTED through as a 400 on selectedAccounts', async () => {
+        engine.getState.mockResolvedValue(selected());
+        engine.submit.mockRejectedValue(
+          new EngineError(400, 'INVALID_STEP_DATA', 'no', {
+            selectedAccounts: ['NO_ACCOUNTS_SELECTED'],
+          }),
+        );
+
+        await expect(service.run(ksaToken)).rejects.toMatchObject({
+          status: 400,
+          response: { errors: { selectedAccounts: ['NO_ACCOUNTS_SELECTED'] } },
+        });
+      });
+
+      it('answers 503 CREDIT_CHECK_UNAVAILABLE when the engine reports LEAN_UNAVAILABLE', async () => {
+        engine.getState.mockResolvedValue(selected());
+        engine.submit.mockRejectedValue(new EngineError(500, 'LEAN_UNAVAILABLE', 'down'));
+
+        await expect(service.run(ksaToken)).rejects.toMatchObject({
+          response: { code: 'CREDIT_CHECK_UNAVAILABLE' },
+        });
+      });
+    });
+
+    it('lists only the selected exported accounts on a result', async () => {
+      engine.getState.mockResolvedValue(
+        state({
+          terminal: true,
+          status: 'approved',
+          step: null,
+          data: {
+            creditOutcome: 'approved',
+            selectedAccounts: ['account-01'],
+            bankAccounts: BANK_ACCOUNTS,
+          },
+        }),
+      );
+
+      await expect(service.getSession(ksaToken)).resolves.toMatchObject({
+        phase: 'result',
+        decision: 'approved',
+        accounts: [expect.objectContaining({ id: 'account-01' })],
+      });
     });
   });
 });

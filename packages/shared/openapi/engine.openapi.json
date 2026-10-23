@@ -11030,6 +11030,14 @@
                     "bankDataMaxSizeBytes": {
                       "type": "integer",
                       "minimum": 1
+                    },
+                    "bankDataFrom": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "accountSelection": {
+                      "type": "string",
+                      "minLength": 1
                     }
                   }
                 }

@@ -15,6 +15,7 @@ const TOKEN = 'tok_123';
 function view(overrides: Partial<SessionView>): SessionView {
   return {
     phase: 'processing',
+    journey: 'uk-algoan',
     step: null,
     fields: [],
     data: {},

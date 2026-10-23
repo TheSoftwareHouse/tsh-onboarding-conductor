@@ -1,7 +1,8 @@
+import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
-import { createSession } from '@/api/bnpl/bnpl.client';
+import { createSession, getJourney, KSA_JOURNEY } from '@/api/bnpl/bnpl.client';
 import { Button } from '@/components/ui/button';
 
 import { readSessions, rememberSession } from '../session/session-history';
@@ -76,14 +77,18 @@ function SessionsFooter() {
  * knows the personae.
  */
 export function HomePage() {
+  const journey = useQuery({ queryKey: ['journey'], queryFn: ({ signal }) => getJourney(signal) });
+  const ksa = journey.data?.journey === KSA_JOURNEY;
+
   return (
     <section>
       <h1 className="text-4xl font-light tracking-display text-card-foreground">
         Check your credit with open banking
       </h1>
       <p className="mt-4 max-w-xl text-muted-foreground">
-        Enter your details, connect your bank and let Algoan analyse your accounts. The bank is
-        simulated: the profile you sign in with decides the outcome.
+        {ksa
+          ? 'Enter your details, link a Saudi sandbox bank through Lean and let Algoan analyse the accounts Lean read. The mock-bank user you sign in as is the data.'
+          : 'Enter your details, connect your bank and let Algoan analyse your accounts. The bank is simulated: the profile you sign in with decides the outcome.'}
       </p>
       <div className="mt-6">
         <StartButton />

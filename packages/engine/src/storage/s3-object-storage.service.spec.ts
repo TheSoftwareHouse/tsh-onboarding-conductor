@@ -53,6 +53,7 @@ jest.mock('@aws-sdk/client-s3', () => ({
   GetObjectCommand: jest.fn().mockImplementation((input) => ({ input })),
   CopyObjectCommand: jest.fn().mockImplementation((input) => ({ input })),
   DeleteObjectCommand: jest.fn().mockImplementation((input) => ({ input })),
+  PutObjectCommand: jest.fn().mockImplementation((input) => ({ input })),
 }));
 
 jest.mock('@aws-sdk/s3-presigned-post', () => ({
@@ -383,6 +384,49 @@ describe('S3ObjectStorageService', () => {
     expect(mockSend).toHaveBeenCalledTimes(2);
     expect(mockSend.mock.calls[0][0]).toBeDefined();
     expect(mockSend.mock.calls[1][0]).toBeDefined();
+  });
+
+  it('writes engine-produced bytes to a final key and answers the etag S3 reports', async () => {
+    mockSend.mockResolvedValueOnce({ ETag: TEST_ETAG });
+
+    const service = new S3ObjectStorageService(mockConfigService, mockS3Client);
+    const body = Buffer.from('{"accounts":[]}');
+    const result = await service.putObject({
+      objectKey: 'private/object',
+      contentType: 'application/json',
+      body,
+    });
+
+    expect(result).toEqual({
+      objectKey: 'private/object',
+      etag: TEST_ETAG,
+      sizeBytes: body.length,
+    });
+    const [command] = mockSend.mock.calls[0];
+    expect(command.input).toMatchObject({
+      Bucket: 'test-bucket',
+      Key: 'private/object',
+      ContentType: 'application/json',
+      ContentLength: body.length,
+    });
+  });
+
+  it('refuses to write an empty body or to answer a write without an etag', async () => {
+    const service = new S3ObjectStorageService(mockConfigService, mockS3Client);
+
+    await expect(
+      service.putObject({ objectKey: 'k', contentType: 'application/json', body: Buffer.alloc(0) }),
+    ).rejects.toThrow('storage object body was empty');
+    expect(mockSend).not.toHaveBeenCalled();
+
+    mockSend.mockResolvedValueOnce({});
+    await expect(
+      service.putObject({
+        objectKey: 'k',
+        contentType: 'application/json',
+        body: Buffer.from('x'),
+      }),
+    ).rejects.toThrow('storage object write answered no etag');
   });
 
   it('refuses promotion when the ETag has changed without making network calls', async () => {

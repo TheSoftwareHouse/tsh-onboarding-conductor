@@ -12,6 +12,8 @@ import type {
   IssueUploadTicketOutput,
   ObjectStoragePort,
   PromoteInspectedObjectInput,
+  PutObjectInput,
+  PutObjectOutput,
   ReadObjectInput,
 } from './object-storage.port';
 
@@ -248,6 +250,30 @@ export class S3ObjectStorageService implements ObjectStoragePort {
     await this.s3Client.send(
       new S3Commands.DeleteObjectCommand({ Bucket: this.contract.bucket, Key: input.objectKey }),
     );
+  }
+
+  /** Writes engine-produced bytes to their final key; the etag S3 answers is the one later reads pin. */
+  async putObject(input: PutObjectInput): Promise<PutObjectOutput> {
+    if (input.body.length === 0) {
+      throw new Error('storage object body was empty');
+    }
+
+    const reply = (await this.s3Client.send(
+      new S3Commands.PutObjectCommand({
+        Bucket: this.contract.bucket,
+        Key: input.objectKey,
+        Body: input.body,
+        ContentType: input.contentType,
+        ContentLength: input.body.length,
+      }),
+    )) as { ETag?: string };
+    const etag = reply.ETag?.trim() ?? '';
+
+    if (etag === '') {
+      throw new Error('storage object write answered no etag');
+    }
+
+    return { objectKey: input.objectKey, etag, sizeBytes: input.body.length };
   }
 
   private async sendWithTimeout<T>(

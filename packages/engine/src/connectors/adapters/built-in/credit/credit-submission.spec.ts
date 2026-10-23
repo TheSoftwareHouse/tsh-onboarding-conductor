@@ -1,6 +1,6 @@
 import type { ConnectorExecutionInput } from '../../../ports/connector-adapter.port';
 import { CreditBankDataInvalidError } from './credit-provider.port';
-import { buildCreditSubmission } from './credit-submission';
+import { buildCreditSubmission, CreditNoAccountsSelectedError } from './credit-submission';
 
 const ONBOARDING_ID = '2d4e1b3c-6f1a-4a39-8f6d-0c2b7a9e5d11';
 const createInput = (payload: Record<string, unknown>): ConnectorExecutionInput => ({
@@ -67,6 +67,67 @@ describe('buildCreditSubmission', () => {
     await expect(
       build(createInput({ bankData: 'doc-1' }), createDeps('application/pdf')),
     ).rejects.toBeInstanceOf(CreditBankDataInvalidError);
+  });
+
+  describe('with an account selection', () => {
+    const TWO_ACCOUNTS = JSON.stringify({
+      accounts: [{ name: 'first' }, { name: 'second' }, { name: 'third' }],
+      extra: true,
+    });
+    const selectedInput = (selection: unknown): ConnectorExecutionInput => ({
+      ...createInput({ bankData: 'doc-1', accountSelection: selection }),
+      payloadFieldSources: { bankData: 'bank_data_document', accountSelection: 'selectedAccounts' },
+    });
+
+    it('keeps the selected positions in document order and ignores positions past the end', async () => {
+      const deps = createDeps();
+      deps.storage.readObject.mockResolvedValue(Buffer.from(TWO_ACCOUNTS));
+
+      const submission = await build(
+        selectedInput(['account-03', 'account-01', 'account-09']),
+        deps,
+      );
+
+      expect(JSON.parse(submission!.bankData.document.toString())).toEqual({
+        accounts: [{ name: 'first' }, { name: 'third' }],
+        extra: true,
+      });
+    });
+
+    it('submits the whole document when the payload carries no selection', async () => {
+      const deps = createDeps();
+      deps.storage.readObject.mockResolvedValue(Buffer.from(TWO_ACCOUNTS));
+
+      const submission = await build(createInput({ bankData: 'doc-1' }), deps);
+
+      expect(submission!.bankData.document.toString()).toBe(TWO_ACCOUNTS);
+    });
+
+    it('refuses a selection that keeps nothing, naming the selection field', async () => {
+      const deps = createDeps();
+      deps.storage.readObject.mockResolvedValue(Buffer.from(TWO_ACCOUNTS));
+
+      await expect(build(selectedInput(['account-07', 'nonsense']), deps)).rejects.toMatchObject({
+        name: 'CreditNoAccountsSelectedError',
+        sourceField: 'selectedAccounts',
+      });
+      await expect(build(selectedInput([]), deps)).rejects.toBeInstanceOf(
+        CreditNoAccountsSelectedError,
+      );
+    });
+
+    it.each([
+      ['not JSON', 'not json'],
+      ['an array', '[]'],
+      ['no accounts array', '{"accounts":{}}'],
+    ])('rejects a document that is %s as invalid bank data', async (_label, content) => {
+      const deps = createDeps();
+      deps.storage.readObject.mockResolvedValue(Buffer.from(content));
+
+      await expect(build(selectedInput(['account-01']), deps)).rejects.toBeInstanceOf(
+        CreditBankDataInvalidError,
+      );
+    });
   });
 
   it('accepts a JSON content type with parameters', async () => {

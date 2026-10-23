@@ -1,4 +1,5 @@
 import type { RawWorkflowStep } from '../../workflow-contract';
+import { validateAndNormalizeWorkflow } from '../../workflow-validator';
 import { compileWorkflow } from '../workflow.compiler';
 
 const terminal = (name: string, outcome = 'approved'): RawWorkflowStep => ({
@@ -197,5 +198,109 @@ describe('credit-assessment', () => {
 
   it('fails with a named error when an opted-in role is collected by no step', () => {
     expect(() => compile({ applicant: { firstName: true } }, false)).toThrow('WORKFLOW_INVALID');
+  });
+
+  describe('bankDataFrom and accountSelection', () => {
+    const FILE_VALIDATION = { contentTypes: ['application/json'], maxSizeBytes: 1024 };
+    // The mapping rules (a declared, persisted, guaranteed-predecessor source) run at
+    // normalization, after compilation, so the document goes through the whole load path.
+    const compileFrom = (
+      config: Record<string, unknown>,
+      exportStepEdges: Record<string, string> = { success: 'pick' },
+    ) =>
+      validateAndNormalizeWorkflow({
+        id: 'credit-from',
+        version: 1,
+        steps: [
+          {
+            name: 'export',
+            type: 'form',
+            config: {
+              fields: {
+                statement: { type: 'file', required: true, validation: FILE_VALIDATION },
+                gate: { type: 'text', required: true },
+              },
+            },
+            edges: exportStepEdges,
+          },
+          {
+            name: 'pick',
+            type: 'form',
+            config: {
+              fields: {
+                chosen: { type: 'array', required: true, items: { type: 'text' } },
+              },
+            },
+            edges: { success: 'assess' },
+          },
+          { ...creditStep(config), edges: { ...EDGES, retry: 'pick' } },
+          terminal('done'),
+          terminal('refused', 'rejected'),
+          terminal('manual', 'invalid'),
+          terminal('elsewhere'),
+        ],
+      }).steps.find((step) => step.name === 'assess')!;
+
+    it('maps the document from the named field and declares no upload of its own', () => {
+      const step = compileFrom({ bankDataFrom: 'statement', accountSelection: 'chosen' });
+
+      expect(step.data.bankData).toBeUndefined();
+      expect(step.data.creditOutcome).toBeDefined();
+      expect(step.connectors![0].fieldMapping).toEqual({
+        bankData: 'statement',
+        accountSelection: 'chosen',
+      });
+    });
+
+    it('keeps the upload and maps no selection when neither key is set', () => {
+      expect(assessStep().data.bankData).toBeDefined();
+      expect(assessStep().connectors![0].fieldMapping).toEqual({ bankData: 'bankData' });
+    });
+
+    it('refuses an upload cap beside bankDataFrom', () => {
+      expect(() => compileFrom({ bankDataFrom: 'statement', bankDataMaxSizeBytes: 10 })).toThrow(
+        'WORKFLOW_INVALID',
+      );
+    });
+
+    it.each([
+      ['a field no step declares', { bankDataFrom: 'missing' }],
+      ['a selection no step declares', { bankDataFrom: 'statement', accountSelection: 'missing' }],
+      ['an empty name', { bankDataFrom: '' }],
+    ])('refuses %s', (_label, config) => {
+      expect(() => compileFrom(config)).toThrow('WORKFLOW_INVALID');
+    });
+
+    it('refuses a document from a step that is not a guaranteed predecessor', () => {
+      expect(() =>
+        validateAndNormalizeWorkflow({
+          id: 'credit-branch',
+          version: 1,
+          steps: [
+            {
+              name: 'route',
+              type: 'form',
+              config: { fields: { which: { type: 'text', required: true } } },
+              edges: { success: 'assess' },
+            },
+            {
+              name: 'export',
+              type: 'form',
+              config: {
+                fields: {
+                  statement: { type: 'file', required: true, validation: FILE_VALIDATION },
+                },
+              },
+              edges: { success: 'assess' },
+            },
+            { ...creditStep({ bankDataFrom: 'statement' }), edges: EDGES },
+            terminal('done'),
+            terminal('refused', 'rejected'),
+            terminal('manual', 'invalid'),
+            terminal('ask'),
+          ],
+        }),
+      ).toThrow('WORKFLOW_INVALID');
+    });
   });
 });

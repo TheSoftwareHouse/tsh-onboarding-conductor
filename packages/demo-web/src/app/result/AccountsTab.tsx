@@ -8,22 +8,31 @@ import {
   TableRow,
 } from '@/components/ui/table';
 
+import { useMoney, type Money } from './money';
 import { NotComputed } from './NotComputed';
-import { formatGbp } from './report-selectors';
 
-function formatBalance(account: SessionAccount): string {
+/** The journey's currency; an account that carries another one (a UK persona's) keeps its own. */
+function formatBalance(account: SessionAccount, money: Money): string {
   if (account.balance === null) {
     return 'n/a';
   }
-  const currency = account.currency ?? 'GBP';
+  const currency = account.currency;
+  if (currency === null || currency === 'GBP') {
+    return money.format(account.balance);
+  }
   try {
     return new Intl.NumberFormat('en-GB', { style: 'currency', currency }).format(account.balance);
   } catch {
-    return formatGbp(account.balance);
+    return money.format(account.balance);
   }
 }
 
+const shownCurrency = (account: SessionAccount, money: Money): string =>
+  account.currency === null || account.currency === 'GBP' ? money.currency : account.currency;
+
 export function AccountsTab({ accounts }: { accounts: SessionAccount[] }) {
+  const money = useMoney();
+
   if (accounts.length === 0) {
     return <NotComputed what="accounts" />;
   }
@@ -48,8 +57,10 @@ export function AccountsTab({ accounts }: { accounts: SessionAccount[] }) {
             <TableCell>
               {account.accountNumber === null ? 'n/a' : `**** ${account.accountNumber}`}
             </TableCell>
-            <TableCell className="text-right tabular-nums">{formatBalance(account)}</TableCell>
-            <TableCell>{account.currency ?? 'n/a'}</TableCell>
+            <TableCell className="text-right tabular-nums">
+              {formatBalance(account, money)}
+            </TableCell>
+            <TableCell>{shownCurrency(account, money)}</TableCell>
           </TableRow>
         ))}
       </TableBody>

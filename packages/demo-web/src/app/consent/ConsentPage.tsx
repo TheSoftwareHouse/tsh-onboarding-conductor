@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 
-import { sessionPath } from '../session/session-routes';
+import { pageFor, sessionPath } from '../session/session-routes';
 import { SessionGate, useSessionView } from '../session/useSessionView';
 
 const CONSENT_VERSION = '2026-10';
@@ -36,11 +36,12 @@ export function ConsentPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await submitSession(token, {
+      const next = await submitSession(token, {
         openBankingCreditCheckVersion: CONSENT_VERSION,
         openBankingCreditCheckConsent: true,
       });
-      void navigate(sessionPath(token, 'bank'));
+      // The next page is the journey's: the UK bank list, or the Lean bank link.
+      void navigate(sessionPath(token, next.phase === 'processing' ? 'processing' : pageFor(next)));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not record your consent.');
       setSubmitting(false);
@@ -83,7 +84,7 @@ export function ConsentPage() {
           </p>
         )}
         <Button disabled={!agreed || submitting} onClick={() => void onContinue()}>
-          {submitting ? 'Saving…' : 'Go to bank selection'}
+          {submitting ? 'Saving…' : 'Continue to your bank'}
         </Button>
       </CardContent>
     </Card>

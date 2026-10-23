@@ -10,6 +10,7 @@ import { StateWaiter } from './bnpl/state-waiter';
 import { validateConfig } from './config/app.config';
 import { EngineClient } from './engine/engine.client';
 import { HealthController } from './health/health.controller';
+import { LeanLinkService } from './lean/lean-link.service';
 import { PersonaService } from './personas/persona.service';
 import { EngineWebhookController } from './webhooks/engine-webhook.controller';
 
@@ -28,6 +29,7 @@ import { EngineWebhookController } from './webhooks/engine-webhook.controller';
     BnplSessionStore,
     StateWaiter,
     PersonaService,
+    LeanLinkService,
     BankDataPusher,
   ],
   exports: [EngineClient],

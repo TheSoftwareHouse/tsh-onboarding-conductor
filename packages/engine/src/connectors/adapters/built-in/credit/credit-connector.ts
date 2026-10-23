@@ -36,6 +36,7 @@ import {
   CREDIT_BANK_DATA_FIELD,
   CREDIT_BANK_DATA_INVALID_ERROR,
   CREDIT_INDICATORS_FIELD,
+  CREDIT_NO_ACCOUNTS_SELECTED_ERROR,
   CREDIT_OUTCOME_FIELD,
   CREDIT_PROVIDER_REFERENCE_FIELD,
   CREDIT_REASON_CODES_FIELD,
@@ -55,7 +56,7 @@ import {
   type CreditPendingReference,
   type CreditProvider,
 } from './credit-provider.port';
-import { buildCreditSubmission } from './credit-submission';
+import { buildCreditSubmission, CreditNoAccountsSelectedError } from './credit-submission';
 
 const CREDIT_CALLBACK_FIELDS = [
   CREDIT_OUTCOME_FIELD,
@@ -143,6 +144,20 @@ export abstract class CreditConnector<
 
         return ConnectorExecutionResult.invalidData(
           { [CREDIT_BANK_DATA_FIELD]: [CREDIT_BANK_DATA_INVALID_ERROR] },
+          { [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true },
+        );
+      }
+
+      // No provider call was made: the selection kept no account. The error sits on the field the
+      // selection came from, since the document itself is sound.
+      if (error instanceof CreditNoAccountsSelectedError) {
+        this.logger.log(
+          `CREDIT_NO_ACCOUNTS_SELECTED connectorId=${this.id} ` +
+            `onboardingId=${input.execution.onboardingId}`,
+        );
+
+        return ConnectorExecutionResult.invalidData(
+          { [error.sourceField]: [CREDIT_NO_ACCOUNTS_SELECTED_ERROR] },
           { [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true },
         );
       }

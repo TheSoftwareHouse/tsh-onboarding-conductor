@@ -1,3 +1,4 @@
+import { BnplJourney } from '../../config/app.config';
 import { PersonaAccountSummary } from '../../personas/persona.service';
 import { JsonValue, StateField } from '../../engine/engine.client';
 
@@ -16,8 +17,15 @@ export interface CreatedSession {
   persona: string | null;
 }
 
+/** Which provider a `processing` session waits on: the bank link (Lean) or the credit check. */
+export type WaitingFor = 'bank' | 'credit';
+
 export interface SessionView {
   phase: Phase;
+  /** The journey this BFF runs; the web app picks its page table from it. */
+  journey: BnplJourney;
+  /** Set while `processing`: what the engine is parked on. */
+  waitingFor?: WaitingFor;
   /** Name of the current step; `null` once the onboarding has ended. */
   step: string | null;
   /** Active fields of the current step; empty outside `collect`. */
@@ -34,4 +42,8 @@ export interface SessionView {
 
 export interface ProcessingView {
   phase: 'processing';
+}
+
+export interface JourneyView {
+  journey: BnplJourney;
 }
