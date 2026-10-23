@@ -5,7 +5,7 @@ import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/services/api/api-error';
 import { createQueryClient } from '@/services/query-client/create-query-client';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
-import { BrowserRouter, Route, Routes } from 'react-router';
+import { createBrowserRouter, Outlet, RouterProvider, type DataRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchAdminWorkflows, type AdminWorkflowSummary } from '@/api/workflows/admin-workflows';
 import {
@@ -141,19 +141,25 @@ function versions(...entries: Array<[number, WorkflowVersion['status']]>): Workf
   }));
 }
 
+let router: DataRouter | null = null;
+
 function renderPage(search = '', client: QueryClient = createQueryClient()): void {
   window.history.replaceState({}, '', `${ADMIN_ROUTES.workflows.details(WORKFLOW_ID)}${search}`);
 
+  router = createBrowserRouter([
+    {
+      element: (
+        <NuqsAdapter>
+          <Outlet />
+        </NuqsAdapter>
+      ),
+      children: [{ path: ADMIN_ROUTES.workflows.detailsPattern, element: <WorkflowDetailsPage /> }],
+    },
+  ]);
   render(
-    <BrowserRouter>
-      <NuqsAdapter>
-        <QueryClientProvider client={client}>
-          <Routes>
-            <Route path={ADMIN_ROUTES.workflows.detailsPattern} element={<WorkflowDetailsPage />} />
-          </Routes>
-        </QueryClientProvider>
-      </NuqsAdapter>
-    </BrowserRouter>,
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
   );
 }
 
@@ -173,6 +179,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  router?.dispose();
   vi.clearAllMocks();
 });
 

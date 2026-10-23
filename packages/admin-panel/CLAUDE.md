@@ -39,8 +39,10 @@ audit trail by lives in a shared tier too, never restated: the endpoint is `ADMI
 in `src/api/audit/audit-events.ts`, `src/lib/audit-metadata.ts` formats a metadata value, and
 `src/lib/audit-actions.ts` flags a failure action.
 
-`NuqsAdapter` sits **inside** `BrowserRouter` in `src/app/App.tsx`, not in `AppProviders`, which
-renders above the router. Any future router-context provider belongs below `BrowserRouter` too.
+The router is a data router (`createBrowserRouter`, ADR 0050), so a page can call `useBlocker`.
+`NuqsAdapter` is the root route's element in `src/app/App.tsx`, not in `AppProviders`, which
+renders above the router; any future router-context provider goes there too. A spec rendering a
+page that calls `useBlocker` builds a `createBrowserRouter` too, and disposes it in `afterEach`.
 
 ## Styling
 
