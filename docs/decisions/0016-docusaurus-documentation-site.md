@@ -57,9 +57,8 @@ Three constraints decided the shape:
   of the default docs instance; `sidebars/api.ts` strips that prefix. A plugin upgrade that changes
   the generated shape surfaces there first.
 - No font file is committed. The site ships Inter Tight and JetBrains Mono, both SIL Open Font
-  License, and declares the commercial TWK Everett with `local()` sources only, so it appears for a
-  reader who owns it and a licence holder can serve it from an ignored `static/fonts` folder
-  (amended 2026-10-26; the files were committed until then).
+  License, as its only type; the brand's commercial TWK Everett is not referenced at all, so every
+  reader sees the same rendering (amended 2026-10-26; the Everett files were committed until then).
 - The fixtures gallery depends on `@tsh/ddl-schema`'s build output, so the site is built after it in
   the fan-out and `pnpm docs:dev` builds it first.
 - Joining the engine image's dependency stage means the lockfile, not the install. `--frozen-lockfile`

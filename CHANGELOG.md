@@ -11,10 +11,9 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ### Changed
 
-- Fonts — The commercial TWK Everett files are no longer in the repository. The documentation site
-  and the admin panel ship Inter Tight and JetBrains Mono (SIL Open Font License) and use
-  TWK Everett only where the reader already has it installed or a licence holder drops the files
-  into a git-ignored fonts folder.
+- Fonts — The commercial TWK Everett files are no longer in the repository and the typeface is no
+  longer referenced. The documentation site and the admin panel ship Inter Tight and JetBrains Mono
+  (SIL Open Font License) as their only type.
 
 ### Fixed
 

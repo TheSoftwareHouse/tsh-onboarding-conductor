@@ -31,7 +31,7 @@ numbers/booleans/null `#B5B4FF`, prompt/comments `#8F9094`, plain `#EDF1F4`. Wri
 
 ## 2. Type
 
-Family: Inter Tight (300, 400) as shipped; TWK Everett (300, 400) takes over only where a reader has it installed or a licence holder serves it (`static/fonts/README.md`). Mono: JetBrains Mono. UI never bold.
+Family: Inter Tight (300, 400), the open-licensed stand-in for the brand's TWK Everett, which is commercial and not used. Mono: JetBrains Mono. UI never bold.
 
 | Element                         | Size / line-height                | Weight            | Tracking           |
 | ------------------------------- | --------------------------------- | ----------------- | ------------------ |

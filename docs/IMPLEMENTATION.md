@@ -4148,8 +4148,7 @@ tests, 15 admin-panel browser tests. **Coverage is measured but the spec's 80%/9
 
 **Documentation site** (`packages/docs`, `@tsh/docs`; `docs/decisions/0016-docusaurus-documentation-site.md`):
 Docusaurus 3, classic preset, skinned with the TSH design system (`src/css/custom.css`, Inter Tight
-and JetBrains Mono from Google Fonts with the commercial TWK Everett declared `local()`-only and no
-font file committed, an ejected footer and a custom home page; the
+and JetBrains Mono from Google Fonts as the only type, with no font file committed, an ejected footer and a custom home page; the
 design spec is `packages/docs/THEME.md`). Three docs instances: **Guides** (`docs/guides`,
 hand-written: introduction, getting started, your first onboarding, configuration, extending; wherever
 a guide shows a step from an example workflow it shows the `custom` form and the specialized form side

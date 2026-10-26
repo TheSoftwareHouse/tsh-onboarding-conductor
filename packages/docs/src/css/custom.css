@@ -1,29 +1,11 @@
 /* =========================================================================
    Onboarding Conductor docs — TSH theme for Docusaurus (classic preset)
-   Drop-in: src/css/custom.css. Logos live in static/img; see static/fonts/README.md for type.
+   Drop-in: src/css/custom.css. Logos live in static/img; type is Inter Tight + JetBrains Mono from Google Fonts.
    Design source: TSH Design System (Widelabs Figma). Radii are 0 by design.
    ========================================================================= */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap');
-/* @import './everett.css'; — licence holders only; uncomment once the files are in `static/fonts/`
-   (imports must stay above every other rule). */
 
-/* TWK Everett is a commercial typeface (Weltkern) and its files are not in this repository. These
-   declarations use it only when a reader already has it installed; everyone else gets Inter Tight,
-   the sanctioned open-licensed stand-in loaded above. A licence holder who wants the site itself to
-   serve Everett follows `static/fonts/README.md` and uncomments the `./everett.css` import above. */
-@font-face {
-  font-family: 'TWK Everett';
-  font-weight: 300;
-  font-display: swap;
-  src: local('TWK Everett Light'), local('TWKEverett-Light');
-}
-@font-face {
-  font-family: 'TWK Everett';
-  font-weight: 400;
-  font-display: swap;
-  src: local('TWK Everett'), local('TWK Everett Regular'), local('TWKEverett-Regular');
-}
 /* ---------- TSH palette (never invent colors outside this list) ---------- */
 :root {
   --tsh-black: #000000;
@@ -76,7 +58,7 @@
   --ifm-link-decoration: underline;
   --ifm-link-hover-decoration: underline;
 
-  --ifm-font-family-base: 'TWK Everett', 'Inter Tight', system-ui, -apple-system, sans-serif;
+  --ifm-font-family-base: 'Inter Tight', system-ui, -apple-system, sans-serif;
   --ifm-font-family-monospace: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   --ifm-font-size-base: 16px;
   --ifm-line-height-base: 1.6;
@@ -85,7 +67,7 @@
   --ifm-font-weight-semibold: 400; /* no bold weights licensed */
   --ifm-font-weight-bold: 400;
 
-  --ifm-heading-font-family: 'TWK Everett', 'Inter Tight', system-ui, sans-serif;
+  --ifm-heading-font-family: 'Inter Tight', system-ui, sans-serif;
   --ifm-heading-font-weight: 400;
   --ifm-h1-font-size: 48px;
   --ifm-h2-font-size: 28px;
