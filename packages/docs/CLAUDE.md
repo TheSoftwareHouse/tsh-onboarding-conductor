@@ -65,8 +65,10 @@ topological order.
   labels via `.tsh-caps`. Never invent a colour outside the `--tsh-*` palette.
 - `.md` pages are CommonMark (`markdown.format: 'detect'`), so braces and angle brackets are
   literal; a page that needs a component is `.mdx`.
-- The fonts under `static/fonts` are the two licensed TWK Everett weights. Never add another weight;
-  the stylesheet maps bold to 400 on purpose.
+- No font file is committed. Inter Tight and JetBrains Mono load from Google Fonts; TWK Everett is
+  commercial, declared with `local()` sources only, and `src/css/everett.css` is the opt-in for a
+  licence holder (`static/fonts/README.md`). Never add another weight; the stylesheet maps bold to
+  400 on purpose.
 
 ## Deployment
 

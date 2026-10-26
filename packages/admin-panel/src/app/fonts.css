@@ -7,5 +7,24 @@
 /* Technical metadata only — ids, timestamps, step names. The brand uses 400 alone. */
 @import '@fontsource/jetbrains-mono/400.css';
 
-/* TWK Everett is commercial and cannot live in this repo. To enable it, follow
-   `public/fonts/README.md` and add `@import './everett.css';` here. */
+/* TWK Everett is commercial and cannot live in this repo. These declarations pick it up only
+   when the operator's machine already has it installed; everyone else falls through to Inter Tight.
+   To have the panel serve it, follow `public/fonts/README.md` and add `@import './everett.css';`. */
+@font-face {
+  font-family: 'TWK Everett';
+  font-weight: 300;
+  font-display: swap;
+  src: local('TWK Everett Light'), local('TWKEverett-Light');
+}
+@font-face {
+  font-family: 'TWK Everett';
+  font-weight: 400;
+  font-display: swap;
+  src: local('TWK Everett'), local('TWK Everett Regular'), local('TWKEverett-Regular');
+}
+@font-face {
+  font-family: 'TWK Everett';
+  font-weight: 500;
+  font-display: swap;
+  src: local('TWK Everett Medium'), local('TWKEverett-Medium');
+}
