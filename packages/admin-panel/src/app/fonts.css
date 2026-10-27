@@ -1,11 +1,9 @@
 /* The single place webfonts are loaded. Self-hosted rather than from a CDN, which a KYC product
-   served from the engine's origin cannot rely on reaching. */
+   served from the engine's origin cannot rely on reaching. Both faces are SIL Open Font License;
+   the brand's commercial TWK Everett is deliberately not referenced anywhere. */
 
-/* The sanctioned stand-in for TWK Everett; variable, so one file serves 300/400/500. */
+/* Display and body; variable, so one file serves 300/400/500. */
 @import '@fontsource-variable/inter-tight/wght.css';
 
 /* Technical metadata only — ids, timestamps, step names. The brand uses 400 alone. */
 @import '@fontsource/jetbrains-mono/400.css';
-
-/* TWK Everett is commercial and cannot live in this repo. To enable it, follow
-   `public/fonts/README.md` and add `@import './everett.css';` here. */

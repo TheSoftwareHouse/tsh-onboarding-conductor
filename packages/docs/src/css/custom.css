@@ -1,27 +1,10 @@
 /* =========================================================================
    Onboarding Conductor docs — TSH theme for Docusaurus (classic preset)
-   Drop-in: src/css/custom.css. Fonts live in static/fonts, logos in static/img.
+   Drop-in: src/css/custom.css. Logos live in static/img; type is Inter Tight + JetBrains Mono from Google Fonts.
    Design source: TSH Design System (Widelabs Figma). Radii are 0 by design.
    ========================================================================= */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap');
-
-@font-face {
-  font-family: 'TWK Everett';
-  font-weight: 300;
-  font-display: swap;
-  src:
-    url('/fonts/TWKEverett-Light-web.woff2') format('woff2'),
-    url('/fonts/TWKEverett-Light-web.woff') format('woff');
-}
-@font-face {
-  font-family: 'TWK Everett';
-  font-weight: 400;
-  font-display: swap;
-  src:
-    url('/fonts/TWKEverett-Regular-web.woff2') format('woff2'),
-    url('/fonts/TWKEverett-Regular-web.woff') format('woff');
-}
 
 /* ---------- TSH palette (never invent colors outside this list) ---------- */
 :root {
@@ -75,7 +58,7 @@
   --ifm-link-decoration: underline;
   --ifm-link-hover-decoration: underline;
 
-  --ifm-font-family-base: 'TWK Everett', 'Inter Tight', system-ui, -apple-system, sans-serif;
+  --ifm-font-family-base: 'Inter Tight', system-ui, -apple-system, sans-serif;
   --ifm-font-family-monospace: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   --ifm-font-size-base: 16px;
   --ifm-line-height-base: 1.6;
@@ -84,7 +67,7 @@
   --ifm-font-weight-semibold: 400; /* no bold weights licensed */
   --ifm-font-weight-bold: 400;
 
-  --ifm-heading-font-family: 'TWK Everett', 'Inter Tight', system-ui, sans-serif;
+  --ifm-heading-font-family: 'Inter Tight', system-ui, sans-serif;
   --ifm-heading-font-weight: 400;
   --ifm-h1-font-size: 48px;
   --ifm-h2-font-size: 28px;

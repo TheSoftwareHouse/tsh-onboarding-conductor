@@ -4147,8 +4147,8 @@ Last observed green: 1623 engine and 484 DDL unit tests, 584 admin-panel unit te
 tests, 15 admin-panel browser tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
 
 **Documentation site** (`packages/docs`, `@tsh/docs`; `docs/decisions/0016-docusaurus-documentation-site.md`):
-Docusaurus 3, classic preset, skinned with the TSH design system (`src/css/custom.css`, the two
-licensed TWK Everett weights under `static/fonts`, an ejected footer and a custom home page; the
+Docusaurus 3, classic preset, skinned with the TSH design system (`src/css/custom.css`, Inter Tight
+and JetBrains Mono from Google Fonts as the only type, with no font file committed, an ejected footer and a custom home page; the
 design spec is `packages/docs/THEME.md`). Three docs instances: **Guides** (`docs/guides`,
 hand-written: introduction, getting started, your first onboarding, configuration, extending; wherever
 a guide shows a step from an example workflow it shows the `custom` form and the specialized form side

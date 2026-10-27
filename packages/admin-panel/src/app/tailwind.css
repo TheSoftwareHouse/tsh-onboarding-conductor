@@ -60,11 +60,8 @@
   /* font-display and font-body share one stack — the two names are kept apart for
      meaning, not typeface: Typography's h1-h6 use font-display. */
   --font-display:
-    'TWK Everett', 'Everett', 'Inter Tight Variable', 'Inter Tight', 'Inter', system-ui,
-    -apple-system, sans-serif;
-  --font-body:
-    'TWK Everett', 'Everett', 'Inter Tight Variable', 'Inter Tight', 'Inter', system-ui,
-    -apple-system, sans-serif;
+    'Inter Tight Variable', 'Inter Tight', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-body: 'Inter Tight Variable', 'Inter Tight', 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Each size carries its line-height, tracking and weight, so one `text-*` is the whole style. */
