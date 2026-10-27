@@ -1,3 +1,4 @@
+import { FIELD_TYPE } from './field-type-names';
 import { isInteger } from '../value-guards';
 import type { ArrayValidation } from '../workflow-contract';
 import type {
@@ -19,7 +20,7 @@ const isNormalizedArrayField = (field: AnyNormalizedField): field is NormalizedA
   field.type === 'array';
 
 export const arrayFieldTypeDefinition = {
-  type: 'array',
+  type: FIELD_TYPE.array,
   aliases: [],
   levels: ['root', 'nested', 'arrayItem'],
   buildValidationSchema(): JsonSchemaFragment {

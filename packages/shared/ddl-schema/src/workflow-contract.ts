@@ -3,22 +3,33 @@ import type { WorkflowFieldFormat } from './formats/field-format.registry';
 import type { NormalizedWorkflowCondition, RawWorkflowCondition } from './workflow-condition';
 
 export type { WorkflowFieldFormat } from './formats/field-format.registry';
+export type { RawWorkflowCondition, WorkflowConditionScalar } from './workflow-condition';
+export { AGREEMENT_KEY_PATTERN } from './agreements/agreement-key';
+export { FIELD_TYPE } from './fields/field-type-names';
+
+export const WORKFLOW_STATUS = {
+  awaitingUser: 'awaiting_user',
+  awaitingManualReview: 'awaiting_manual_review',
+  approved: 'approved',
+  rejected: 'rejected',
+  invalid: 'invalid',
+} as const;
 
 export const WORKFLOW_STATUSES = [
-  'awaiting_user',
-  'awaiting_manual_review',
-  'approved',
-  'rejected',
-  'invalid',
+  WORKFLOW_STATUS.awaitingUser,
+  WORKFLOW_STATUS.awaitingManualReview,
+  WORKFLOW_STATUS.approved,
+  WORKFLOW_STATUS.rejected,
+  WORKFLOW_STATUS.invalid,
 ] as const;
 
 export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 
 /** The statuses an onboarding ends in. A step carrying one declares no data and no transitions. */
 export const TERMINAL_WORKFLOW_STATUSES = [
-  'approved',
-  'rejected',
-  'invalid',
+  WORKFLOW_STATUS.approved,
+  WORKFLOW_STATUS.rejected,
+  WORKFLOW_STATUS.invalid,
 ] as const satisfies readonly WorkflowStatus[];
 
 export type TerminalWorkflowStatus = (typeof TERMINAL_WORKFLOW_STATUSES)[number];
@@ -43,6 +54,8 @@ export const UNSAFE_NAMES: readonly string[] = Object.getOwnPropertyNames(Object
  * belong here. `custom` covers a connector with no capability of its own, which is what makes the
  * generic `http_request` connector expressible at all.
  */
+export const CUSTOM_CONNECTOR_TYPE = 'custom';
+
 export const CONNECTOR_TYPES = [
   // Identity and compliance.
   'kyc',
@@ -59,7 +72,7 @@ export const CONNECTOR_TYPES = [
   'e_signature',
   'document_storage',
   // No capability of its own.
-  'custom',
+  CUSTOM_CONNECTOR_TYPE,
 ] as const;
 
 export type ConnectorType = (typeof CONNECTOR_TYPES)[number];

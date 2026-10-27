@@ -27,12 +27,20 @@ export type {
 } from '../workflow-contract';
 export type { JsonSchemaFragment } from '../fields/field-type.port';
 
+export const COLLECT_STEP_CATEGORY = 'collect';
+
 /**
  * What a step does, from the operator's point of view. It groups the palette a builder renders and
  * nothing else — the compiler never branches on it, so a category is free to hold one step type or
  * a dozen.
  */
-export const STEP_CATEGORIES = ['collect', 'verify', 'decide', 'integrate', 'terminal'] as const;
+export const STEP_CATEGORIES = [
+  COLLECT_STEP_CATEGORY,
+  'verify',
+  'decide',
+  'integrate',
+  'terminal',
+] as const;
 
 export type WorkflowStepCategory = (typeof STEP_CATEGORIES)[number];
 
