@@ -1,0 +1,157 @@
+import { useState, type ReactElement } from 'react';
+import { Button } from '@/components/ui/Button/Button';
+import { Typography } from '@/components/ui/Typography/Typography';
+import { cn } from '@/lib/cn';
+import { findConfigHint, findConfigLabel, type HintOwner } from '../../../constants/config-hints';
+import {
+  buildDefault,
+  humanize,
+  isComposite,
+  isEmptyValue,
+  type Schema,
+} from '../../../utils/config-schema';
+import { toMemberPath } from '../../../utils/check-config';
+import { useConfigFormContext } from './config-form-context';
+import { ConnectorPicker, readConnectorTypes } from './ConnectorPicker';
+import { FieldRow } from './FieldRow';
+import { asObject, describeFallback, setMember } from './form-values';
+import { SchemaForm } from './SchemaForm';
+
+export interface ObjectFormProps {
+  schema: Schema;
+  value: unknown;
+  onChange: (value: unknown) => void;
+  readOnly: boolean;
+  /** Where this object sits in the step's config. */
+  path?: string;
+  /** Members drawn elsewhere, such as a variant's `type` tag. */
+  skip?: string[];
+  /** Per-member engine defaults. */
+  defaults?: Record<string, unknown>;
+  /** A member of another object: it gets a left rule, so its end is visible. */
+  framed?: boolean;
+  /** Optional members still unset wait behind a toggle; only a section's top level does this. */
+  hidesUnset?: boolean;
+}
+
+// Field descriptors are the only config objects that declare both a `type` and a `required` member.
+function readHintOwner(schema: Schema, connectorTypes: string[] | null): HintOwner {
+  if (connectorTypes !== null) return 'connector';
+  return schema.properties?.type && schema.properties.required ? 'field' : 'config';
+}
+
+/** Required and set members show; with `hidesUnset`, unset optional ones wait behind a toggle. */
+export function ObjectForm({
+  schema,
+  value,
+  onChange,
+  readOnly,
+  path = '',
+  skip = [],
+  defaults = {},
+  framed = false,
+  hidesUnset = false,
+}: ObjectFormProps): ReactElement {
+  const [showUnset, setShowUnset] = useState(false);
+  const { stepType, renameField } = useConfigFormContext();
+  const object = asObject(value);
+  const properties = Object.entries(schema.properties ?? {}).filter(([key]) => !skip.includes(key));
+  const required = new Set(schema.required ?? []);
+  // A member once set stays shown after it is cleared, so clearing it to retype keeps the input.
+  const [revealed, setRevealed] = useState<ReadonlySet<string>>(() => new Set(Object.keys(object)));
+  const newlySet = Object.keys(object).filter((key) => !revealed.has(key));
+  if (newlySet.length > 0) setRevealed(new Set([...revealed, ...newlySet]));
+  const isHidden = (key: string): boolean =>
+    hidesUnset && !required.has(key) && !(key in object) && !revealed.has(key);
+  const hiddenCount = properties.filter(([key]) => isHidden(key)).length;
+  const shown = showUnset ? properties : properties.filter(([key]) => !isHidden(key));
+  // A connector binding's `id` names one of the engine's connectors, narrowed by a declared `type`.
+  const connectorTypes = readConnectorTypes(schema);
+  const boundType = connectorTypes?.find((type) => type === object.type);
+  const pickableTypes = boundType === undefined ? connectorTypes : [boundType];
+  const hintOwner = readHintOwner(schema, connectorTypes);
+
+  return (
+    <div className={cn('flex flex-col gap-4', framed && 'border-l-2 border-border-rule pl-3')}>
+      {shown.map(([key, member]) => {
+        const isOptional = !required.has(key);
+        const isSet = key in object;
+        const label = findConfigLabel(key) ?? humanize(key);
+        const fallback = describeFallback(defaults[key]);
+
+        return (
+          <FieldRow
+            key={key}
+            label={label}
+            required={!isOptional}
+            hint={findConfigHint(hintOwner, stepType, key)}
+            onRemove={
+              readOnly || !isOptional || !isSet
+                ? undefined
+                : () => onChange(setMember(object, key, undefined))
+            }
+          >
+            {isOptional && !isSet && isComposite(member) ? (
+              <div className="flex items-center gap-2">
+                <Typography variant="meta" as="span" className="text-fg-disabled">
+                  not set
+                  {fallback ? ` · ${fallback}` : ''}
+                </Typography>
+                {!readOnly && (
+                  <Button
+                    size="sm"
+                    aria-label={`Set ${label}`}
+                    onClick={() => onChange(setMember(object, key, buildDefault(member)))}
+                  >
+                    Set
+                  </Button>
+                )}
+              </div>
+            ) : key === 'id' && pickableTypes !== null ? (
+              <ConnectorPicker
+                types={pickableTypes}
+                value={object[key]}
+                readOnly={readOnly}
+                label={label}
+                onChange={(next) => onChange(setMember(object, key, next))}
+              />
+            ) : (
+              <SchemaForm
+                schema={member}
+                name={key}
+                path={toMemberPath(path, key)}
+                label={label}
+                value={object[key]}
+                readOnly={readOnly}
+                optional={isOptional}
+                fallback={defaults[key]}
+                framed
+                // Only a section's top level hides unset members, so this is the step's root field map.
+                onRenameEntry={
+                  hidesUnset && key === 'fields' ? (renameField ?? undefined) : undefined
+                }
+                onChange={(next) =>
+                  onChange(
+                    setMember(object, key, isOptional && isEmptyValue(next) ? undefined : next),
+                  )
+                }
+              />
+            )}
+          </FieldRow>
+        );
+      })}
+      {hiddenCount > 0 && !readOnly && (
+        <Button
+          variant="quiet"
+          size="sm"
+          className="self-start"
+          onClick={() => setShowUnset(!showUnset)}
+        >
+          {showUnset
+            ? 'Hide unset settings'
+            : `Show ${hiddenCount} more ${hiddenCount === 1 ? 'setting' : 'settings'}`}
+        </Button>
+      )}
+    </div>
+  );
+}

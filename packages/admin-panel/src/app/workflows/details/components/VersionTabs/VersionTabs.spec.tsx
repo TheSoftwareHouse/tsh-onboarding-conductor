@@ -13,6 +13,7 @@ function renderTabs(value: WorkflowView, keepJsonMounted = false) {
     <VersionTabs
       value={value}
       onValueChange={onValueChange}
+      canvas={<p>canvas panel</p>}
       graph={<p>graph panel</p>}
       json={<p>json panel</p>}
       keepJsonMounted={keepJsonMounted}
@@ -22,26 +23,34 @@ function renderTabs(value: WorkflowView, keepJsonMounted = false) {
 }
 
 describe('VersionTabs', () => {
-  it('renders a Graph and a JSON tab', () => {
-    renderTabs('graph');
-    expect(screen.getByRole('tab', { name: 'Graph' })).toBeInTheDocument();
+  it('renders an Authored graph, a Compiled graph and a JSON tab', () => {
+    renderTabs('compiled');
+    expect(screen.getByRole('tab', { name: 'Authored graph' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Compiled graph' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'JSON' })).toBeInTheDocument();
   });
 
   it('shows the selected tab panel only', () => {
-    renderTabs('graph');
+    renderTabs('compiled');
     expect(screen.getByText('graph panel')).toBeInTheDocument();
+    expect(screen.queryByText('canvas panel')).not.toBeInTheDocument();
     expect(screen.queryByText('json panel')).not.toBeInTheDocument();
   });
 
+  it('shows the canvas panel on the authored tab', () => {
+    renderTabs('authored');
+    expect(screen.getByText('canvas panel')).toBeInTheDocument();
+    expect(screen.queryByText('graph panel')).not.toBeInTheDocument();
+  });
+
   it('calls onValueChange with the other value on click', async () => {
-    const onValueChange = renderTabs('graph');
+    const onValueChange = renderTabs('compiled');
     await userEvent.click(screen.getByRole('tab', { name: 'JSON' }));
     expect(onValueChange).toHaveBeenCalledWith('json');
   });
 
-  it('keeps the JSON panel in the DOM while Graph is selected when keepJsonMounted is set', () => {
-    renderTabs('graph', true);
+  it('keeps the JSON panel in the DOM while Compiled graph is selected when keepJsonMounted is set', () => {
+    renderTabs('compiled', true);
     expect(screen.getByText('json panel', { exact: true })).toBeInTheDocument();
     expect(screen.getByText('graph panel')).toBeVisible();
   });

@@ -679,7 +679,11 @@ describe('layoutWorkflowGraph edge cases', () => {
   });
 
   it('draws a workflow that declares no steps at all', () => {
-    expect(layoutWorkflowGraph(definitionOf('collect', []))).toEqual({ nodes: [], edges: [] });
+    expect(layoutWorkflowGraph(definitionOf('collect', []))).toEqual({
+      nodes: [],
+      edges: [],
+      groups: [],
+    });
   });
 
   it('places a step nothing transitions to rather than dropping it', () => {
@@ -755,5 +759,66 @@ describe('layoutWorkflowGraph for a workflow that loops back and skips a rank', 
 
     expect(oneWay?.markerStart).toBeUndefined();
     expect(oneWay?.markerEnd).toBeDefined();
+  });
+});
+
+describe('layoutWorkflowGraph groups', () => {
+  const otp = { step: 'send_code', type: 'otp-verify', category: 'verify' };
+  const grouped: WorkflowDefinition = {
+    ...DEFINITION,
+    initialStep: 'collect',
+    steps: [
+      step({
+        name: 'collect',
+        source: { step: 'collect', type: 'form', category: 'collect' },
+        transitions: [{ status: 'success', target: 'send_code', reason: null }],
+      }),
+      step({
+        name: 'send_code',
+        source: otp,
+        transitions: [{ status: 'success', target: 'verify_code', reason: null }],
+      }),
+      step({
+        name: 'verify_code',
+        source: otp,
+        transitions: [
+          { status: 'success', target: 'approved', reason: null },
+          { status: 'rejected', target: 'resend_code', reason: null },
+        ],
+      }),
+      step({
+        name: 'resend_code',
+        source: otp,
+        transitions: [{ status: 'success', target: 'verify_code', reason: null }],
+      }),
+      step({ name: 'approved', status: 'approved', terminal: true }),
+    ],
+  };
+
+  it('frames only an authored step that compiled to several steps, around every one of them', () => {
+    const { nodes, groups } = layoutWorkflowGraph(grouped);
+
+    expect(groups.map((group) => group.data)).toEqual([
+      expect.objectContaining({ step: 'send_code', type: 'otp-verify', category: 'verify' }),
+    ]);
+    const [frame] = groups;
+    for (const name of ['send_code', 'verify_code', 'resend_code']) {
+      const node = nodes.find((candidate) => candidate.id === name)!;
+      expect(node.position.x).toBeGreaterThan(frame!.position.x);
+      expect(node.position.y).toBeGreaterThan(frame!.position.y);
+      expect(node.position.x + NODE_WIDTH).toBeLessThan(frame!.position.x + frame!.data.width);
+      expect(node.position.y + NODE_HEIGHT).toBeLessThan(frame!.position.y + frame!.data.height);
+    }
+  });
+
+  it('tints a node by its source category, and leaves it untinted without a source', () => {
+    const { nodes } = layoutWorkflowGraph(grouped);
+
+    expect(nodes.find((node) => node.id === 'collect')?.data.category).toBe('collect');
+    expect(nodes.find((node) => node.id === 'approved')?.data.category).toBeNull();
+  });
+
+  it('draws no frame when every authored step compiled to one step', () => {
+    expect(layoutWorkflowGraph(DEFINITION).groups).toEqual([]);
   });
 });

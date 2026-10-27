@@ -210,6 +210,44 @@ describe('newDraftSchema fork arm', () => {
     });
   });
 
+  it('renames every connector source key from the new id, keeping shared keys shared', () => {
+    const document = {
+      id: 'kyc',
+      version: 1,
+      steps: [
+        { name: 'a', config: { sourceKey: 'kyc_v1' } },
+        { name: 'b', config: { sourceKey: 'kyc_v1' } },
+        { name: 'c', config: { connectors: [{ config: { sourceKey: 'other' } }] } },
+      ],
+    };
+
+    expect(
+      newDraftSchema.parse({
+        ...FORK,
+        workflowId: 'my-kyc',
+        fork: { workflowId: 'kyc', scope: 'users', document },
+      }),
+    ).toMatchObject({
+      steps: [
+        { config: { sourceKey: 'my_kyc' } },
+        { config: { sourceKey: 'my_kyc' } },
+        { config: { connectors: [{ config: { sourceKey: 'my_kyc_2' } }] } },
+      ],
+    });
+  });
+
+  it('keeps the source keys when the id is unchanged', () => {
+    const document = { id: 'kyc', version: 1, steps: [{ config: { sourceKey: 'kyc_v1' } }] };
+
+    expect(
+      newDraftSchema.parse({
+        ...FORK,
+        workflowId: 'kyc',
+        fork: { workflowId: 'kyc', scope: 'users', document },
+      }),
+    ).toMatchObject({ steps: [{ config: { sourceKey: 'kyc_v1' } }] });
+  });
+
   it('fails without a source', () => {
     expect(messagesOf({ ...FORK, fork: null })).toEqual(['Choose a workflow and a version.']);
   });

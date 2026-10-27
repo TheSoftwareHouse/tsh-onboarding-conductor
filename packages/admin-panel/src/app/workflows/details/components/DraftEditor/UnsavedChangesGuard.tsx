@@ -1,14 +1,23 @@
-import { useEffect, type ReactElement } from 'react';
+import { useEffect, type ReactElement, type RefObject } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
-import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker, type BlockerFunction } from 'react-router';
 import { Button } from '@/components/ui/Button/Button';
 import { Close } from '@/components/ui/icons';
 import { Typography } from '@/components/ui/Typography/Typography';
+import { workflowVersionSearchParams } from '@/lib/workflow-search-params';
 
 export interface UnsavedChangesGuardProps {
   /** True while the editor holds edits the stored draft does not. */
   when: boolean;
+  /** Set by a write that succeeded and is about to navigate: the edits are stored or deleted, not lost. */
+  isWritten: RefObject<boolean>;
+}
+
+const VERSION_KEY = 'version' satisfies keyof typeof workflowVersionSearchParams;
+
+function readVersion(search: string): number | null {
+  const raw = new URLSearchParams(search).get(VERSION_KEY);
+  return raw === null ? null : workflowVersionSearchParams[VERSION_KEY].parse(raw);
 }
 
 /** Leaving the draft means another page or another version; a tab or step change stays on it. */
@@ -17,17 +26,13 @@ function isLeavingDraft({
   nextLocation,
 }: Parameters<BlockerFunction>[0]): boolean {
   if (currentLocation.pathname !== nextLocation.pathname) return true;
-  const version = (search: string): string | null => new URLSearchParams(search).get('version');
-  return version(currentLocation.search) !== version(nextLocation.search);
+  return readVersion(currentLocation.search) !== readVersion(nextLocation.search);
 }
 
 /** Asks before an in-app navigation drops unsaved edits; a reload or tab close gets the browser's own prompt. */
-export function UnsavedChangesGuard({ when }: UnsavedChangesGuardProps): ReactElement {
-  const queryClient = useQueryClient();
-  // A write navigates from its own onSuccess, while its mutation is still pending: that leave is the editor's own.
-  const blocker = useBlocker(
-    (args) => when && queryClient.isMutating() === 0 && isLeavingDraft(args),
-  );
+export function UnsavedChangesGuard({ when, isWritten }: UnsavedChangesGuardProps): ReactElement {
+  // A ref, not `when`: the write navigates from its onSuccess, before the editor re-renders clean.
+  const blocker = useBlocker((args) => when && !isWritten.current && isLeavingDraft(args));
 
   useEffect(() => {
     if (!when) return;

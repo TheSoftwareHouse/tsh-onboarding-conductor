@@ -146,11 +146,17 @@ function AtStartingUrl({
 
 let client: QueryClient;
 let startingUrl = STARTING_URL;
-
 let router: DataRouter | null = null;
 
-function renderEditor({ staysMounted = false, search = '', strict = false } = {}): void {
-  startingUrl = `${STARTING_URL}${search}`;
+// A draft opens on the canvas; most of these specs drive the JSON editor, so they start there unless a view is given.
+function renderEditor({
+  staysMounted = false,
+  search = '',
+  strict = false,
+  view = 'json',
+}: { staysMounted?: boolean; search?: string; strict?: boolean; view?: string | null } = {}): void {
+  const viewParam = view === null || search.includes('view=') ? '' : `&view=${view}`;
+  startingUrl = `${STARTING_URL}${search}${viewParam}`;
   window.history.replaceState({}, '', startingUrl);
   const Root = strict ? StrictMode : Fragment;
   router = createBrowserRouter([
@@ -238,6 +244,42 @@ describe('DraftEditor', () => {
     expect(screen.getByText(/Editing · draft saved/)).toBeInTheDocument();
   });
 
+  describe('Authored graph tab', () => {
+    it('is the tab a draft opens on', async () => {
+      renderEditor({ view: null, staysMounted: true });
+
+      const tab = await screen.findByRole('tab', { name: 'Authored graph' });
+      expect(tab).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByText(/No steps yet/)).toBeInTheDocument();
+      expect(mockedCompile).not.toHaveBeenCalled();
+    });
+
+    it('marks the editor dirty on a canvas edit, shows it in JSON, and undoes it', async () => {
+      renderEditor({ view: null, staysMounted: true });
+      await userEvent.click(await screen.findByRole('button', { name: /^terminal/ }));
+
+      expect(screen.getByText('Unsaved changes · save to publish')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('tab', { name: 'JSON' }));
+      expect((await editorText()).value).toContain('"name": "terminal_1"');
+
+      await userEvent.click(screen.getByRole('tab', { name: 'Authored graph' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Undo' }));
+
+      expect(screen.queryByText(/Unsaved changes/)).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole('tab', { name: 'JSON' }));
+      expect((await editorText()).value).toBe(SAVED_TEXT);
+    });
+
+    it('asks to fix the JSON instead of drawing text that is not a document', async () => {
+      renderEditor({ staysMounted: true });
+      type(await editorText(), '{"steps":');
+      await userEvent.click(screen.getByRole('tab', { name: 'Authored graph' }));
+
+      expect(await screen.findByText(/Fix the JSON to see the canvas/)).toBeInTheDocument();
+      expect(screen.queryByText(/No steps yet/)).not.toBeInTheDocument();
+    });
+  });
+
   describe('Validate', () => {
     it('shows a JSON syntax error without calling the engine', async () => {
       renderEditor();
@@ -289,7 +331,7 @@ describe('DraftEditor', () => {
     const SYNTAX_ERROR_TEXT = '{"id":';
 
     async function openGraph(): Promise<void> {
-      await userEvent.click(screen.getByRole('tab', { name: 'Graph' }));
+      await userEvent.click(screen.getByRole('tab', { name: 'Compiled graph' }));
     }
 
     async function openJson(): Promise<void> {
@@ -306,14 +348,6 @@ describe('DraftEditor', () => {
 
     beforeEach(() => {
       mockedCompile.mockResolvedValue(COMPILATION);
-    });
-
-    it('selects JSON by default', async () => {
-      renderEditor({ staysMounted: true });
-      await editorText();
-
-      expect(screen.getByRole('tab', { name: 'JSON' })).toHaveAttribute('aria-selected', 'true');
-      expect(mockedCompile).not.toHaveBeenCalled();
     });
 
     it('compiles the current text once on opening and renders the inspector without stats', async () => {
@@ -727,7 +761,7 @@ describe('DraftEditor', () => {
       renderEditor({ staysMounted: true });
       await editorText();
       await clickPublish();
-      await userEvent.click(screen.getByRole('tab', { name: 'Graph' }));
+      await userEvent.click(screen.getByRole('tab', { name: 'Compiled graph' }));
 
       expect(mockedCompile).toHaveBeenCalledTimes(1);
     });
@@ -1010,15 +1044,65 @@ describe('DraftEditor', () => {
       );
     });
 
-    it('does not ask when switching tab', async () => {
+    it('asks again for an edit made after a save', async () => {
+      mockedUpdate.mockResolvedValue(summary());
       renderEditor({ staysMounted: true });
+      type(await editorText(), JSON.stringify({ ...DOCUMENT, name: 'Saved' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+      await waitFor(() => expect(showSuccessToast).toHaveBeenCalledWith('Draft saved.'));
+      type(await editorText(), JSON.stringify({ ...DOCUMENT, name: 'Edited after save' }));
+      await act(() => router?.navigate(ADMIN_ROUTES.workflows.root));
+
+      expect(await screen.findByRole('dialog', { name: 'Leave without saving?' })).toBeVisible();
+    });
+
+    it('asks while a validate is still in flight', async () => {
+      mockedCompile.mockReturnValue(new Promise(() => undefined));
+      renderEditor();
       type(await editorText(), JSON.stringify({ ...DOCUMENT, name: 'Edited' }));
-      await userEvent.click(screen.getByRole('tab', { name: 'Graph' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Validate' }));
+      await act(() => router?.navigate(ADMIN_ROUTES.workflows.root));
+
+      expect(await screen.findByRole('dialog', { name: 'Leave without saving?' })).toBeVisible();
+    });
+
+    it('does not ask when a delete of the edited draft leaves', async () => {
+      mockedDelete.mockResolvedValue(undefined);
+      renderEditor();
+      type(await editorText(), JSON.stringify({ ...DOCUMENT, name: 'Edited' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Delete draft' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Confirm delete' }));
 
       await waitFor(() =>
-        expect(screen.getByLabelText('location')).toHaveTextContent('view=graph'),
+        expect(screen.getByLabelText('location')).toHaveTextContent(/^\/workflows$/),
+      );
+      expect(screen.queryByRole('dialog', { name: 'Leave without saving?' })).toBeNull();
+    });
+
+    it('does not ask when switching tab', async () => {
+      mockedCompile.mockResolvedValue(COMPILATION);
+      renderEditor({ staysMounted: true });
+      type(await editorText(), JSON.stringify({ ...DOCUMENT, name: 'Edited' }));
+      await userEvent.click(screen.getByRole('tab', { name: 'Compiled graph' }));
+
+      await waitFor(() =>
+        expect(screen.getByLabelText('location')).toHaveTextContent('view=compiled'),
       );
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('asks the browser before unloading with edits, and not without', async () => {
+      const unload = (): boolean => {
+        const event = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      renderEditor();
+      const editor = await editorText();
+      expect(unload()).toBe(false);
+
+      type(editor, JSON.stringify({ ...DOCUMENT, name: 'Edited' }));
+      await waitFor(() => expect(unload()).toBe(true));
     });
 
     it('does not ask without edits', async () => {

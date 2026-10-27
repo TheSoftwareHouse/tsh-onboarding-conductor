@@ -12,7 +12,12 @@ const PERCENT = 100;
 const FIT_PADDING = 0.1;
 
 /** Zoom out, the current zoom, zoom in and fit-to-view, floating on the graph's canvas. */
-export function WorkflowZoomControls(): ReactElement {
+export function WorkflowZoomControls({
+  onFit,
+}: {
+  /** Replaces the default fit, for a canvas whose overlays need room of their own. */
+  onFit?: () => void;
+}): ReactElement {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const { zoom } = useViewport();
 
@@ -42,7 +47,7 @@ export function WorkflowZoomControls(): ReactElement {
       <Button
         size="md"
         className="font-normal tracking-normal text-fg-3"
-        onClick={() => void fitView({ padding: FIT_PADDING, duration: 0 })}
+        onClick={() => (onFit ? onFit() : void fitView({ padding: FIT_PADDING, duration: 0 }))}
       >
         Fit
       </Button>
