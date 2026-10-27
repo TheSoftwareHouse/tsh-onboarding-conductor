@@ -71,7 +71,7 @@ const workflow = (): Record<string, unknown> => structuredClone(baseWorkflowFixt
 /** What normalization fills in on every declaration that names neither a retry nor a fallback. */
 const connectorDefaults = { retry: DEFAULT_CONNECTOR_RETRY, fallbacks: [] };
 
-const expectInvalid = (input: unknown, reason?: string): void => {
+const expectInvalid = (input: unknown, reason?: string, path?: string): void => {
   try {
     validateAndNormalizeUntypedSteps(input);
     throw new Error('Expected workflow validation to fail');
@@ -80,6 +80,9 @@ const expectInvalid = (input: unknown, reason?: string): void => {
     expect(error).toMatchObject({ code: 'WORKFLOW_INVALID' });
     if (reason) {
       expect(error).toMatchObject({ reason });
+    }
+    if (path) {
+      expect(error).toMatchObject({ path });
     }
     expect((error as Error).message).toBe('WORKFLOW_INVALID');
     expect((error as Error).message).not.toContain('base');
@@ -596,7 +599,8 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
       },
     ];
 
-    expectInvalid(input, 'INVALID_VALUE');
+    // Located at the step whose connector reads the field, not left for the author to hunt down.
+    expectInvalid(input, 'INVALID_VALUE', 'steps[3]');
   });
 
   it('rejects connector mappings sourced from a persist:false predecessor field', () => {
@@ -2585,7 +2589,7 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
       ];
     }
 
-    expectInvalid(input, 'INVALID_VALUE');
+    expectInvalid(input, 'INVALID_VALUE', 'steps[0]');
   });
 
   it.each([
@@ -2790,7 +2794,7 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
       const firstStep = (input.steps as Record<string, unknown>[])[0];
       firstStep.scoring = [{ score: 'unknown', add: 5 }];
 
-      expectInvalid(input, 'INVALID_VALUE');
+      expectInvalid(input, 'INVALID_VALUE', 'steps[0]');
     });
 
     it.each([
