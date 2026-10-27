@@ -4,9 +4,10 @@ React 19 + Vite operator UI. Talks to `@tsh/engine` over HTTP only and has no wo
 dependency on the engine, so anything the panel needs from the engine's domain (statuses,
 projected fields) is declared again here, deliberately.
 
-The one exception is `@tsh/ddl-schema/workflow-contract`, imported for `CONNECTOR_TYPES`. That
-subpath is plain constants and types; the package root would pull `ajv` into the browser bundle.
-Import that subpath only, never `@tsh/ddl-schema` itself.
+The exception is `@tsh/ddl-schema`'s browser-safe subpaths: `workflow-contract`, `step-types` and
+`workflow-schema`. They carry no `ajv`, which the root and every other path would pull into the
+bundle. ESLint (`no-restricted-imports`) forbids `@tsh/engine`, the root and any other deep path
+(ADR 0051).
 
 `docs/IMPLEMENTATION.md` §12 (repo root) covers this package's design decisions in full — no
 automatic refetching, Zod-projected responses, the fixture-driven e2e harness, search-param
@@ -43,6 +44,20 @@ The router is a data router (`createBrowserRouter`, ADR 0050), so a page can cal
 `NuqsAdapter` is the root route's element in `src/app/App.tsx`, not in `AppProviders`, which
 renders above the router; any future router-context provider goes there too. A spec rendering a
 page that calls `useBlocker` builds a `createBrowserRouter` too, and disposes it in `afterEach`.
+
+## Graph editor
+
+The draft editor's Authored graph tab edits the draft's authored document on a canvas
+(`src/app/workflows/details/components/AuthoredCanvas/`, ADR 0051).
+
+- The document is the single source of truth. `AuthoredCanvas` keeps no copy: every edit hands the
+  whole next document to `onChange`, and undo and redo step through whole-text versions.
+- Inspector forms (`SchemaForm`) are generated from each step type's JSON Schema and write straight
+  into the document, outside react-hook-form. Do not add RHF state beside it.
+- A step's position lives in its `meta.position`. Once one step has it, every canvas edit writes it
+  for all steps (`pinPositions`), and Auto-arrange rewrites them all.
+- Ports and stored fields come from `@tsh/ddl-schema/step-types`, never from a panel-side copy of the
+  compile.
 
 ## Styling
 

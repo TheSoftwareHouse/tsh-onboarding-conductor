@@ -2,11 +2,13 @@ import { useEffect, useRef, useState, type ReactElement, type ReactNode } from '
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HttpStatusCode } from 'axios';
 import type { ApiError } from '@/services/api/api-error';
+import { readDraftError } from '@/api/workflows/workflow-drafts';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
 import { WORKFLOW_VERSION_STATUS } from '@/api/workflows/workflow-versions';
 import { Button } from '@/components/ui/Button/Button';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
 import { formatDateTime } from '@/lib/format-date-time';
+import { useEditHistory } from '../../hooks/useEditHistory';
 import { useDeleteDraft } from '../../hooks/useDeleteDraft';
 import { usePublishDraft } from '../../hooks/usePublishDraft';
 import { useSaveDraft } from '../../hooks/useSaveDraft';
@@ -14,8 +16,11 @@ import { useValidateDraft } from '../../hooks/useValidateDraft';
 import { useWorkflowDetailsSearchParams } from '../../hooks/useWorkflowDetailsSearchParams';
 import { JSON_INDENT } from '../../constants/json-indent';
 import { describePublishConnectorNotes } from '../../utils/describe-publish-connector-notes';
+import { findFailedStep } from '../../utils/find-failed-step';
 import { parseWorkflowDocument } from '../../utils/parse-workflow-document';
+import type { CanvasFailure } from '../AuthoredCanvas/CanvasStatus';
 import { DeleteDraftAction } from './DeleteDraftAction';
+import { DraftCanvas } from './DraftCanvas';
 import { DraftGraph } from './DraftGraph';
 import { JsonEditor } from '../JsonEditor';
 import { VersionTabs } from '../VersionTabs/VersionTabs';
@@ -56,13 +61,21 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
     enabled: isPublishModalOpen,
   });
   const validateMutation = useValidateDraft();
-  const saveMutation = useSaveDraft(workflowId, version);
-  const deleteMutation = useDeleteDraft(workflowId, version);
-  const publishMutation = usePublishDraft(workflowId, version);
+  // Set by a successful save, delete or publish, and cleared by the next edit.
+  const isWritten = useRef(false);
+  const markWritten = (): void => {
+    isWritten.current = true;
+  };
+  const saveMutation = useSaveDraft(workflowId, version, markWritten);
+  const deleteMutation = useDeleteDraft(workflowId, version, markWritten);
+  const publishMutation = usePublishDraft(workflowId, version, markWritten);
   const { view, step, setView, setStep } = useWorkflowDetailsSearchParams();
   // `null` means the editor shows the saved document untouched.
   const [edited, setEdited] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<ValidationOutcome | null>(null);
+  // The last compile failure, pinned to its step by name so editing toward a fix keeps it in view.
+  const [failure, setFailure] = useState<CanvasFailure | null>(null);
+  const editHistory = useEditHistory();
   // Bumped on every edit, so a compile that was sent for older text is dropped when it lands.
   const textRevision = useRef(0);
   // The revision a compile is in flight for, so a repeated request for the same text is dropped.
@@ -120,19 +133,39 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
     deleteMutation.isPending ||
     publishMutation.isPending;
 
-  function handleChange(next: string): void {
+  function showText(next: string): void {
+    isWritten.current = false;
     textRevision.current += 1;
     setEdited(next);
     setOutcome(null);
+  }
+
+  function handleChange(next: string): void {
+    // The JSON editor echoes text it was handed (an undo, a canvas edit) back as a change; that is not an edit.
+    if (next === text) return;
+    editHistory.record(text);
+    showText(next);
+  }
+
+  function handleUndo(): void {
+    const previous = editHistory.undo(text);
+    if (previous !== null) showText(previous);
+  }
+
+  function handleRedo(): void {
+    const next = editHistory.redo(text);
+    if (next !== null) showText(next);
   }
 
   function handleDiscard(): void {
     textRevision.current += 1;
     setEdited(null);
     setOutcome(null);
+    setFailure(null);
+    editHistory.clear();
   }
 
-  // Validate, Publish and the Graph tab share this: the result is kept only if the text has not changed since.
+  // Validate, Publish and the Compiled graph tab share this: the result is kept only if the text has not changed since.
   function compileText(onValid?: () => void): void {
     const parsed = parseWorkflowDocument(text);
     if (!parsed.ok) {
@@ -140,6 +173,7 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
       return;
     }
     const sentRevision = textRevision.current;
+    const sentText = text;
     const isCurrent = (): boolean => textRevision.current === sentRevision;
     compilingRevision.current = sentRevision;
     validateMutation.mutate(parsed.document, {
@@ -151,18 +185,29 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
       onSuccess: ({ stepCount, workflow }) => {
         if (isCurrent()) {
           setOutcome({ kind: 'valid', stepCount, workflow });
+          setFailure(null);
           onValid?.();
         }
       },
-      onError: (failure) => {
+      onError: (error) => {
         if (isCurrent()) {
-          setOutcome({ kind: 'invalid', error: failure });
+          setOutcome({ kind: 'invalid', error });
+          const read = readDraftError(error);
+          setFailure(
+            read === null
+              ? null
+              : {
+                  reason: read.reason ?? error.message,
+                  path: read.path ?? null,
+                  step: findFailedStep(sentText, read.path),
+                },
+          );
         }
       },
     });
   }
 
-  // The Graph tab's request: a compile already in flight for this text is not sent twice (Strict Mode runs effects twice).
+  // The Compiled graph tab's request: a compile already in flight for this text is not sent twice (Strict Mode runs effects twice).
   function compileForGraph(): void {
     if (compilingRevision.current !== textRevision.current) {
       compileText();
@@ -227,9 +272,20 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
       })}
       <ValidationResult outcome={outcome} />
       <VersionTabs
-        value={view ?? 'json'}
+        value={view ?? 'authored'}
         onValueChange={setView}
         keepJsonMounted
+        canvas={
+          <DraftCanvas
+            text={text}
+            failure={failure}
+            onChange={handleChange}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            canUndo={editHistory.canUndo}
+            canRedo={editHistory.canRedo}
+          />
+        }
         json={<JsonEditor value={text} onChange={handleChange} label="Workflow document (JSON)" />}
         graph={
           <DraftGraph
@@ -243,7 +299,7 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
           />
         }
       />
-      <UnsavedChangesGuard when={dirty} />
+      <UnsavedChangesGuard when={dirty} isWritten={isWritten} />
       <PublishDraftDialog
         open={isPublishModalOpen}
         onOpenChange={setIsPublishModalOpen}

@@ -43,8 +43,16 @@ vi.mock('@/api/workflows/admin-workflows', async (importOriginal) => {
 });
 
 vi.mock('./components/JsonEditor', () => ({
-  JsonEditor: ({ value, label }: { value: string; label: string }) => (
-    <textarea aria-label={label} value={value} readOnly />
+  JsonEditor: ({
+    value,
+    label,
+    onChange,
+  }: {
+    value: string;
+    label: string;
+    onChange: (value: string) => void;
+  }) => (
+    <textarea aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} />
   ),
 }));
 
@@ -195,7 +203,7 @@ describe('WorkflowDetailsPage', () => {
     expect(screen.getByText('/notify')).toBeInTheDocument();
     expect(screen.getByText('email')).toBeInTheDocument();
     expect(screen.getByText('text · required · format email')).toBeInTheDocument();
-    expect(screen.getByText('Collect data')).toBeInTheDocument();
+    expect(screen.getByText('From collect · form')).toBeInTheDocument();
   });
 
   it('shows the zoom controls on the graph canvas', async () => {
@@ -476,12 +484,12 @@ describe('WorkflowDetailsPage', () => {
     expect(within(screen.getByRole('complementary')).getByText('↻ retry')).toBeInTheDocument();
   });
 
-  it('opens a published version on Graph with its stats', async () => {
+  it('opens a published version on Compiled graph with its stats', async () => {
     mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
     renderPage();
 
     expect(await findInspectorHeading('collect')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Graph', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Compiled graph', selected: true })).toBeInTheDocument();
     expect(screen.getByText('3 steps')).toBeInTheDocument();
     expect(mockedFetchDocument).not.toHaveBeenCalled();
   });
@@ -507,7 +515,37 @@ describe('WorkflowDetailsPage', () => {
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
   });
 
-  it('clears ?view= and lands on Graph when the version changes', async () => {
+  it('draws a published version read-only on the Authored graph tab, without the palette', async () => {
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+    mockedFetchDocument.mockResolvedValue({
+      workflowId: WORKFLOW_ID,
+      version: 2,
+      status: 'published',
+      name: 'KYC flow',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      document: {
+        id: WORKFLOW_ID,
+        version: 2,
+        steps: [{ name: 'done', type: 'terminal', config: { outcome: 'approved' } }],
+      },
+    });
+    renderPage('?view=authored');
+
+    expect(await screen.findByText('1 step · 0 edges')).toBeInTheDocument();
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+    expect(mockedFetchDocument).toHaveBeenCalledWith(WORKFLOW_ID, 2);
+  });
+
+  it('reads the old ?view=graph as the Compiled graph tab', async () => {
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
+    renderPage('?view=graph');
+
+    expect(await findInspectorHeading('collect')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Compiled graph', selected: true })).toBeInTheDocument();
+  });
+
+  it('clears ?view= and lands on Compiled graph when the version changes', async () => {
     mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
     mockedFetchDocument.mockResolvedValue({
       workflowId: WORKFLOW_ID,
@@ -525,7 +563,7 @@ describe('WorkflowDetailsPage', () => {
 
     expect(await findInspectorHeading('collect')).toBeInTheDocument();
     expect(window.location.search).not.toContain('view=');
-    expect(screen.getByRole('tab', { name: 'Graph', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Compiled graph', selected: true })).toBeInTheDocument();
   });
 
   it('keeps the list search on the breadcrumb and drops version, step and view', async () => {
@@ -598,17 +636,16 @@ describe('WorkflowDetailsPage', () => {
       document: { id: WORKFLOW_ID, version: 3, steps: [] },
     };
 
-    it('renders the editor, not the graph, and never reads the compiled definition', async () => {
+    it('opens on the editable canvas, and never reads the compiled definition', async () => {
       mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [3, 'draft']));
       mockedFetchDocument.mockResolvedValue(draftDocument);
       renderPage('?version=3');
 
       expect(
-        await screen.findByRole('textbox', { name: 'Workflow document (JSON)' }),
+        await screen.findByRole('tab', { name: 'Authored graph', selected: true }),
       ).toBeInTheDocument();
+      expect(await screen.findByRole('searchbox')).toBeInTheDocument();
       expect(screen.getByRole('heading', { level: 1, name: 'KYC draft' })).toBeInTheDocument();
-      expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
-      expect(document.querySelector('.react-flow')).toBeNull();
       expect(mockedFetchDefinition).not.toHaveBeenCalled();
       expect(mockedFetchDocument).toHaveBeenCalledWith(WORKFLOW_ID, 3);
     });
@@ -616,7 +653,7 @@ describe('WorkflowDetailsPage', () => {
     it('does not link to onboardings', async () => {
       mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [3, 'draft']));
       mockedFetchDocument.mockResolvedValue(draftDocument);
-      renderPage('?version=3');
+      renderPage('?version=3&view=json');
 
       await screen.findByRole('textbox', { name: 'Workflow document (JSON)' });
       expect(screen.queryByRole('link', { name: /View onboardings/ })).not.toBeInTheDocument();
@@ -625,12 +662,42 @@ describe('WorkflowDetailsPage', () => {
     it('opens the draft without ?version= when the family has no published version', async () => {
       mockedFetchVersions.mockResolvedValue(versions([3, 'draft'], [1, 'retired']));
       mockedFetchDocument.mockResolvedValue(draftDocument);
-      renderPage();
+      renderPage('?view=json');
 
       expect(
         await screen.findByRole('textbox', { name: 'Workflow document (JSON)' }),
       ).toBeInTheDocument();
       expect(mockedFetchDocument).toHaveBeenCalledWith(WORKFLOW_ID, 3);
+    });
+
+    it('asks before the header switches a draft with unsaved edits to another version', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [3, 'draft']));
+      mockedFetchDocument.mockResolvedValue(draftDocument);
+      renderPage('?version=3&view=json');
+      const editor = await screen.findByRole('textbox', { name: 'Workflow document (JSON)' });
+      fireEvent.change(editor, { target: { value: '{"edited":true}' } });
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), {
+        target: { value: '2' },
+      });
+
+      expect(await screen.findByText('Leave without saving?')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+      await waitFor(() =>
+        expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument(),
+      );
+      expect(screen.getByRole('textbox', { name: 'Workflow document (JSON)' })).toHaveValue(
+        '{"edited":true}',
+      );
+      expect(window.location.search).toBe('?version=3&view=json');
+
+      fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), {
+        target: { value: '2' },
+      });
+      fireEvent.click(await screen.findByRole('button', { name: 'Discard and leave' }));
+
+      expect(await findInspectorHeading('collect')).toBeInTheDocument();
+      expect(window.location.search).toBe('?version=2');
     });
 
     it('moves to the read-only view when the draft was published since the versions were read', async () => {
@@ -729,7 +796,7 @@ describe('WorkflowDetailsPage', () => {
         updatedAt: '2026-01-01T00:00:00.000Z',
         document: { id: WORKFLOW_ID, version: 3, steps: [] },
       });
-      renderPage('?version=3');
+      renderPage('?version=3&view=json');
 
       await screen.findByRole('textbox', { name: 'Workflow document (JSON)' });
       expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
