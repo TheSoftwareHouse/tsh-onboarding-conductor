@@ -13,6 +13,7 @@ import { hasOtherVersions, useRemoveVersionOnUnmount } from '../utils/draft-cach
 export function useSaveDraft(
   workflowId: string,
   version: number,
+  onWritten?: () => void,
 ): UseMutationResult<WorkflowDraft, ApiError, WorkflowDocumentInput> {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -32,6 +33,7 @@ export function useSaveDraft(
           queryKey: workflowQueries.versions(workflowId).queryKey,
         });
       }
+      onWritten?.();
       const movedTo = `${ADMIN_ROUTES.workflows.details(draft.workflowId)}?version=${draft.version}`;
       void navigate(movedTo, { replace: true });
       // Removed once the editor unmounts: while it is mounted, a render would refetch the removed version.

@@ -6,6 +6,7 @@ import {
   MAX_WORKFLOW_ID_LENGTH,
   MIN_DRAFT_VERSION,
 } from '../constants/new-draft';
+import { renameSourceKeys } from './source-key';
 
 const VERSION_PATTERN = /^\d+$/;
 
@@ -146,7 +147,12 @@ export const newDraftSchema = z
       return withIdentity(values.upload.document, workflowId, version, name);
     }
     if (values.source === 'fork') {
-      return withIdentity(values.fork.document, workflowId, version, name);
+      // A new id is a new family, which may not reuse the source family's connector source keys.
+      const document =
+        workflowId === values.fork.workflowId
+          ? values.fork.document
+          : renameSourceKeys(values.fork.document, workflowId);
+      return withIdentity(document, workflowId, version, name);
     }
 
     return { id: workflowId, version, ...(name === '' ? {} : { name }), steps: [] };

@@ -7,6 +7,9 @@ import { WORKFLOW_VIEWS, type WorkflowView } from '../../utils/workflow-details-
 export interface VersionTabsProps {
   value: WorkflowView;
   onValueChange: (value: WorkflowView) => void;
+  /** The authored-document canvas: editable on a draft, read-only on a stored version. */
+  canvas: ReactNode;
+  /** The compiled graph with its step inspector. */
   graph: ReactNode;
   json: ReactNode;
   /** Keeps the JSON panel in the DOM while hidden, so an editor's undo history and scroll survive. */
@@ -27,10 +30,11 @@ function isWorkflowView(value: unknown): value is WorkflowView {
   return WORKFLOW_VIEWS.some((view) => view === value);
 }
 
-/** The details page's Graph | JSON switch, styled like `FilterTabs`. */
+/** The details page's Authored graph | Compiled graph | JSON switch, styled like `FilterTabs`. */
 export function VersionTabs({
   value,
   onValueChange,
+  canvas,
   graph,
   json,
   keepJsonMounted = false,
@@ -46,9 +50,14 @@ export function VersionTabs({
       className="flex min-h-0 flex-1 flex-col"
     >
       <Tabs.List className="flex items-end border-b border-border-rule px-8">
-        <Tabs.Tab value="graph" className={tab({ active: value === 'graph' })}>
+        <Tabs.Tab value="authored" className={tab({ active: value === 'authored' })}>
           <Typography variant="body-md" as="span">
-            Graph
+            Authored graph
+          </Typography>
+        </Tabs.Tab>
+        <Tabs.Tab value="compiled" className={tab({ active: value === 'compiled' })}>
+          <Typography variant="body-md" as="span">
+            Compiled graph
           </Typography>
         </Tabs.Tab>
         <Tabs.Tab value="json" className={tab({ active: value === 'json' })}>
@@ -57,7 +66,10 @@ export function VersionTabs({
           </Typography>
         </Tabs.Tab>
       </Tabs.List>
-      <Tabs.Panel value="graph" className="flex min-h-0 flex-1 flex-col">
+      <Tabs.Panel value="authored" className="flex min-h-0 flex-1 flex-col">
+        {canvas}
+      </Tabs.Panel>
+      <Tabs.Panel value="compiled" className="flex min-h-0 flex-1 flex-col">
         {graph}
       </Tabs.Panel>
       <Tabs.Panel

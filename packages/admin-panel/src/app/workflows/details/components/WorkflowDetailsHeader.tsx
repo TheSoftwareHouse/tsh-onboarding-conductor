@@ -28,13 +28,13 @@ export interface WorkflowDetailsHeaderProps {
   /** Query string the list handed over, carried by the breadcrumb's back link. */
   backSearch: string;
   onVersionChange: (version: number) => void;
-  /** Buttons drawn after the version picker; a draft's editing actions. */
+  /** Buttons drawn under the version picker; a draft's editing actions. */
   actions?: ReactNode;
   /** Muted text beside the status chip. */
   note?: ReactNode;
 }
 
-/** The header band: breadcrumb, title with the shown version's chip, the onboardings link (not on a draft), and the version picker. */
+/** The header band: breadcrumb, title, a meta line with the version chip, note and onboardings link (not on a draft), and on the right the version picker with the actions under it. */
 export function WorkflowDetailsHeader({
   workflowId,
   name,
@@ -57,7 +57,7 @@ export function WorkflowDetailsHeader({
   };
 
   return (
-    <header className="flex flex-none flex-wrap items-center justify-between gap-x-6 gap-y-4 border-b border-border-rule px-8 py-5">
+    <header className="flex flex-none items-start justify-between gap-6 border-b border-border-rule px-8 py-5">
       <div className="flex min-w-72 flex-1 flex-col gap-1.5">
         <div className="flex items-center gap-2 **:leading-natural">
           <Typography
@@ -75,15 +75,10 @@ export function WorkflowDetailsHeader({
             {workflowId}
           </Typography>
         </div>
-        <div className="flex min-w-0 items-center gap-4">
-          <Typography
-            variant="h5"
-            as="h1"
-            title={name ?? workflowId}
-            className="max-w-full min-w-0 truncate text-tsh-black"
-          >
-            {name ?? workflowId}
-          </Typography>
+        <Typography variant="h5" as="h1" className="text-tsh-black">
+          {name ?? workflowId}
+        </Typography>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           {shown !== undefined && (
             <Chip
               tone={STATUS_TONES[shown.status]}
@@ -94,18 +89,14 @@ export function WorkflowDetailsHeader({
             </Chip>
           )}
           {note !== undefined && (
-            <Typography variant="body-sm" as="span" className="shrink-0 text-fg-3">
+            <Typography variant="body-sm" as="span" className="text-fg-3">
               {note}
             </Typography>
           )}
+          {showOnboardingsLink && <TextLink to={onboardingsHref}>View onboardings →</TextLink>}
         </div>
-        {showOnboardingsLink && (
-          <TextLink to={onboardingsHref} className="self-start">
-            View onboardings →
-          </TextLink>
-        )}
       </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-col items-end gap-2">
         {versions.length > 0 && (
           <select
             aria-label="Version"
@@ -125,7 +116,9 @@ export function WorkflowDetailsHeader({
             ))}
           </select>
         )}
-        {actions}
+        {actions !== undefined && (
+          <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>
+        )}
       </div>
     </header>
   );

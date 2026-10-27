@@ -11,11 +11,31 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ### Added
 
+- Graph workflow editor — The admin panel's draft editor has an Authored graph tab: add steps from a
+  palette, wire ports, edit each step's config in a generated form, drag steps (saved as
+  `meta.position`) and undo or redo, saving the same document the JSON tab edits. A stored version
+  opens the same canvas read-only. Fields get a validation editor per type and can be renamed, with
+  references following; an HTTP call's request is a form; unclear settings carry a hint; every
+  problem a step has is listed in full, on the canvas and in its inspector. The compiled graph's
+  inspector names the authored step a compiled step came from. A step's scoring rules are edited in
+  its inspector, and its node lists the scores they touch. A setting that fails its step type's
+  schema shows a short reason under it, and the step's problem names the setting instead of a bare
+  error code. A consent — a `consents` section's acknowledgement, or a yes/no field of a custom
+  step — is tracked as an agreement from its step, and Workflow settings lists every agreement with
+  its step and field picked from those consents. The details header keeps the version picker and a
+  draft's actions on the right, stacked, with the title wrapping on the left.
+- Forking under a new ID — The admin panel renames the copy's connector `sourceKey`s from the new
+  workflow ID, so the fork no longer fails its first publish with `WORKFLOW_SOURCE_KEY_CONFLICT`.
 - Unsaved-changes guard — Leaving a workflow draft with unsaved edits, for another page or another
   version, now asks first; a reload or closing the tab gets the browser's own prompt.
 
 ### Changed
 
+- Compiled workflow graph — The tab formerly named Graph is Compiled graph (`?view=graph` still
+  opens it) and draws a dashed frame around the compiled steps one authored step produced.
+- Workflow validation — A failure in one step's connector field mappings, conditions, scoring or
+  transitions now carries that step's `path` (`steps[i]`) instead of none, so the admin panel and
+  `pnpm workflow:compile` name the step to fix.
 - Fonts — The commercial TWK Everett files are no longer in the repository and the typeface is no
   longer referenced. The documentation site and the admin panel ship Inter Tight and JetBrains Mono
   (SIL Open Font License) as their only type.

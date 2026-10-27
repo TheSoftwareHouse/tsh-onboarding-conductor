@@ -12,6 +12,7 @@ import { hasOtherVersions, useRemoveVersionOnUnmount } from '../utils/draft-cach
 export function useDeleteDraft(
   workflowId: string,
   version: number,
+  onWritten?: () => void,
 ): UseMutationResult<void, ApiError, void> {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -27,6 +28,7 @@ export function useDeleteDraft(
           queryKey: workflowQueries.versions(workflowId).queryKey,
         });
       }
+      onWritten?.();
       void navigate(
         familyRemains ? ADMIN_ROUTES.workflows.details(workflowId) : ADMIN_ROUTES.workflows.root,
         { replace: true },

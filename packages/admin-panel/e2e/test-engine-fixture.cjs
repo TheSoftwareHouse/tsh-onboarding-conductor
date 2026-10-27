@@ -189,7 +189,7 @@ function sendJson(response, statusCode, payload) {
 function sendCorsHeaders(response) {
   response.setHeader('access-control-allow-origin', PANEL_ORIGIN);
   response.setHeader('access-control-allow-credentials', 'false');
-  response.setHeader('access-control-allow-methods', 'GET, OPTIONS');
+  response.setHeader('access-control-allow-methods', 'GET, PUT, OPTIONS');
   response.setHeader('access-control-allow-headers', 'content-type, authorization');
   response.setHeader('access-control-max-age', '86400');
   response.setHeader('vary', 'origin');
@@ -241,7 +241,112 @@ async function respondToGet(request, response) {
   sendJson(response, 200, paginate(filtered, query));
 }
 
+/** In-memory draft families for the workflow editor spec, keyed by workflow id; documents are never validated. */
+const DRAFT_FAMILIES = new Map();
+const DRAFT_ROUTE = /^\/v1\/admin\/workflows\/([^/]+)\/versions(?:\/(\d+)(\/document)?)?$/;
+// Each test names its own draft, so one test's save is never another test's starting document.
+const DRAFT_ID_PREFIX = 'editor-draft-';
+
+/** The draft family for `workflowId`, created empty on first use; undefined for any other id. */
+function findDraftFamily(workflowId) {
+  if (!workflowId.startsWith(DRAFT_ID_PREFIX)) {
+    return undefined;
+  }
+
+  if (!DRAFT_FAMILIES.has(workflowId)) {
+    DRAFT_FAMILIES.set(workflowId, {
+      version: 1,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+      document: { id: workflowId, version: 1, name: 'Editor draft', steps: [] },
+    });
+  }
+
+  return DRAFT_FAMILIES.get(workflowId);
+}
+
+function readBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    request.on('error', reject);
+  });
+}
+
+function toDraftSummary(workflowId, family) {
+  return {
+    workflowId,
+    version: family.version,
+    status: 'draft',
+    name: family.document.name ?? null,
+    createdAt: family.createdAt,
+    updatedAt: family.updatedAt,
+  };
+}
+
+/** Answers a draft route, or returns false when the request is not one. */
+async function respondToDraftRoute(request, response, pathname) {
+  const match = DRAFT_ROUTE.exec(pathname);
+  if (match === null) {
+    return false;
+  }
+
+  const workflowId = decodeURIComponent(match[1]);
+  const version = match[2] === undefined ? null : Number.parseInt(match[2], 10);
+  const family = findDraftFamily(workflowId);
+  sendCorsHeaders(response);
+
+  if (request.method === 'OPTIONS') {
+    response.writeHead(204);
+    response.end();
+    return true;
+  }
+
+  if (family === undefined || (version !== null && version !== family.version)) {
+    sendJson(response, 404, { code: 'WORKFLOW_NOT_FOUND' });
+    return true;
+  }
+
+  if (version === null && request.method === 'GET') {
+    sendJson(response, 200, {
+      items: [
+        {
+          version: family.version,
+          status: 'draft',
+          createdAt: family.createdAt,
+          updatedAt: family.updatedAt,
+        },
+      ],
+    });
+    return true;
+  }
+
+  if (version !== null && match[3] !== undefined && request.method === 'GET') {
+    sendJson(response, 200, { ...toDraftSummary(workflowId, family), document: family.document });
+    return true;
+  }
+
+  if (version !== null && match[3] === undefined && request.method === 'PUT') {
+    family.document = JSON.parse(await readBody(request));
+    family.updatedAt = new Date().toISOString();
+    sendJson(response, 200, toDraftSummary(workflowId, family));
+    return true;
+  }
+
+  return false;
+}
+
 const server = http.createServer(async (request, response) => {
+  const { pathname } = new URL(request.url || '/', `http://${HOST}`);
+
+  // Draft routes are not onboarding reads: they bypass the runner's onboarding request audit.
+  if (pathname.startsWith('/v1/admin/workflows') && request.headers.origin === PANEL_ORIGIN) {
+    if (await respondToDraftRoute(request, response, pathname)) {
+      return;
+    }
+  }
+
   const record = recordRequest(request);
 
   if (typeof process.send === 'function') {
