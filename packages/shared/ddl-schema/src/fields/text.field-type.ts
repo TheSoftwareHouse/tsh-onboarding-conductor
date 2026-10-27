@@ -1,3 +1,4 @@
+import { FIELD_TYPE } from './field-type-names';
 import { findFieldFormat, listFieldFormatNames } from '../formats/field-format.registry';
 import { isInteger } from '../value-guards';
 import type { TextValidation } from '../workflow-contract';
@@ -48,7 +49,7 @@ const satisfiesTextConstraints = (value: string, validation: Record<string, unkn
 };
 
 export const textFieldTypeDefinition = {
-  type: 'text',
+  type: FIELD_TYPE.text,
   aliases: ['string'],
   levels: ['root', 'nested', 'arrayItem'],
   buildValidationSchema(): JsonSchemaFragment {

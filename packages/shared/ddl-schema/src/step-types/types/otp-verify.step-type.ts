@@ -28,7 +28,9 @@ import type {
 } from '../step-type.port';
 
 /** The channel the one-time code travels over. */
-export const OTP_CHANNELS = ['sms', 'email'] as const;
+export const OTP_CHANNEL = { sms: 'sms', email: 'email' } as const;
+
+export const OTP_CHANNELS = [OTP_CHANNEL.sms, OTP_CHANNEL.email] as const;
 
 export type OtpChannelName = (typeof OTP_CHANNELS)[number];
 
