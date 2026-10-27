@@ -13,6 +13,14 @@
       "types": "./dist/workflow-contract.d.ts",
       "require": "./dist/workflow-contract.js"
     },
+    "./step-types": {
+      "types": "./dist/step-types.d.ts",
+      "require": "./dist/step-types.js"
+    },
+    "./workflow-schema": {
+      "types": "./dist/workflow-schema.d.ts",
+      "require": "./dist/workflow-schema.js"
+    },
     "./workflow-validator": {
       "types": "./dist/workflow-validator.d.ts",
       "require": "./dist/workflow-validator.js"

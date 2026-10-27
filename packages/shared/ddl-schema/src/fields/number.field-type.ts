@@ -1,3 +1,4 @@
+import { FIELD_TYPE } from './field-type-names';
 import type { NumberValidation } from '../workflow-contract';
 import type {
   AnyNormalizedField,
@@ -57,7 +58,7 @@ const satisfiesBounds = (value: number, validation: Record<string, unknown>): bo
 };
 
 export const numberFieldTypeDefinition = {
-  type: 'number',
+  type: FIELD_TYPE.number,
   aliases: [],
   levels: ['root', 'nested', 'arrayItem'],
   buildValidationSchema(): JsonSchemaFragment {
