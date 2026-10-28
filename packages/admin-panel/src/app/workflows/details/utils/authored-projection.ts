@@ -352,7 +352,10 @@ function projectEdges(
   });
 
   for (const [port, edge] of Object.entries(step.edges ?? {})) {
-    readArms(step, port).forEach((arm, armIndex) => {
+    const arms = readArms(step, port);
+    // The schema's `stepEdge` needs at least one arm, so an empty list is no wiring at all.
+    if (arms.length === 0) unfinished.add(port);
+    arms.forEach((arm, armIndex) => {
       if (arm.target === UNWIRED) {
         unfinished.add(port);
         return;

@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import {
   createBrowserRouter,
@@ -36,18 +36,14 @@ const routes: RouteObject[] = [
   },
 ];
 
-/** Created once sign-in has settled, so the router reads the URL the auth redirect left behind. */
-function AppRouter(): ReactElement {
-  const [router] = useState(() => createBrowserRouter(routes));
-  return <RouterProvider router={router} />;
-}
+const router = createBrowserRouter(routes);
 
 /** Application root: gates the admin sections behind sign-in, app-wide providers, and the router. */
 export function App(): ReactElement {
   return (
     <AppProviders>
       <AuthGate>
-        <AppRouter />
+        <RouterProvider router={router} />
       </AuthGate>
     </AppProviders>
   );

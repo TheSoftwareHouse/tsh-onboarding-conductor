@@ -215,9 +215,9 @@ describe('newDraftSchema fork arm', () => {
       id: 'kyc',
       version: 1,
       steps: [
-        { name: 'a', config: { sourceKey: 'kyc_v1' } },
-        { name: 'b', config: { sourceKey: 'kyc_v1' } },
-        { name: 'c', config: { connectors: [{ config: { sourceKey: 'other' } }] } },
+        { name: 'a', type: 'kyc-identity-verification', config: { sourceKey: 'kyc_v1' } },
+        { name: 'b', type: 'kyc-identity-verification', config: { sourceKey: 'kyc_v1' } },
+        { name: 'c', type: 'custom', config: { connectors: [{ config: { sourceKey: 'other' } }] } },
       ],
     };
 

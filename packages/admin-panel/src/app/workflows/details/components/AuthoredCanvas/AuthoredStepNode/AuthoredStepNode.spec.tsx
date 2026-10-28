@@ -23,6 +23,12 @@ const DOC: AuthoredDocument = {
     },
     { name: 'broken', type: 'form', config: {}, edges: {} },
     {
+      name: 'leftover',
+      type: 'form',
+      config: { fields: { first: { type: 'text', required: true } } },
+      edges: { success: 'check', gone: 'check' },
+    },
+    {
       name: 'custom_scored',
       type: 'custom',
       config: { scoring: [{ score: 'trust', add: 2 }], transitions: [] },
@@ -101,6 +107,15 @@ describe('AuthoredStepNode', () => {
       expect(container.querySelector(`.source[data-handleid="${slot.name}"]`)).not.toBeNull();
     }
     expect(container.querySelectorAll('.target')).toHaveLength(1);
+  });
+
+  it('lets a normal port start a connection but not a stray one', () => {
+    const container = renderNode('leftover');
+    const source = (port: string): Element | null =>
+      container.querySelector(`.source[data-handleid="${port}"]`);
+
+    expect(source('success')?.classList.contains('connectable')).toBe(true);
+    expect(source('gone')?.classList.contains('connectable')).toBe(false);
   });
 
   it('marks a step with problems', () => {

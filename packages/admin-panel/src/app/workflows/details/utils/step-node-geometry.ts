@@ -41,7 +41,18 @@ export type PortSlot = {
   width: number;
 };
 
-export function listSlots(step: ProjectedStep): PortSlot[] {
+/** Caches a per-step result by the step object, which is never mutated, so a drag re-reads it instead of rebuilding it every frame. */
+function cacheByStep<S extends ProjectedStep, T>(compute: (step: S) => T): (step: S) => T {
+  const cache = new WeakMap<S, T>();
+  return (step) => {
+    if (cache.has(step)) return cache.get(step)!;
+    const result = compute(step);
+    cache.set(step, result);
+    return result;
+  };
+}
+
+export const listSlots = cacheByStep((step: ProjectedStep): PortSlot[] => {
   const known = step.ports.kind === 'known' ? step.ports.ports : [];
   return [
     ...known.flatMap((port) => {
@@ -85,10 +96,10 @@ export function listSlots(step: ProjectedStep): PortSlot[] {
       stray: true,
     })),
   ].map((slot) => ({ ...slot, width: slot.label.length * PORT_CHAR_WIDTH + PORT_PADDING }));
-}
+});
 
 /** Where each port's handle sits along the bottom edge, so the layout can place targets under their port. */
-export function listPortCenters(step: ProjectedStep): { name: string; x: number }[] {
+export const listPortCenters = cacheByStep((step: ProjectedStep): { name: string; x: number }[] => {
   const slots = listSlots(step);
   let offset = (nodeWidth(step) - slots.reduce((sum, slot) => sum + slot.width, 0)) * HALF;
   return slots.map((slot) => {
@@ -97,10 +108,10 @@ export function listPortCenters(step: ProjectedStep): { name: string; x: number 
     offset += slot.width;
     return { name: slot.name, x };
   });
-}
+});
 
 /** Grows by a line each for the included sections, the scores and an issue, so a plain step stays compact. */
-export function nodeHeight(step: ProjectedStep & { hasError?: boolean }): number {
+export const nodeHeight = cacheByStep((step: ProjectedStep & { hasError?: boolean }): number => {
   const hasIncludes = (step.step.include ?? []).length > 0;
   const hasScores = listScoringRules(step.step).length > 0;
   const hasIssue = step.issues.length > 0 || step.hasError === true;
@@ -108,11 +119,11 @@ export function nodeHeight(step: ProjectedStep & { hasError?: boolean }): number
     BASE_NODE_HEIGHT +
     EXTRA_LINE_HEIGHT * (Number(hasIncludes) + Number(hasScores) + Number(hasIssue))
   );
-}
+});
 
-export function nodeWidth(step: ProjectedStep): number {
+export const nodeWidth = cacheByStep((step: ProjectedStep): number => {
   const ports = listSlots(step).reduce((sum, slot) => sum + slot.width, 0);
   // Rounded up to two grid cells, so both the right edge and the centre (the entry handle) land on the grid.
   const cell = GRID_SIZE * WIDTH_CELL_GRID_CELLS;
   return Math.ceil(Math.max(MIN_NODE_WIDTH, ports) / cell) * cell;
-}
+});
