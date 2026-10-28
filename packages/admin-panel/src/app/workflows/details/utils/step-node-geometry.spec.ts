@@ -5,6 +5,7 @@ import { projectDocument } from './authored-projection';
 import {
   BASE_NODE_HEIGHT,
   listPortCenters,
+  listSlots,
   MIN_NODE_WIDTH,
   nodeHeight,
   nodeWidth,
@@ -35,6 +36,20 @@ function project(name: string) {
 }
 
 describe('step node geometry', () => {
+  it('reuses the slots of the same step and rebuilds them for a changed one', () => {
+    const step = project('start');
+    const stray = projectDocument({
+      steps: [
+        { ...DOC.steps[0]!, edges: { yes: 'tall', default: 'tall', gone: 'tall' } },
+        DOC.steps[1]!,
+      ],
+    }).steps[0]!;
+
+    expect(listSlots(step)).toBe(listSlots(step));
+    expect(listSlots(stray).map((slot) => slot.name)).toContain('gone');
+    expect(listSlots(step).map((slot) => slot.name)).not.toContain('gone');
+  });
+
   it('rounds a node’s width up to whole pairs of grid cells, never under the minimum', () => {
     const width = nodeWidth(project('start'));
 
