@@ -151,6 +151,32 @@ describe('disconnect', () => {
     ]);
   });
 
+  it('removes a port whose lone arm is emptied', () => {
+    const lone: AuthoredDocument = {
+      steps: [{ name: 'a', type: 'form', edges: { success: [{ target: 'review' }] } }],
+    };
+
+    expect(disconnect(lone, 'a', 'success', 0).steps[0]?.edges).toEqual({});
+  });
+
+  it('keeps the webhook of a lone arm and unwires it', () => {
+    const webhook = { notify: false } as const;
+    const lone: AuthoredDocument = {
+      steps: [{ name: 'a', type: 'form', edges: { success: [{ target: 'review', webhook }] } }],
+    };
+
+    expect(disconnect(lone, 'a', 'success', 0).steps[0]?.edges?.success).toEqual([
+      { target: UNWIRED, webhook },
+    ]);
+  });
+
+  it('keeps an unconditional arm unwired beside other arms', () => {
+    expect(disconnect(doc, 'a', 'other', 1).steps[0]?.edges?.other).toEqual([
+      { when, target: 'b' },
+      { target: UNWIRED },
+    ]);
+  });
+
   it('unwires a custom transition and keeps its status', () => {
     const custom: AuthoredDocument = {
       steps: [
@@ -230,6 +256,17 @@ describe('deleteStep', () => {
     expect(next.steps.map((step) => step.name)).toEqual(['a', 'c']);
     expect(next.steps[0]?.edges).toHaveProperty('retry');
     expect(next.steps[0]?.edges).not.toHaveProperty('success');
+  });
+
+  it('removes a port whose lone arm targeted the step', () => {
+    const lone: AuthoredDocument = {
+      steps: [
+        { name: 'a', type: 'form', edges: { success: [{ target: 'review' }] } },
+        { name: 'review', type: 'terminal' },
+      ],
+    };
+
+    expect(deleteStep(lone, 'review').steps[0]?.edges).toEqual({});
   });
 
   it('leaves arms and transitions with an empty target, keeping their conditions', () => {

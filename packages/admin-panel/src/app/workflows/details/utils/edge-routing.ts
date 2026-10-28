@@ -80,13 +80,21 @@ export function routeEdges(
   );
   const source = (edge: ProjectedEdge): GeometryNode => byName.get(edge.source)!;
   const target = (edge: ProjectedEdge): GeometryNode => byName.get(edge.target)!;
+  // Measured once per call: the checks below read every node's box many times per edge.
+  const boxes = new Map(
+    nodes.map((node) => {
+      const width = nodeWidth(node.data);
+      const row = { top: node.position.y, bottom: node.position.y + nodeHeight(node.data) };
+      return [
+        node,
+        { right: node.position.x + width, centre: node.position.x + width * HALF, row },
+      ];
+    }),
+  );
   const leftOf = (node: GeometryNode): number => node.position.x;
-  const rightOf = (node: GeometryNode): number => node.position.x + nodeWidth(node.data);
-  const centreOf = (node: GeometryNode): number => node.position.x + nodeWidth(node.data) * HALF;
-  const rowOf = (node: GeometryNode): Span => ({
-    top: node.position.y,
-    bottom: node.position.y + nodeHeight(node.data),
-  });
+  const rightOf = (node: GeometryNode): number => boxes.get(node)!.right;
+  const centreOf = (node: GeometryNode): number => boxes.get(node)!.centre;
+  const rowOf = (node: GeometryNode): Span => boxes.get(node)!.row;
   // Steps sharing a top edge form a row; the gap below it starts under its tallest step.
   const rowBottoms = new Map<number, number>();
   for (const node of nodes) {
@@ -94,15 +102,23 @@ export function routeEdges(
     rowBottoms.set(top, Math.max(rowBottoms.get(top) ?? bottom, bottom));
   }
   const rowBottomOf = (node: GeometryNode): number => rowBottoms.get(node.position.y)!;
-  const portX = (edge: ProjectedEdge): number => {
-    const port = listPortCenters(source(edge).data).find((center) => center.name === edge.handle);
-    return source(edge).position.x + (port?.x ?? nodeWidth(source(edge).data) * HALF);
-  };
+  const portXs = new Map(
+    drawn.map((edge) => {
+      const port = listPortCenters(source(edge).data).find((center) => center.name === edge.handle);
+      return [edge, source(edge).position.x + (port?.x ?? nodeWidth(source(edge).data) * HALF)];
+    }),
+  );
+  const portX = (edge: ProjectedEdge): number => portXs.get(edge)!;
   /** The rows a vertical run covers: between the two steps, or for a loop, the gaps around them. */
-  const spanOf = (edge: ProjectedEdge): Span =>
-    back.has(edge.id)
-      ? { top: rowOf(target(edge)).top - RANK_GAP, bottom: rowBottomOf(source(edge)) + RANK_GAP }
-      : { top: rowOf(source(edge)).bottom, bottom: rowOf(target(edge)).top };
+  const spans = new Map(
+    drawn.map((edge): [ProjectedEdge, Span] => [
+      edge,
+      back.has(edge.id)
+        ? { top: rowOf(target(edge)).top - RANK_GAP, bottom: rowBottomOf(source(edge)) + RANK_GAP }
+        : { top: rowOf(source(edge)).bottom, bottom: rowOf(target(edge)).top },
+    ]),
+  );
+  const spanOf = (edge: ProjectedEdge): Span => spans.get(edge)!;
   /** Whether a vertical run at `x` down the edge's span misses every step but its own two. */
   const isClear = (edge: ProjectedEdge, x: number): boolean =>
     nodes.every(

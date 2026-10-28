@@ -221,6 +221,8 @@ function Canvas({
 
   function handleConnect(connection: Connection): void {
     if (!connection.sourceHandle) return;
+    const source = projection.steps.find((projected) => projected.step.name === connection.source);
+    if (source?.strayPorts.includes(connection.sourceHandle)) return;
     write(connect(doc, connection.source, connection.sourceHandle, connection.target));
   }
 

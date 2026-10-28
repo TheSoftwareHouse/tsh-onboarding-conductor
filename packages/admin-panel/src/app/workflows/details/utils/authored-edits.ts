@@ -117,6 +117,14 @@ export function setArms(
   });
 }
 
+/** Writes a port's arms after a target was cleared; a lone arm left with nothing but its empty target removes the port. */
+function writeClearedArms(edges: StepEdges, port: string, arms: AuthoredArm[]): void {
+  const [only] = arms;
+  const hollow = arms.length === 1 && only?.target === UNWIRED && Object.keys(only).length === 1;
+  if (hollow) delete edges[port];
+  else edges[port] = arms;
+}
+
 export function disconnect(
   doc: AuthoredDocument,
   source: string,
@@ -138,8 +146,10 @@ export function disconnect(
     if (armIndex === null || typeof current === 'string' || current === undefined) {
       delete edges[port];
     } else {
-      edges[port] = current.map((arm, index) =>
-        index === armIndex ? { ...arm, target: UNWIRED } : arm,
+      writeClearedArms(
+        edges,
+        port,
+        current.map((arm, index) => (index === armIndex ? { ...arm, target: UNWIRED } : arm)),
       );
     }
     return { ...step, edges };
@@ -172,7 +182,9 @@ export function deleteStep(doc: AuthoredDocument, name: string): AuthoredDocumen
         if (typeof edge === 'string') {
           if (edge !== name) edges[port] = edge;
         } else {
-          edges[port] = edge.map((arm) => ({ ...arm, target: unwire(arm.target) }));
+          const arms = edge.map((arm) => ({ ...arm, target: unwire(arm.target) }));
+          if (edge.some((arm) => arm.target === name)) writeClearedArms(edges, port, arms);
+          else edges[port] = arms;
         }
       }
       return { ...step, edges };

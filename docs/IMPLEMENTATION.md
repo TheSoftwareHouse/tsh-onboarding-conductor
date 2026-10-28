@@ -3596,8 +3596,9 @@ workflow already has draft v{N}. Open it, or change the ID to create a new workf
 it" linking to `/workflows/<id>?version=N`; the footer's primary action becomes **Open draft v{N}**
 (a link to the same path), Create is disabled and outlined; the engine's
 `409 WORKFLOW_DRAFT_EXISTS` toast stays as the fallback. The schema's `fork` arm posts
-`{ ...fork.document, id, version, name? }`. Under a new ID it first renames every `sourceKey` in the
-document (`renameSourceKeys`) to one derived from that ID — `my-flow` → `my_flow`, then `my_flow_2`
+`{ ...fork.document, id, version, name? }`. Under a new ID it first renames the `sourceKey` the engine reads —
+`config.sourceKey` of a `kyc-identity-verification` step, and `config.sourceKey` of each connector and
+its `fallback` entries on a `custom` or `connector-call` step and on a `notify` step's `connector` (`renameSourceKeys`) — to one derived from that ID — `my-flow` → `my_flow`, then `my_flow_2`
 for a second distinct key — since only one workflow id may own a key and the copy would otherwise
 fail its first publish with `409 WORKFLOW_SOURCE_KEY_CONFLICT`; steps that shared a key still share
 one, and a fork under the same ID keeps its keys. It rejects a form with no source ("Choose a workflow

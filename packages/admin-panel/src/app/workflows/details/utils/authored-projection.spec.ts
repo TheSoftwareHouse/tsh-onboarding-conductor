@@ -124,6 +124,27 @@ describe('projectDocument edges', () => {
     expect(steps[0]?.issues).toContain('no target: success');
   });
 
+  it('reports an empty arm array as unfinished, not unwired', () => {
+    const { steps } = project(form('a', { success: [] }));
+
+    expect(steps[0]?.unfinished).toEqual(['success']);
+    expect(steps[0]?.unwired).toEqual([]);
+    expect(steps[0]?.issues).toContain('no target: success');
+  });
+
+  it('reports an empty arm array on an optional port as unfinished', () => {
+    const manual: AuthoredStep = {
+      name: 'm',
+      type: STEP_TYPE.manualReview,
+      edges: { approved: 'b', rejected: 'b', invalid: [] },
+    };
+
+    const { steps } = project(manual, terminal('b'));
+
+    expect(steps[0]?.unfinished).toEqual(['invalid']);
+    expect(steps[0]?.issues).toContain('no target: invalid');
+  });
+
   it('draws a custom transition to a sub-step as an edge to its authored step', () => {
     const phone: AuthoredStep = {
       name: 'phone',

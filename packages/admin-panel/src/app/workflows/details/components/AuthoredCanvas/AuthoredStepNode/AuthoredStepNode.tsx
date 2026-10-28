@@ -176,7 +176,7 @@ export function AuthoredStepNode({
           id={slot.name}
           type="source"
           position={Position.Bottom}
-          isConnectable={!readOnly}
+          isConnectable={!readOnly && !slot.stray}
           className={handle({ failing: isFailing(slot) })}
           // `left` is measured from inside the border, while the centres are measured from its outside.
           style={{ left: (centers.get(slot.name) ?? 0) - NODE_BORDER_WIDTH }}

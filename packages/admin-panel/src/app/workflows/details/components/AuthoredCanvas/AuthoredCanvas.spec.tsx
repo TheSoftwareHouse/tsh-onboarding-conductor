@@ -3,9 +3,25 @@ import { useState, type ReactElement } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Connection, ReactFlowProps } from '@xyflow/react';
 import type { AuthoredDocument } from '../../utils/authored-document';
 import { AuthoredCanvas, type AuthoredCanvasProps } from './AuthoredCanvas';
 import { CanvasErrorBoundary } from './CanvasErrorBoundary';
+
+const flow = vi.hoisted(() => ({
+  onConnect: undefined as ((connection: Connection) => void) | undefined,
+}));
+
+vi.mock('@xyflow/react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@xyflow/react')>();
+  return {
+    ...actual,
+    ReactFlow: (props: ReactFlowProps) => {
+      flow.onConnect = props.onConnect;
+      return <actual.ReactFlow {...props} />;
+    },
+  };
+});
 
 beforeEach(() => window.localStorage.clear());
 afterEach(cleanup);
@@ -30,6 +46,20 @@ const DOC: AuthoredDocument = {
       config: formConfig('second'),
       meta: { position: { x: 400, y: 0 } },
     },
+    { name: 'done', type: 'terminal', config: { outcome: 'approved' } },
+  ],
+};
+
+const STRAY: AuthoredDocument = {
+  initial: 'collect',
+  steps: [
+    {
+      name: 'collect',
+      type: 'form',
+      config: formConfig('first'),
+      edges: { success: 'done', gone: 'done' },
+    },
+    { name: 'other', type: 'form', config: formConfig('second') },
     { name: 'done', type: 'terminal', config: { outcome: 'approved' } },
   ],
 };
@@ -64,6 +94,29 @@ function Harness({
 
 const lastDoc = (onChange: ReturnType<typeof vi.fn>): AuthoredDocument =>
   onChange.mock.calls.at(-1)![0] as AuthoredDocument;
+
+describe('AuthoredCanvas connections', () => {
+  it('connects from a real port and ignores a stray one', () => {
+    const onChange = vi.fn();
+    render(<Harness initial={STRAY} onChange={onChange} />);
+
+    flow.onConnect!({
+      source: 'collect',
+      sourceHandle: 'gone',
+      target: 'other',
+      targetHandle: null,
+    });
+    expect(onChange).not.toHaveBeenCalled();
+
+    flow.onConnect!({
+      source: 'collect',
+      sourceHandle: 'success',
+      target: 'other',
+      targetHandle: null,
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('CanvasErrorBoundary', () => {
   function Boom(): never {
