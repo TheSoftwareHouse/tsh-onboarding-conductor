@@ -26,7 +26,8 @@ One product version covers the whole monorepo. Every pull request adds its line 
   draft's actions on the right, stacked, with the title wrapping on the left. The compiled graph routes
   and labels its edges the way the Authored graph does, and dashes only loops back. A connector
   fallback offers only connectors of the primary's type, and changing the primary's type clears the
-  connector ids it no longer fits.
+  connector ids it no longer fits. A custom step's transitions are edited under Ports — added,
+  removed, reordered, with their status, condition and reason — instead of deep in its settings.
 - Forking under a new ID — The admin panel renames the copy's connector `sourceKey`s from the new
   workflow ID, so the fork no longer fails its first publish with `WORKFLOW_SOURCE_KEY_CONFLICT`.
 - Unsaved-changes guard — Leaving a workflow draft with unsaved edits, for another page or another
