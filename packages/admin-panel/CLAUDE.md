@@ -58,6 +58,16 @@ The draft editor's Authored graph tab edits the draft's authored document on a c
   for all steps (`pinPositions`), and Auto-arrange rewrites them all.
 - Ports and stored fields come from `@tsh/ddl-schema/step-types`, never from a panel-side copy of the
   compile.
+- Inspector copy and controls follow one set of rules. ALL CAPS (`caps-tiny`) only for section and panel
+  titles and the AND / OR between conditions; labels inside a section are Capitalized. Add, delete and clear go through
+  `AuthoredCanvas/EntryActions.tsx`: `AddButton` (`+ Add <thing>`), `DeleteButton` (red trash, removes a list
+  entry) and `ClearButton` (×, unsets an optional setting). Three containers, one meaning each: a list
+  entry (added, deleted, reordered) is an `EntryCard` — white, bordered, its `EntryTitle` row set off by a
+  hairline (a short card such as a scoring rule or an agreement has no title row, and never a numbered one); a group (a fixed named set of settings, such as Validation or a nested object) is a `FieldRow`
+  with `group`, drawn on a `bg-subtle` panel when outermost and indented by a left rule inside another group; a condition keeps
+  its yellow rule. An empty value reads "Not set". Four text tiers inside a
+  section: section title (`caps-tiny`), card title (`EntryTitle`, mono), group title (14px sans), field label (`meta`, medium, `fg-1`), and
+  everything secondary — hints, counts, "Go to", "Not set" — plain `meta`.
 
 ## Styling
 

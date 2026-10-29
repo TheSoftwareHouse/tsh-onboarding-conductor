@@ -95,7 +95,7 @@ describe('SchemaForm scalars', () => {
     );
 
     await user.click(screen.getByRole('combobox', { name: 'Mode' }));
-    await user.click(await screen.findByRole('option', { name: '— (default: a)' }));
+    await user.click(await screen.findByRole('option', { name: 'Not set (default: a)' }));
 
     expect(lastCall(onChange)).toBeUndefined();
   });
@@ -161,7 +161,7 @@ describe('SchemaForm lists and maps', () => {
     const onChange = vi.fn();
     render(<Harness schema={tags} label="Tags" onChange={onChange} initial={[]} />);
 
-    await user.click(screen.getByRole('button', { name: 'Add Tags' }));
+    await user.click(screen.getByRole('button', { name: '+ Add tag' }));
     expect(lastCall(onChange)).toEqual(['']);
 
     await user.type(screen.getByRole('textbox', { name: 'Tags 1' }), 'x');
@@ -438,7 +438,7 @@ describe('SchemaForm variants', () => {
     await user.click(screen.getByRole('button', { name: 'list' }));
 
     expect(lastCall(onChange)).toEqual([]);
-    expect(screen.getByRole('button', { name: 'Add Allowed' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '+ Add allowed' })).toBeInTheDocument();
   });
 
   it('switches a tagged object by its type, keeping the tag', async () => {

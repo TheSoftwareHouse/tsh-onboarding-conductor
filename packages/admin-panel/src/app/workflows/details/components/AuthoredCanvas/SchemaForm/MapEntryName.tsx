@@ -44,7 +44,7 @@ export function MapEntryName({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-      <Typography as="label" variant="caps-tiny" htmlFor={inputId} className="text-fg-1">
+      <Typography as="label" variant="meta" htmlFor={inputId} className="font-medium text-fg-1">
         {label}
       </Typography>
       <div className="flex items-center gap-2">

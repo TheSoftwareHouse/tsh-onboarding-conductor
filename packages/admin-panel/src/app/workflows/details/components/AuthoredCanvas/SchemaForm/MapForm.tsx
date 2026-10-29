@@ -1,6 +1,5 @@
 import { useId, useState, type ReactElement } from 'react';
 import { Button } from '@/components/ui/Button/Button';
-import { Close } from '@/components/ui/icons';
 import { Input } from '@/components/ui/Input/Input';
 import { Typography } from '@/components/ui/Typography/Typography';
 import {
@@ -12,7 +11,9 @@ import {
   type Schema,
 } from '../../../utils/config-schema';
 import { toMemberPath } from '../../../utils/check-config';
+import { DeleteButton } from '../EntryActions';
 import { asObject, findEntryNameProblem, renameMember, setMember } from './form-values';
+import { EntryCard } from '../EntryCard';
 import { MapEntryName } from './MapEntryName';
 import { SchemaForm } from './SchemaForm';
 
@@ -61,38 +62,37 @@ export function MapForm({
   };
 
   return (
-    <div className="flex flex-col gap-2 border-l-2 border-border-rule pl-3">
+    <div className="flex flex-col gap-2">
       {Object.entries(object).map(([key, entry]) => (
-        <div key={key} className="flex flex-col gap-3 border border-border-rule bg-bg-subtle p-3">
-          <MapEntryName
-            name={key}
-            label={nameLabel}
-            taken={Object.keys(object).filter((other) => other !== key)}
-            pattern={pattern}
-            readOnly={readOnly}
-            note={
-              key === unresolvedKey
-                ? 'References not updated: another step has a field with this name'
-                : undefined
-            }
-            onRename={(next) => rename(key, next)}
-            trailing={
-              !readOnly && (
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  className="h-9 px-2"
-                  aria-label={`Remove ${key}`}
-                  onClick={() => onChange(setMember(object, key, undefined))}
-                >
-                  <Close aria-hidden className="size-4" />
-                </Button>
-              )
-            }
-          />
+        <EntryCard
+          key={key}
+          header={
+            <MapEntryName
+              name={key}
+              label={nameLabel}
+              taken={Object.keys(object).filter((other) => other !== key)}
+              pattern={pattern}
+              readOnly={readOnly}
+              note={
+                key === unresolvedKey
+                  ? 'References not updated: another step has a field with this name'
+                  : undefined
+              }
+              onRename={(next) => rename(key, next)}
+              trailing={
+                !readOnly && (
+                  <DeleteButton
+                    label={`Remove ${key}`}
+                    onClick={() => onChange(setMember(object, key, undefined))}
+                  />
+                )
+              }
+            />
+          }
+        >
           <div className="flex flex-col gap-1.5">
             {labelsValue && (
-              <Typography variant="caps-tiny" as="span" aria-hidden className="text-fg-1">
+              <Typography variant="meta" as="span" aria-hidden className="font-medium text-fg-1">
                 Value
               </Typography>
             )}
@@ -106,7 +106,7 @@ export function MapForm({
               onChange={(next) => onChange(setMember(object, key, next))}
             />
           </div>
-        </div>
+        </EntryCard>
       ))}
       {!readOnly && (
         <form
