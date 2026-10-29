@@ -3507,7 +3507,17 @@ frame around them (`WorkflowGroupNode`), tinted by the step type's category and 
 `<step> · <type>`; the frames come from each compiled step's `source`, and a workflow with none lays
 out as before. The inspector names the same source under the step's name, as `From <step> · <type>`, with no friendly type label. Every edge except a plain, unguarded `success` carries a label
 (the condition, the `manual.*` action, the status with its reasons, or `<status> · fallback`),
-capped at 22 characters and expanded in place on hover or focus while kept inside the canvas; the
+capped at 22 characters and expanded in place on hover or focus while kept inside the canvas.
+Edges are routed like the Authored graph's: dagre ranks every step, loops included, and each rank
+becomes a top-aligned row. Each step's edges leave from exits spread along its bottom, ordered by
+where each edge heads so they never cross there, and `routeLines` in `edge-routing.ts` routes them.
+An edge that skips rows, loops included, keeps to the column dagre threaded it down (`columnXs`),
+slid past a step in its way and never shared with another line; a loop with no clear column
+climbs an outer lane. Each label is boxed and sits on its own edge, at the first spot along it
+clear of steps, other labels and other lines (`placeLabels`). A pair joined both ways is two
+edges. Only a loop back, an edge to a step at or above its source, is dashed, as on the Authored
+graph; an edge's status shows in its label, not its stroke. Each gap is `RANK_GAP` plus a label height per labelled edge
+leaving the row above it (`RowSpacing`), so only a gap with labels grows. The
 selected node is drawn with an outline, so its content never shifts. From the `xl` breakpoint the
 graph and inspector sit side by side and only the inspector scrolls; below it they stack and the
 area scrolls as a whole. On the JSON tab of a published or retired version, `VersionDocument`
@@ -3714,7 +3724,8 @@ canvas" instead.
   every step at its shown spot (`pinPositions`), so undo restores a whole layout, never a mix. A
   hand-written `meta.position` is overwritten when that step is dragged.
 - **Layout.** `canvas-layout.ts` ranks steps with dagre and re-places each rank under the ports that
-  lead to it; `edge-routing.ts` routes edges orthogonally, with retry loops on the right. The
+  lead to it; `edge-routing.ts` routes edges orthogonally, with retry loops on the right; an edge that turns
+  early comes down at whichever slot on its target crosses the fewest other lines. The
   toolbar's **Auto-arrange** lays out again and, when the document has positions, writes the new
   layout to every step's `meta.position`.
 - **Editing.** The palette lists every registered step type by category (click or drag to add).

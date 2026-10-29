@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AuthoredDocument } from './authored-document';
 import { listBackEdges, projectDocument } from './authored-projection';
 import { layoutCanvas, RANK_GAP } from './canvas-layout';
-import { EDGE_OFFSET, routeEdges } from './edge-routing';
+import { EDGE_OFFSET, routeEdges, routeLines } from './edge-routing';
 import { nodeHeight, nodeWidth, type GeometryNode } from './step-node-geometry';
 
 const decision = (name: string, edges: Record<string, string>) => ({
@@ -151,5 +151,53 @@ describe('routeEdges heights and loops', () => {
     for (const loop of loops) {
       expect(routes.get(loop.id)!.laneX).toBeGreaterThan(rightmost);
     }
+  });
+});
+
+describe('routeLines', () => {
+  const box = (id: string, x: number, y: number) => ({
+    id,
+    position: { x, y },
+    width: 100,
+    height: 60,
+  });
+
+  it('turns in the gap each row says it has under it', () => {
+    const gap = 140;
+    const nodes = [box('a', 0, 0), box('b', 200, 60 + gap)];
+    const route = routeLines(
+      nodes,
+      [{ id: 'a>b', source: 'a', target: 'b', portX: 50 }],
+      new Set(),
+      { gapBelow: () => gap, gapAbove: () => gap },
+    ).get('a>b')!;
+
+    expect(route.turnY).toBeGreaterThanOrEqual(60 + EDGE_OFFSET);
+    expect(route.turnY).toBeLessThanOrEqual(60 + gap - EDGE_OFFSET);
+  });
+
+  it('brings an early turn down between the lines it would otherwise cross', () => {
+    // `left` runs straight down into `target`; `right` must turn early round `middle`, whose own
+    // edge then turns in from the right.
+    const nodes = [
+      box('left', 0, 0),
+      box('right', 300, 0),
+      box('middle', 300, 200),
+      box('target', 0, 400),
+    ];
+    const routes = routeLines(
+      nodes,
+      [
+        { id: 'left', source: 'left', target: 'target', portX: 40 },
+        { id: 'right', source: 'right', target: 'target', portX: 350 },
+        { id: 'middle', source: 'middle', target: 'target', portX: 330 },
+      ],
+      new Set(),
+    );
+    const entryOf = (id: string) => routes.get(id)!.entryOffset;
+
+    expect(routes.get('right')!.dropY).not.toBeNull();
+    expect(entryOf('left')).toBeLessThan(entryOf('right'));
+    expect(entryOf('right')).toBeLessThan(entryOf('middle'));
   });
 });
