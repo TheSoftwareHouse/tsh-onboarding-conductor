@@ -94,7 +94,7 @@ describe('ConnectorPicker', () => {
     mockedFetchConnectors.mockRejectedValue(new Error('down'));
     const onChange = renderPicker();
 
-    const input = await screen.findByPlaceholderText('connectors unavailable');
+    const input = await screen.findByPlaceholderText('Connectors unavailable');
     await userEvent.setup().type(input, 'x');
 
     expect(onChange).toHaveBeenCalledWith('x');

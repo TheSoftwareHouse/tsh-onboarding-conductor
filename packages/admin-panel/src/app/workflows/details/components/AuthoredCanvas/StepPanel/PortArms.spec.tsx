@@ -56,7 +56,7 @@ describe('PortArms plain port', () => {
   it('starts a branch with a condition above the existing target', async () => {
     const { onArms } = renderArms({ arms: [{ target: 'done' }] });
 
-    await userEvent.setup().click(screen.getByRole('button', { name: '+ Condition' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: '+ Add condition' }));
 
     const [arms] = onArms.mock.calls[0]!;
     expect(arms).toHaveLength(2);

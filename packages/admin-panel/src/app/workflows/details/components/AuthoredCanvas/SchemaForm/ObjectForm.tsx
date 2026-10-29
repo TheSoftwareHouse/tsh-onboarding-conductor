@@ -1,19 +1,24 @@
 import { useContext, useState, type ReactElement } from 'react';
 import { Button } from '@/components/ui/Button/Button';
 import { Typography } from '@/components/ui/Typography/Typography';
-import { cn } from '@/lib/cn';
 import { findConfigHint, findConfigLabel, type HintOwner } from '../../../constants/config-hints';
 import {
   buildDefault,
+  CONDITION_REFS,
+  findRefName,
   humanize,
   isComposite,
   isEmptyValue,
+  listVariants,
+  readKind,
+  resolveSchema,
   type Schema,
 } from '../../../utils/config-schema';
 import { toMemberPath } from '../../../utils/check-config';
 import { useConfigFormContext } from './config-form-context';
 import { findConnectorType, PrimaryConnectorContext, retypeConnector } from './connector-binding';
 import { ConnectorPicker, readConnectorTypes } from './ConnectorPicker';
+import { findValidationType } from './FieldValidation/FieldValidation';
 import { FieldRow } from './FieldRow';
 import { asObject, describeFallback, setMember } from './form-values';
 import { SchemaForm } from './SchemaForm';
@@ -29,8 +34,6 @@ export interface ObjectFormProps {
   skip?: string[];
   /** Per-member engine defaults. */
   defaults?: Record<string, unknown>;
-  /** A member of another object: it gets a left rule, so its end is visible. */
-  framed?: boolean;
   /** Optional members still unset wait behind a toggle; only a section's top level does this. */
   hidesUnset?: boolean;
 }
@@ -39,6 +42,19 @@ export interface ObjectFormProps {
 function readHintOwner(schema: Schema, connectorTypes: string[] | null): HintOwner {
   if (connectorTypes !== null) return 'connector';
   return schema.properties?.type && schema.properties.required ? 'field' : 'config';
+}
+
+/** A member drawn as a named set of settings: a validation editor or a nested object form, not a list, map or condition. */
+function isGroupMember(member: Schema, key: string): boolean {
+  const refName = findRefName(member);
+  if (refName !== null && CONDITION_REFS.has(refName)) return false;
+  if (findValidationType(member, key) !== null) return true;
+  const resolved = resolveSchema(member);
+  return (
+    listVariants(resolved).length === 0 &&
+    readKind(resolved) === 'object' &&
+    resolved.properties !== undefined
+  );
 }
 
 /** Required and set members show; with `hidesUnset`, unset optional ones wait behind a toggle. */
@@ -50,7 +66,6 @@ export function ObjectForm({
   path = '',
   skip = [],
   defaults = {},
-  framed = false,
   hidesUnset = false,
 }: ObjectFormProps): ReactElement {
   const [showUnset, setShowUnset] = useState(false);
@@ -91,12 +106,14 @@ export function ObjectForm({
   const shown = showUnset ? properties : properties.filter(([key]) => !isHidden(key));
 
   const form = (
-    <div className={cn('flex flex-col gap-4', framed && 'border-l-2 border-border-rule pl-3')}>
+    <div className="flex flex-col gap-4">
       {shown.map(([key, member]) => {
         const isOptional = !required.has(key);
         const isSet = key in object;
         const label = findConfigLabel(key) ?? humanize(key);
         const fallback = describeFallback(defaults[key]);
+        const isGroup = isGroupMember(member, key);
+        const setCount = Object.keys(asObject(object[key])).length;
 
         return (
           <FieldRow
@@ -104,18 +121,27 @@ export function ObjectForm({
             label={label}
             required={!isOptional}
             hint={findConfigHint(hintOwner, stepType, key)}
+            group={
+              isGroup
+                ? {
+                    open: !(isOptional && !isSet),
+                    summary: setCount > 0 ? `· ${setCount} set` : undefined,
+                  }
+                : undefined
+            }
             onRemove={
               readOnly || !isOptional || !isSet ? undefined : () => writeMember(key, undefined)
             }
           >
             {isOptional && !isSet && isComposite(member) ? (
               <div className="flex items-center gap-2">
-                <Typography variant="meta" as="span" className="text-fg-disabled">
-                  not set
+                <Typography variant="meta" as="span">
+                  Not set
                   {fallback ? ` · ${fallback}` : ''}
                 </Typography>
                 {!readOnly && (
                   <Button
+                    variant="outline"
                     size="sm"
                     aria-label={`Set ${label}`}
                     onClick={() => onChange(setMember(object, key, buildDefault(member)))}
@@ -142,7 +168,6 @@ export function ObjectForm({
                 readOnly={readOnly}
                 optional={isOptional}
                 fallback={defaults[key]}
-                framed
                 // Only a section's top level hides unset members, so this is the step's root field map.
                 onRenameEntry={
                   hidesUnset && key === 'fields' ? (renameField ?? undefined) : undefined

@@ -1,10 +1,10 @@
 import type { ReactElement } from 'react';
-import { Button } from '@/components/ui/Button/Button';
-import { Close } from '@/components/ui/icons';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { suggestAgreementKey, type Agreement } from '../../../utils/agreements';
 import { pluralize } from '../../../utils/pluralize';
 import { Checkbox } from '../Checkbox';
+import { EntryCard } from '../EntryCard';
+import { DeleteButton } from '../EntryActions';
 import { InspectorBand } from '../InspectorBand';
 import { AgreementKeyInput } from './AgreementKeyInput';
 
@@ -61,7 +61,7 @@ export function StepAgreements({
       {candidates.map((field) => {
         const tracked = own.filter(({ agreement }) => agreement.acceptedWhen === field);
         return (
-          <div key={field} className="flex flex-col gap-2 border border-border-rule p-3">
+          <EntryCard key={field}>
             <Typography variant="body-sm" as="label" className="flex items-center gap-2">
               <Checkbox
                 checked={tracked.length > 0}
@@ -86,32 +86,31 @@ export function StepAgreements({
                 onKey={(key) => setKey(index, key)}
               />
             ))}
-          </div>
+          </EntryCard>
         );
       })}
       {fields !== null &&
         stale.map(({ agreement, index }) => (
-          <div key={index} className="flex flex-col gap-1 border border-border-rule p-3">
-            <div className="flex items-center justify-between gap-2">
-              <Typography variant="mono" as="span" className="text-tsh-red line-through">
-                {agreement.key} · {agreement.acceptedWhen || 'no field'}
-              </Typography>
-              {!readOnly && (
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  className="h-7 px-1"
-                  aria-label={`Remove agreement ${agreement.key}`}
-                  onClick={() => remove(index)}
-                >
-                  <Close aria-hidden className="size-5" />
-                </Button>
-              )}
-            </div>
+          <EntryCard
+            key={index}
+            header={
+              <>
+                <Typography variant="mono" as="span" className="text-tsh-red line-through">
+                  {agreement.key} · {agreement.acceptedWhen || 'no field'}
+                </Typography>
+                {!readOnly && (
+                  <DeleteButton
+                    label={`Remove agreement ${agreement.key}`}
+                    onClick={() => remove(index)}
+                  />
+                )}
+              </>
+            }
+          >
             <Typography variant="meta" className="text-tsh-red">
               Not a stored yes/no field of this step.
             </Typography>
-          </div>
+          </EntryCard>
         ))}
     </InspectorBand>
   );

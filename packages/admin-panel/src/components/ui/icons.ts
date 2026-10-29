@@ -7,6 +7,7 @@ import Cable from '@material-symbols/svg-300/outlined/cable.svg?react';
 import Check from '@material-symbols/svg-300/outlined/check.svg?react';
 import ChevronRight from '@material-symbols/svg-300/outlined/chevron_right.svg?react';
 import Close from '@material-symbols/svg-300/outlined/close.svg?react';
+import Delete from '@material-symbols/svg-300/outlined/delete.svg?react';
 import Download from '@material-symbols/svg-300/outlined/download.svg?react';
 import Info from '@material-symbols/svg-300/outlined/info.svg?react';
 import LeftPanelClose from '@material-symbols/svg-300/outlined/left_panel_close.svg?react';
@@ -44,6 +45,7 @@ export {
   Check,
   ChevronRight,
   Close,
+  Delete,
   Download,
   Info,
   LeftPanelClose,

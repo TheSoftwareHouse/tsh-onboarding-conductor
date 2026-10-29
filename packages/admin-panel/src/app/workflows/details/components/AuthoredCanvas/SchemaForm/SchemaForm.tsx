@@ -42,8 +42,6 @@ export interface SchemaFormProps {
   fallback?: unknown;
   /** Per-member engine defaults, for the object this form draws. */
   defaults?: Record<string, unknown>;
-  /** A member of another object: it gets a left rule. Map and list entries are never framed twice. */
-  framed?: boolean;
   /** Optional members still unset wait behind a toggle; only a section's top level does this. */
   hidesUnset?: boolean;
   /** Renames a map entry across the document, in place of a plain key rename; returns whether references followed. */
@@ -88,13 +86,12 @@ function SchemaControl({
   optional = false,
   fallback,
   defaults = {},
-  framed = false,
   hidesUnset = false,
   onRenameEntry,
   aria,
 }: SchemaFormProps & { aria: ControlAria }): ReactElement {
   const placeholder = describeFallback(fallback);
-  const unsetLabel = placeholder ? `— (${placeholder})` : '—';
+  const unsetLabel = placeholder ? `Not set (${placeholder})` : 'Not set';
   const refName = findRefName(schema);
   if (refName !== null && CONDITION_REFS.has(refName)) {
     return <ConditionEditor value={value} onChange={onChange} readOnly={readOnly} />;
@@ -114,7 +111,6 @@ function SchemaControl({
         value={value}
         onChange={onChange}
         readOnly={readOnly}
-        framed={framed}
       />
     );
   }
@@ -148,6 +144,7 @@ function SchemaControl({
         <Select
           aria-label={label}
           {...aria}
+          placeholder={unsetLabel}
           items={items}
           value={value === undefined ? UNSET : JSON.stringify(value)}
           disabled={readOnly}
@@ -160,6 +157,7 @@ function SchemaControl({
         <Select
           aria-label={label}
           {...aria}
+          placeholder={unsetLabel}
           items={[{ value: UNSET, label: unsetLabel }, ...BOOLEAN_ITEMS]}
           value={typeof value === 'boolean' ? String(value) : UNSET}
           disabled={readOnly}
@@ -226,7 +224,6 @@ function SchemaControl({
           readOnly={readOnly}
           path={path}
           defaults={defaults}
-          framed={framed}
           hidesUnset={hidesUnset}
         />
       ) : (

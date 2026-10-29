@@ -5,6 +5,9 @@ import { Typography } from '@/components/ui/Typography/Typography';
 import type { CanvasPort } from '../../../utils/authored-projection';
 import { checkStepConfig, toEntryPath } from '../../../utils/check-config';
 import { buildDefault, resolveSchema, toRef } from '../../../utils/config-schema';
+import { AddButton, DeleteButton } from '../EntryActions';
+import { EntryCard } from '../EntryCard';
+import { EntryTitle } from '../EntryTitle';
 import { ConfigFormContext } from '../SchemaForm/config-form-context';
 import { ObjectForm } from '../SchemaForm/ObjectForm';
 import { TargetSelect } from './TargetSelect';
@@ -53,42 +56,40 @@ export function CustomTransitions({
 
           return (
             // Transitions have no identity of their own; removing one re-keys the rest.
-            <div key={index} className="flex flex-col gap-2 border border-border-rule p-2">
-              <div className="flex items-center justify-between gap-2">
-                <Typography variant="mono" as="span">
-                  {portName}
-                </Typography>
-                {!readOnly && (
-                  <span className="flex gap-1">
-                    <Button
-                      variant="quiet"
-                      size="sm"
-                      disabled={index === 0}
-                      aria-label={`Move ${portName} up`}
-                      onClick={() => move(index, -1)}
-                    >
-                      ↑
-                    </Button>
-                    <Button
-                      variant="quiet"
-                      size="sm"
-                      disabled={index === transitions.length - 1}
-                      aria-label={`Move ${portName} down`}
-                      onClick={() => move(index, 1)}
-                    >
-                      ↓
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      aria-label={`Remove ${portName}`}
-                      onClick={() => onChange(transitions.filter((_, at) => at !== index))}
-                    >
-                      Remove
-                    </Button>
-                  </span>
-                )}
-              </div>
+            <EntryCard
+              key={index}
+              header={
+                <>
+                  <EntryTitle>{portName}</EntryTitle>
+                  {!readOnly && (
+                    <span className="flex gap-1">
+                      <Button
+                        variant="quiet"
+                        size="sm"
+                        disabled={index === 0}
+                        aria-label={`Move ${portName} up`}
+                        onClick={() => move(index, -1)}
+                      >
+                        ↑
+                      </Button>
+                      <Button
+                        variant="quiet"
+                        size="sm"
+                        disabled={index === transitions.length - 1}
+                        aria-label={`Move ${portName} down`}
+                        onClick={() => move(index, 1)}
+                      >
+                        ↓
+                      </Button>
+                      <DeleteButton
+                        label={`Remove ${portName}`}
+                        onClick={() => onChange(transitions.filter((_, at) => at !== index))}
+                      />
+                    </span>
+                  )}
+                </>
+              }
+            >
               <ObjectForm
                 schema={schema}
                 value={rest}
@@ -105,7 +106,7 @@ export function CustomTransitions({
               />
               <div className="flex items-center justify-between gap-2">
                 <Typography variant="meta" as="span">
-                  go to
+                  Go to
                 </Typography>
                 <TargetSelect
                   aria-label={`Target of ${portName}`}
@@ -118,20 +119,17 @@ export function CustomTransitions({
                   }
                 />
               </div>
-            </div>
+            </EntryCard>
           );
         })}
         {!readOnly && (
-          <Button
-            variant="quiet"
-            size="sm"
-            className="self-start px-0"
+          <AddButton
             onClick={() =>
               onChange([...transitions, buildDefault(TRANSITION_SCHEMA) as RawWorkflowTransition])
             }
           >
-            + Transition
-          </Button>
+            transition
+          </AddButton>
         )}
       </div>
     </ConfigFormContext.Provider>
