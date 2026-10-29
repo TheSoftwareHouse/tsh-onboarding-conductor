@@ -42,13 +42,17 @@ function definesFields(type: string): boolean {
   return type === STEP_TYPE.custom || schema?.properties?.fields !== undefined;
 }
 
-/** A custom step's `config.scoring` is edited in the Scoring section, so its form leaves the list out. */
-function withoutOwnScoring(type: string, schema: Schema): Schema {
+/** A custom step's lists edited elsewhere: `scoring` in the Scoring section, `transitions` under Ports. */
+const CUSTOM_LISTS_EDITED_ELSEWHERE = ['scoring', 'transitions'];
+
+/** A custom step's form without the lists the panel edits in their own sections. */
+function withoutListsEditedElsewhere(type: string, schema: Schema): Schema {
   if (type !== STEP_TYPE.custom || schema.properties === undefined) return schema;
+  const isOwn = (key: string): boolean => !CUSTOM_LISTS_EDITED_ELSEWHERE.includes(key);
   const properties = Object.fromEntries(
-    Object.entries(schema.properties).filter(([key]) => key !== 'scoring'),
+    Object.entries(schema.properties).filter(([key]) => isOwn(key)),
   );
-  return { ...schema, properties };
+  return { ...schema, properties, required: schema.required?.filter(isOwn) };
 }
 
 export function StepSections({
@@ -152,7 +156,7 @@ function SectionBlock({
   const baseSchema = findStepType(section.type)?.buildConfigSchema() as Schema | undefined;
   const requestSchema =
     baseSchema && withHttpRequestSchema(section.type, baseSchema, section.config);
-  const schema = requestSchema && withoutOwnScoring(section.type, requestSchema);
+  const schema = requestSchema && withoutListsEditedElsewhere(section.type, requestSchema);
 
   return (
     <div className={cn('flex flex-col gap-3', carded && 'border border-border-rule p-3')}>

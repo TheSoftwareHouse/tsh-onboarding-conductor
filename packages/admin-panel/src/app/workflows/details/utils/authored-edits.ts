@@ -498,6 +498,17 @@ export function setConfigScoringRules(
   });
 }
 
+/** A `custom` step with its `config.transitions` replaced; the list is required, so an empty one stays. */
+export function setTransitions(
+  doc: AuthoredDocument,
+  name: string,
+  transitions: RawWorkflowTransition[],
+): AuthoredDocument {
+  return mapSteps(doc, (step) =>
+    step.name === name ? { ...step, config: { ...step.config, transitions } } : step,
+  );
+}
+
 export function snapToGrid(position: CanvasPosition): CanvasPosition {
   return {
     x: Math.round(position.x / GRID_SIZE) * GRID_SIZE,
