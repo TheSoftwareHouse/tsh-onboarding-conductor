@@ -6,11 +6,13 @@ import type {
   WorkflowTransitionDefinition,
 } from '@/api/workflows/workflow-definitions';
 import { describeCondition } from './describe-condition';
+import { NODE_GAP, RANK_GAP } from './canvas-layout';
+import { listRoutePoints, routeLines, type RouteBox } from './edge-routing';
 import { describeTransition, isFallbackArm } from './describe-transition';
 import { isSelfTransition } from './is-self-transition';
 import { pluralize } from './pluralize';
 import { HALF } from './step-node-geometry';
-import { findEdgeMidpoint, type EdgePoint } from './workflow-edge-path';
+import type { EdgePoint } from './workflow-edge-path';
 
 /** Node box size, fixed so dagre ranks steps without measuring the DOM. */
 export const NODE_WIDTH = 176;
@@ -22,7 +24,7 @@ const EXTRA_LINE_HEIGHT = 14;
 /** A step declaring more transitions than this says how many it has. */
 const TRANSITION_COUNT_THRESHOLD = 3;
 
-/** Ids of the arrowhead `<marker>`s `WorkflowGraph` defines: solid for `success` edges, light for the rest. */
+/** Ids of the arrowhead `<marker>`s `WorkflowGraph` defines: solid for edges going down, light for loops back. */
 export const ARROW_MARKER_ID = 'wf-ar';
 export const DASHED_ARROW_MARKER_ID = 'wf-ar-l';
 
@@ -31,19 +33,19 @@ const arrowId = (dashed: boolean): string => (dashed ? DASHED_ARROW_MARKER_ID : 
 /** Statuses a reviewer's action fires are `manual.<action>`, labelled with the action alone. */
 const MANUAL_PREFIX = 'manual.';
 
-/** Label box estimate handed to dagre: mono 11px is about 6.6px a character. */
+/** A drawn label is cut to this many characters; the full text shows on hover. */
 export const MAX_LABEL_CHARS = 22;
+/** Mono 11px is about 6.6px a character. */
 const LABEL_CHAR_WIDTH = 6.6;
 const LABEL_PADDING = 12;
 const LABEL_HEIGHT = 18;
 
-/** dagre spacing: between siblings on a rank, between ranks, and around the drawing. */
-const NODE_GAP = 48;
-const RANK_GAP = 64;
-const DRAWING_MARGIN = 32;
+/** Room a group frame keeps around its steps, and above them for its title. */
+const GROUP_PADDING = 12;
+const GROUP_TITLE_HEIGHT = 24;
 
 const EDGE_STROKE_WIDTH = 1.5;
-/** Dash and gap lengths of a non-`success` edge. */
+/** Dash and gap lengths of a loop back. */
 const EDGE_DASH = '5 4';
 
 const EDGE_COLOR = 'var(--color-fg-2)';
@@ -76,16 +78,17 @@ export type WorkflowGroupData = {
 export type WorkflowGroupNode = Node<WorkflowGroupData, 'workflowGroup'>;
 
 export type WorkflowEdgeData = {
-  /** The route dagre laid the edge along, in the same coordinate space as the node positions. */
+  /** The corners the edge's route passes, in the same coordinate space as the node positions. */
   points: EdgePoint[];
-  /** Centre of the label box dagre reserved room for, or null when the edge has no label. */
+  /** The centre of the label, on the edge's own line; null when the edge has no label. */
   labelPosition: EdgePoint | null;
   /** The full rules of the edge's guarded transitions, for the tooltip; empty when none is guarded. */
   label: string;
   /** The guard conditions alone, joined, before any cut. */
   condition: string;
-  /** The condition cut to `MAX_LABEL_CHARS`: what is drawn and what dagre reserved room for. */
+  /** The condition cut to `MAX_LABEL_CHARS`: what is drawn. */
   displayLabel: string;
+  /** A loop back up to a step at or above its source, drawn dashed like the Authored graph's. */
   dashed: boolean;
 };
 
@@ -100,14 +103,14 @@ export interface WorkflowGraph {
 
 const GROUP_ID_PREFIX = 'group:';
 
-/** Cuts a label to the width dagre reserves for it; the full text stays in `data.label`. */
-export function truncateLabel(label: string): string {
-  return label.length <= MAX_LABEL_CHARS ? label : `${label.slice(0, MAX_LABEL_CHARS - 1)}…`;
-}
-
-/** The one-line box a drawn label occupies, which is what dagre reserves room for. */
+/** The one-line box a drawn label occupies. */
 export function labelBox(displayLabel: string): { width: number; height: number } {
   return { width: displayLabel.length * LABEL_CHAR_WIDTH + LABEL_PADDING, height: LABEL_HEIGHT };
+}
+
+/** Cuts a label to `MAX_LABEL_CHARS`; the full text stays in `data.label`. */
+export function truncateLabel(label: string): string {
+  return label.length <= MAX_LABEL_CHARS ? label : `${label.slice(0, MAX_LABEL_CHARS - 1)}…`;
 }
 
 /** What an edge says for one transition; empty for a plain, unguarded `success`. */
@@ -150,13 +153,9 @@ function describeSubtitle(step: WorkflowStepDefinition): string {
     : `${step.status} · ${pluralize(step.fields.length, 'field')}`;
 }
 
-const nodeHeight = (data: WorkflowNodeData): number =>
+export const nodeHeight = (data: WorkflowNodeData): number =>
   NODE_HEIGHT +
   EXTRA_LINE_HEIGHT * ((data.transitionCount === null ? 0 : 1) + data.selfTransitions.length);
-
-/** Both directions between one pair of steps, whichever way round they were declared. */
-const pairKey = (edge: WorkflowGraphEdge): string =>
-  [edge.source, edge.target].sort().join('\u0000');
 
 const markerColor = (dashed: boolean): string => (dashed ? DASHED_EDGE_COLOR : EDGE_COLOR);
 
@@ -165,178 +164,6 @@ const edgeStyle = (color: string, dashed: boolean): WorkflowGraphEdge['style'] =
   strokeWidth: EDGE_STROKE_WIDTH,
   strokeDasharray: dashed ? EDGE_DASH : undefined,
 });
-
-/** The label seed on the drawn route: its own dagre spot, else the drawn route's midpoint. */
-function mergedLabelPosition(
-  drawn: WorkflowGraphEdge,
-  opposed: WorkflowGraphEdge,
-): EdgePoint | null {
-  if (drawn.data?.labelPosition != null) return drawn.data.labelPosition;
-  if (opposed.data?.labelPosition == null) return null;
-  const points = drawn.data?.points ?? [];
-  return points.length > 0 ? findEdgeMidpoint(points) : opposed.data.labelPosition;
-}
-
-/** Collapses a step pair joined both ways into one line with an arrowhead at each end. */
-function mergeOpposedEdges(edges: readonly WorkflowGraphEdge[]): WorkflowGraphEdge[] {
-  const byPair = new Map<string, WorkflowGraphEdge[]>();
-  for (const edge of edges) {
-    const key = pairKey(edge);
-    byPair.set(key, [...(byPair.get(key) ?? []), edge]);
-  }
-
-  const merged = new Set<string>();
-  const result: WorkflowGraphEdge[] = [];
-
-  for (const edge of edges) {
-    const pair = byPair.get(pairKey(edge)) ?? [];
-    const opposed = pair.find((candidate) => candidate.source === edge.target);
-
-    if (pair.length !== 2 || opposed === undefined) {
-      result.push(edge);
-      continue;
-    }
-
-    if (merged.has(pairKey(edge))) continue;
-    merged.add(pairKey(edge));
-
-    const dashed = (edge.data?.dashed ?? false) || (opposed.data?.dashed ?? false);
-    const joined = (pick: (data: WorkflowEdgeData) => string): string =>
-      [edge.data, opposed.data]
-        .map((data) => (data === undefined ? '' : pick(data)))
-        .filter((part) => part !== '')
-        .join(' · ');
-    const label = joined((data) => data.label);
-    const condition = joined((data) => data.condition);
-    const color = markerColor(dashed);
-
-    result.push({
-      ...edge,
-      id: `${edge.id}+${opposed.id}`,
-      style: edgeStyle(color, dashed),
-      markerStart: arrowId(dashed),
-      markerEnd: arrowId(dashed),
-      data: {
-        points: edge.data?.points ?? [],
-        labelPosition: mergedLabelPosition(edge, opposed),
-        label,
-        condition,
-        displayLabel: truncateLabel(condition),
-        dashed,
-      },
-    });
-  }
-
-  return result;
-}
-
-/** Exit and entry points spread over this share of a node's edge, at least `MIN_PORT_GAP` apart. */
-const PORT_SPAN_SHARE = 0.7;
-const MIN_PORT_GAP = 16;
-
-/** Length of the straight run an edge keeps as it leaves or enters a node. */
-const PORT_STUB = 12;
-
-interface PortEnd {
-  edge: WorkflowGraphEdge;
-  end: 'start' | 'end';
-  /** Where the end's neighbour lies, which decides its place in the order along the side. */
-  towardsX: number;
-  /** The far node's centre, breaking ties. */
-  farX: number;
-  /** The point next to the end on the drawn path. */
-  neighbour: EdgePoint;
-}
-
-/** Spreads edge ends along each node side in approach order, so edges never cross at a node. */
-export function spreadEdgePorts(
-  edges: readonly WorkflowGraphEdge[],
-  nodes: readonly WorkflowStepNode[],
-  heights: ReadonlyMap<string, number>,
-): WorkflowGraphEdge[] {
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const centreX = (id: string): number => (nodeById.get(id)?.position.x ?? 0) + NODE_WIDTH / 2;
-  const height = (id: string): number => heights.get(id) ?? NODE_HEIGHT;
-  const groups = new Map<string, PortEnd[]>();
-
-  // An unlabelled one-rank edge runs straight, since dagre's spacer bend would cross reordered ends.
-  const straightened = edges.map((edge) => {
-    const points = edge.data?.points ?? [];
-    const spacerOnly = points.length === 3 && edge.data?.label === '';
-
-    return spacerOnly
-      ? { ...edge, data: { ...edge.data!, points: [points[0]!, points[2]!] } }
-      : edge;
-  });
-
-  for (const edge of straightened) {
-    const points = edge.data?.points ?? [];
-    if (points.length < 2) continue;
-    const bends = points.length > 3;
-
-    const ends: Array<['start' | 'end', string, string, EdgePoint]> = [
-      ['start', edge.source, edge.target, points[1]!],
-      ['end', edge.target, edge.source, points[points.length - 2]!],
-    ];
-
-    for (const [end, nodeId, farId, neighbour] of ends) {
-      const node = nodeById.get(nodeId);
-      if (node === undefined) continue;
-      const side = neighbour.y < node.position.y + height(nodeId) / 2 ? 'top' : 'bottom';
-      const towardsX = bends ? neighbour.x : centreX(farId);
-      const key = `${nodeId}\u0000${side}`;
-      groups.set(key, [
-        ...(groups.get(key) ?? []),
-        { edge, end, towardsX, farX: centreX(farId), neighbour },
-      ]);
-    }
-  }
-
-  const rewritten = new Map<string, EdgePoint[]>(
-    straightened.map((edge) => [edge.id, [...(edge.data?.points ?? [])]]),
-  );
-
-  for (const [key, ports] of groups) {
-    const [nodeId, side] = key.split('\u0000');
-    const node = nodeById.get(nodeId!)!;
-    const centre = centreX(nodeId!);
-    const sorted = [...ports].sort((a, b) => a.towardsX - b.towardsX || a.farX - b.farX);
-    const span = Math.min(NODE_WIDTH * PORT_SPAN_SHARE, (sorted.length - 1) * MIN_PORT_GAP);
-    const y = side === 'top' ? node.position.y : node.position.y + height(nodeId!);
-    const outward = side === 'top' ? -1 : 1;
-
-    sorted.forEach(({ edge, end, neighbour }, index) => {
-      const points = rewritten.get(edge.id) ?? [];
-      const x =
-        sorted.length === 1 ? centre : centre - span / 2 + (span * index) / (sorted.length - 1);
-      const port = { x, y };
-      const stub = { x, y: y + outward * PORT_STUB };
-      const roomy = Math.hypot(neighbour.x - x, neighbour.y - y) >= PORT_STUB * 2;
-
-      if (end === 'start') points.splice(0, 1, port, ...(roomy ? [stub] : []));
-      else points.splice(points.length - 1, 1, ...(roomy ? [stub] : []), port);
-    });
-  }
-
-  return straightened.map((edge) => {
-    const original = edge.data?.points ?? [];
-    let points = rewritten.get(edge.id) ?? [];
-    let labelPosition = edge.data?.labelPosition ?? null;
-
-    // A labelled one-rank edge bends halfway between its reordered ports, and its label follows.
-    if (original.length === 3) {
-      const spacer = original[1]!;
-      const index = points.findIndex((point) => point.x === spacer.x && point.y === spacer.y);
-      if (index > 0) {
-        const bend = { x: (points[0]!.x + points[points.length - 1]!.x) / 2, y: spacer.y };
-        points = points.map((point, at) => (at === index ? bend : point));
-        if (labelPosition !== null) labelPosition = { x: bend.x, y: labelPosition.y };
-      }
-    }
-
-    return { ...edge, data: { ...(edge.data as WorkflowEdgeData), points, labelPosition } };
-  });
-}
 
 /** Characters an expanded label wraps at, matching the edge's `32ch` hover width. */
 const EXPANDED_LINE_CHARS = 32;
@@ -518,7 +345,11 @@ export function placeLabels(
   });
 }
 
-/** Lays steps out top to bottom with dagre, one edge per ordered pair, drawn along dagre's points. */
+/**
+ * Lays steps out top to bottom with dagre and routes the edges the way the Authored graph does:
+ * straight down from an exit on the source's bottom, across once in a gap, into the target's top,
+ * and round an outer lane for a loop back.
+ */
 export function layoutWorkflowGraph(definition: WorkflowDefinition): WorkflowGraph {
   const declared = new Set(definition.steps.map((step) => step.name));
 
@@ -539,6 +370,12 @@ export function layoutWorkflowGraph(definition: WorkflowDefinition): WorkflowGra
       },
     ]),
   );
+  const heights = new Map(
+    definition.steps.map((step) => [
+      step.name,
+      nodeHeight(datas.get(step.name) as WorkflowNodeData),
+    ]),
+  );
 
   // Authored steps that compiled to more than one step, each with the steps it produced.
   const bySource = new Map<string, WorkflowStepDefinition[]>();
@@ -551,7 +388,7 @@ export function layoutWorkflowGraph(definition: WorkflowDefinition): WorkflowGra
   // One entry per ordered pair, carrying every transition that joins it.
   const pairs = new Map<
     string,
-    { from: string; to: string; rules: string[]; conditions: string[]; dashed: boolean }
+    { from: string; to: string; rules: string[]; conditions: string[] }
   >();
   for (const step of definition.steps) {
     for (const transition of step.transitions) {
@@ -564,14 +401,12 @@ export function layoutWorkflowGraph(definition: WorkflowDefinition): WorkflowGra
         to: target,
         rules: [],
         conditions: [],
-        dashed: false,
       };
       const label = describeEdgeLabel(step, transition);
       if (label !== '') {
         pair.rules.push(describeTransition(step, transition));
         pair.conditions.push(label);
       }
-      pair.dashed ||= transition.status !== 'success';
       pairs.set(key, pair);
     }
   }
@@ -580,113 +415,200 @@ export function layoutWorkflowGraph(definition: WorkflowDefinition): WorkflowGra
     id: `${pair.from}->${pair.to}`,
   }));
 
+  const outgoing = new Map<string, { id: string; target: string }[]>();
+  for (const { id, from, to } of transitions) {
+    outgoing.set(from, [...(outgoing.get(from) ?? []), { id, target: to }]);
+  }
+
   // Multigraph, so the two directions between a pair stay distinct; compound only with a group.
   const graph = new dagre.graphlib.Graph({ multigraph: true, compound: grouped.length > 0 });
-  graph.setGraph({
-    rankdir: 'TB',
-    nodesep: NODE_GAP,
-    ranksep: RANK_GAP,
-    marginx: DRAWING_MARGIN,
-    marginy: DRAWING_MARGIN,
-  });
+  graph.setGraph({ rankdir: 'TB', nodesep: NODE_GAP, ranksep: RANK_GAP });
   graph.setDefaultEdgeLabel(() => ({}));
   for (const step of definition.steps) {
-    const data = datas.get(step.name);
-    graph.setNode(step.name, {
-      width: NODE_WIDTH,
-      height: data === undefined ? NODE_HEIGHT : nodeHeight(data),
-    });
+    graph.setNode(step.name, { width: NODE_WIDTH, height: heights.get(step.name) });
   }
-  // dagre sizes a parent to enclose its children with padding, which leaves room for the frame's label.
+  // A compound parent keeps the steps one authored step produced side by side.
   for (const steps of grouped) {
     const groupId = `${GROUP_ID_PREFIX}${steps[0]!.source!.step}`;
     graph.setNode(groupId, {});
     for (const step of steps) graph.setParent(step.name, groupId);
   }
   for (const transition of transitions) {
-    const label = truncateLabel(transition.conditions.join(' · '));
-    const box = label === '' ? {} : { ...labelBox(label), labelpos: 'c' };
-    graph.setEdge(transition.from, transition.to, box, transition.id);
+    graph.setEdge(transition.from, transition.to, {}, transition.id);
   }
   dagre.layout(graph);
 
+  // Room for the labels of a step's edges, which have to find a clear spot along them.
+  const labelRoomOf = (name: string): number =>
+    transitions.filter((transition) => transition.from === name && transition.rules.length > 0)
+      .length * LABEL_HEIGHT;
+
+  // dagre ranks the steps; each rank becomes one top-aligned row, and each gap is `RANK_GAP` plus
+  // room for the labels leaving the row above it, so only a gap with labels in it grows.
+  const ranks = new Map<number, string[]>();
+  for (const step of definition.steps) {
+    const { y } = graph.node(step.name);
+    ranks.set(y, [...(ranks.get(y) ?? []), step.name]);
+  }
+  const rowTops = new Map<number, number>();
+  const gapsBelow = new Map<number, number>();
+  const gapsAbove = new Map<number, number>();
+  let top = 0;
+  let previous: { bottom: number; gap: number } | null = null;
+  for (const [y, names] of [...ranks].sort(([a], [b]) => a - b)) {
+    if (previous !== null) {
+      top = previous.bottom + previous.gap;
+      gapsBelow.set(previous.bottom, previous.gap);
+      gapsAbove.set(top, previous.gap);
+    }
+    rowTops.set(y, top);
+    const bottom = top + Math.max(...names.map((name) => heights.get(name) ?? NODE_HEIGHT));
+    previous = { bottom, gap: RANK_GAP + Math.max(...names.map(labelRoomOf)) };
+  }
+
   const nodes: WorkflowStepNode[] = definition.steps.map((step) => {
-    const { x, y, height } = graph.node(step.name);
+    const { x, y } = graph.node(step.name);
 
     return {
       id: step.name,
       type: 'workflowStep',
-      position: { x: x - NODE_WIDTH / 2, y: y - height / 2 },
+      position: { x: x - NODE_WIDTH * HALF, y: rowTops.get(y)! },
       draggable: false,
       connectable: false,
       data: datas.get(step.name) as WorkflowNodeData,
     };
   });
 
-  // Shifted so the drawing starts at (0, 0), which keeps one input laying out to one result.
+  // Shifted so the drawing starts at x 0, which keeps one input laying out to one result.
   const minX = nodes.length === 0 ? 0 : Math.min(...nodes.map((node) => node.position.x));
-  const minY = nodes.length === 0 ? 0 : Math.min(...nodes.map((node) => node.position.y));
-  for (const node of nodes) {
-    node.position.x -= minX;
-    node.position.y -= minY;
+  for (const node of nodes) node.position.x -= minX;
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const heightOf = (id: string): number => heights.get(id) ?? NODE_HEIGHT;
+  const centreX = (id: string): number => nodeById.get(id)!.position.x + NODE_WIDTH * HALF;
+
+  const topOf = (id: string): number => nodeById.get(id)!.position.y;
+  // Edges whose target is not below their source climb back up the drawing.
+  const back = new Set(
+    transitions.filter(({ from, to }) => topOf(to) <= topOf(from)).map(({ id }) => id),
+  );
+
+  // dagre threads an edge that skips rows down a column of its own; the router keeps it there.
+  const rowIndex = new Map(
+    [...new Set(nodes.map((node) => node.position.y))]
+      .sort((a, b) => a - b)
+      .map((top, index) => [top, index]),
+  );
+  const columnXs = new Map<string, number[]>();
+  for (const { id, from, to } of transitions) {
+    const skipped = Math.abs(rowIndex.get(topOf(to))! - rowIndex.get(topOf(from))!) - 1;
+    const points: EdgePoint[] = graph.edge({ v: from, w: to, name: id })?.points ?? [];
+    const xs = points.slice(1, -1).map((point) => point.x - minX);
+    if (skipped < 1 || xs.length === 0) continue;
+    // The middle of the run first, where an edge through several rows most likely stays.
+    const middle = xs[Math.floor(xs.length / 2)]!;
+    columnXs.set(
+      id,
+      [...xs].sort((a, b) => Math.abs(a - middle) - Math.abs(b - middle)),
+    );
   }
 
-  const drawn: WorkflowGraphEdge[] = transitions.map(
-    ({ id, from, to, rules, conditions, dashed }) => {
-      const color = markerColor(dashed);
-      const laidOut = graph.edge({ v: from, w: to, name: id });
-      const points = (laidOut?.points ?? []).map((point: EdgePoint) => ({
-        x: point.x - minX,
-        y: point.y - minY,
-      }));
-      const labelPosition =
-        rules.length > 0 && typeof laidOut?.x === 'number' && typeof laidOut.y === 'number'
-          ? { x: laidOut.x - minX, y: laidOut.y - minY }
-          : null;
+  // Exits share the source's bottom evenly, like ports, ordered so none cross: by where each edge
+  // heads (its column, or its target), then loops with no column, which climb lanes on the right,
+  // the longest (outermost) first.
+  const portXs = new Map<string, number>();
+  const headingX = (id: string, target: string): number =>
+    columnXs.get(id)?.[0] ?? (back.has(id) ? Number.POSITIVE_INFINITY : centreX(target));
+  for (const [source, leaving] of outgoing) {
+    const sorted = [...leaving].sort(
+      (a, b) =>
+        headingX(a.id, a.target) - headingX(b.id, b.target) || topOf(a.target) - topOf(b.target),
+    );
+    const left = nodeById.get(source)!.position.x;
+    sorted.forEach(({ id }, index) =>
+      portXs.set(id, left + (NODE_WIDTH * (index + 1)) / (sorted.length + 1)),
+    );
+  }
 
-      return {
-        id,
-        source: from,
-        target: to,
-        type: 'workflowTransition',
-        style: edgeStyle(color, dashed),
-        markerEnd: arrowId(dashed),
-        data: {
-          points,
-          labelPosition,
-          label: rules.join(' · '),
-          condition: conditions.join(' · '),
-          displayLabel: truncateLabel(conditions.join(' · ')),
-          dashed,
-        },
-      };
+  const boxes: RouteBox[] = nodes.map((node) => ({
+    id: node.id,
+    position: node.position,
+    width: NODE_WIDTH,
+    height: heightOf(node.id),
+  }));
+  const routes = routeLines(
+    boxes,
+    transitions.map(({ id, from, to }) => ({
+      id,
+      source: from,
+      target: to,
+      portX: portXs.get(id)!,
+      columnXs: columnXs.get(id),
+    })),
+    back,
+    {
+      gapBelow: (rowBottom) => gapsBelow.get(rowBottom) ?? RANK_GAP,
+      gapAbove: (rowTop) => gapsAbove.get(rowTop) ?? RANK_GAP,
     },
   );
 
-  const heights = new Map(
-    definition.steps.map((step) => [
-      step.name,
-      nodeHeight(datas.get(step.name) as WorkflowNodeData),
-    ]),
-  );
+  const edges: WorkflowGraphEdge[] = transitions.map(({ id, from, to, rules, conditions }) => {
+    const dashed = back.has(id);
+    const source = nodeById.get(from)!;
+    const route = routes.get(id)!;
+    const start = { x: portXs.get(id)!, y: source.position.y + heightOf(from) };
+    const end = { x: centreX(to) + route.entryOffset, y: nodeById.get(to)!.position.y };
+    // Rows too close to turn between still take one step, halfway.
+    const turned =
+      route.dropY === null && route.turnY === null && start.x !== end.x
+        ? { ...route, turnY: (start.y + end.y) * HALF }
+        : route;
+    const points = listRoutePoints(start, end, turned);
 
-  const spread = spreadEdgePorts(mergeOpposedEdges(drawn), nodes, heights);
+    return {
+      id,
+      source: from,
+      target: to,
+      type: 'workflowTransition',
+      style: edgeStyle(markerColor(dashed), dashed),
+      markerEnd: arrowId(dashed),
+      data: {
+        points,
+        // Seeded halfway along; `placeLabels` moves it to the first clear spot on the line.
+        labelPosition: rules.length > 0 ? pointAlong(points, HALF) : null,
+        label: rules.join(' · '),
+        condition: conditions.join(' · '),
+        displayLabel: truncateLabel(conditions.join(' · ')),
+        dashed,
+      },
+    };
+  });
 
   const groups: WorkflowGroupNode[] = grouped.map((steps) => {
     const source = steps[0]!.source!;
-    const id = `${GROUP_ID_PREFIX}${source.step}`;
-    const { x, y, width, height } = graph.node(id);
+    const members = steps.map((step) => nodeById.get(step.name)!);
+    const left = Math.min(...members.map((node) => node.position.x)) - GROUP_PADDING;
+    const right = Math.max(...members.map((node) => node.position.x + NODE_WIDTH)) + GROUP_PADDING;
+    const top = Math.min(...members.map((node) => node.position.y)) - GROUP_TITLE_HEIGHT;
+    const bottom =
+      Math.max(...members.map((node) => node.position.y + heightOf(node.id))) + GROUP_PADDING;
     return {
-      id,
+      id: `${GROUP_ID_PREFIX}${source.step}`,
       type: 'workflowGroup',
-      position: { x: x - width * HALF - minX, y: y - height * HALF - minY },
+      position: { x: left, y: top },
       draggable: false,
       connectable: false,
       selectable: false,
       zIndex: -1,
-      data: { step: source.step, type: source.type, category: source.category, width, height },
+      data: {
+        step: source.step,
+        type: source.type,
+        category: source.category,
+        width: right - left,
+        height: bottom - top,
+      },
     };
   });
 
-  return { nodes, edges: placeLabels(spread, nodes, heights), groups };
+  return { nodes, edges: placeLabels(edges, nodes, heights), groups };
 }
