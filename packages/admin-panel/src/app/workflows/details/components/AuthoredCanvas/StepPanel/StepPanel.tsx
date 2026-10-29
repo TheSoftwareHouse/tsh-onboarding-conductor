@@ -1,4 +1,5 @@
 import { memo, useId, useState, type ReactElement } from 'react';
+import { STEP_TYPE } from '@tsh/ddl-schema/step-types';
 import { Button } from '@/components/ui/Button/Button';
 import { Chip } from '@/components/ui/Chip/Chip';
 import { Input } from '@/components/ui/Input/Input';
@@ -28,6 +29,7 @@ import {
   setInitial,
   setScoringRules,
   setSectionConfig,
+  setTransitions,
 } from '../../../utils/authored-edits';
 import {
   acceptsScoring,
@@ -39,10 +41,10 @@ import { pluralize } from '../../../utils/pluralize';
 import { StepAgreements } from '../Agreements/StepAgreements';
 import { InspectorBand } from '../InspectorBand';
 import { PanelClose } from '../PanelClose';
+import { CustomTransitions } from './CustomTransitions';
 import { PortArms } from './PortArms';
 import { ScoringSection } from './ScoringSection';
 import { StepSections } from './StepSections';
-import { TargetSelect } from './TargetSelect';
 
 export interface StepPanelProps {
   doc: AuthoredDocument;
@@ -221,55 +223,51 @@ export const StepPanel = memo(function StepPanel({
             {projected.ports.message}
           </Typography>
         )}
-        {ports.map((port) => {
-          const info = knownPorts.find((candidate) => candidate.name === port);
-          const isStray = !portNames.includes(port);
-          const portName = info?.label ?? port;
-          const label = (
-            <Typography
-              variant="mono"
-              as="span"
-              className={isStray ? 'text-tsh-red line-through' : ''}
-              title={info?.detail}
-            >
-              {portName}
-              {info?.detail ? (
-                <Typography variant="meta" as="span" className="block">
-                  {info.detail}
-                </Typography>
-              ) : null}
-            </Typography>
-          );
-          const transitionIndex = readTransitionIndex(port);
-          // A custom step's transition carries its own condition in config; its port only picks a target.
-          if (transitionIndex !== null) {
-            return (
-              <div key={port} className="flex items-center justify-between gap-2">
-                {label}
-                <TargetSelect
-                  aria-label={`Target of ${portName}`}
-                  value={transitions[transitionIndex]?.target ?? null}
-                  stepNames={stepNames}
-                  readOnly={readOnly}
-                  emptyLabel="Not wired"
-                  onChange={(target) => wire(port, target)}
-                />
-              </div>
+        {step.type === STEP_TYPE.custom && (
+          <CustomTransitions
+            stepType={step.type}
+            config={step.config ?? {}}
+            transitions={transitions}
+            ports={knownPorts}
+            stepNames={stepNames}
+            readOnly={readOnly}
+            onChange={(next) => onChange(setTransitions(doc, stepName, next))}
+          />
+        )}
+        {ports
+          .filter((port) => readTransitionIndex(port) === null)
+          .map((port) => {
+            const info = knownPorts.find((candidate) => candidate.name === port);
+            const isStray = !portNames.includes(port);
+            const portName = info?.label ?? port;
+            const label = (
+              <Typography
+                variant="mono"
+                as="span"
+                className={isStray ? 'text-tsh-red line-through' : ''}
+                title={info?.detail}
+              >
+                {portName}
+                {info?.detail ? (
+                  <Typography variant="meta" as="span" className="block">
+                    {info.detail}
+                  </Typography>
+                ) : null}
+              </Typography>
             );
-          }
-          return (
-            <PortArms
-              key={port}
-              label={label}
-              portName={portName}
-              arms={readArms(step, port)}
-              stepNames={stepNames}
-              readOnly={readOnly}
-              onWire={(target) => wire(port, target)}
-              onArms={(arms: AuthoredArm[]) => onChange(setArms(doc, stepName, port, arms))}
-            />
-          );
-        })}
+            return (
+              <PortArms
+                key={port}
+                label={label}
+                portName={portName}
+                arms={readArms(step, port)}
+                stepNames={stepNames}
+                readOnly={readOnly}
+                onWire={(target) => wire(port, target)}
+                onArms={(arms: AuthoredArm[]) => onChange(setArms(doc, stepName, port, arms))}
+              />
+            );
+          })}
       </InspectorBand>
 
       <StepSections

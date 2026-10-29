@@ -3731,7 +3731,9 @@ canvas" instead.
 - **Editing.** The palette lists every registered step type by category (click or drag to add).
   A clicked step goes under the selected one, or mid-pane, and the canvas pans only when it lands
   out of view; a dropped step stays where it was dropped, and a drop never pans. Dragging from a port wires it, the step panel and each port's `Select` rewire it, and Backspace or
-  Delete removes a step or edge; deleting a step also drops the `agreements` that name it. A
+  Delete removes a step or edge; a `custom` step's transitions are its ports, so the panel's Ports
+  band adds, removes, reorders and edits them (status, `when`, a rejection's `reason`, `webhook`,
+  target) and its settings form leaves `transitions` out (`StepPanel/CustomTransitions.tsx`); deleting a step also drops the `agreements` that name it. A
   composable type dropped on a collect step, or picked in its "Include a section" select, becomes a
   section; each type appears once per step, the step's own type included. Node
   summaries show the terminal outcome, the connector id, or the status and field count, and a

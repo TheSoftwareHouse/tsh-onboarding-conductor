@@ -590,3 +590,101 @@ describe('StepPanel scoring on a custom step', () => {
     expect(screen.getAllByRole('heading', { name: 'Scoring' })).toHaveLength(1);
   });
 });
+
+describe('StepPanel transitions of a custom step', () => {
+  const custom: AuthoredDocument = {
+    initial: 'verify',
+    steps: [
+      {
+        name: 'verify',
+        type: 'custom',
+        config: {
+          status: 'awaiting_user',
+          data: {},
+          transitions: [
+            { status: 'success', target: 'done' },
+            { status: 'rejected', reason: ['CHALLENGE_EXPIRED'], target: 'verify' },
+          ],
+        },
+      },
+      { name: 'done', type: 'terminal', config: { status: 'approved' } },
+    ],
+  };
+  const transitionsOf = (onChange: ReturnType<typeof vi.fn>): unknown =>
+    lastDoc(onChange).steps[0]?.config?.transitions;
+
+  it('adds a transition under Ports', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness stepName="verify" initial={custom} onChange={onChange} />);
+
+    await user.click(screen.getByRole('button', { name: '+ Transition' }));
+
+    expect(transitionsOf(onChange)).toEqual([
+      { status: 'success', target: 'done' },
+      { status: 'rejected', reason: ['CHALLENGE_EXPIRED'], target: 'verify' },
+      { status: 'success' },
+    ]);
+  });
+
+  it('removes a transition and reorders the rest', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness stepName="verify" initial={custom} onChange={onChange} />);
+
+    await user.click(screen.getByRole('button', { name: 'Move success down' }));
+    expect(transitionsOf(onChange)).toEqual([
+      { status: 'rejected', reason: ['CHALLENGE_EXPIRED'], target: 'verify' },
+      { status: 'success', target: 'done' },
+    ]);
+
+    await user.click(screen.getByRole('button', { name: 'Remove rejected' }));
+    expect(transitionsOf(onChange)).toEqual([{ status: 'success', target: 'done' }]);
+  });
+
+  it('edits the status and keeps the target', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness stepName="verify" initial={custom} onChange={onChange} />);
+
+    const [firstStatus] = screen.getAllByRole('combobox', { name: 'Status' });
+    await user.click(firstStatus!);
+    await user.click(await screen.findByRole('option', { name: 'manual.approve' }));
+
+    expect(transitionsOf(onChange)).toEqual([
+      { status: 'manual.approve', target: 'done' },
+      { status: 'rejected', reason: ['CHALLENGE_EXPIRED'], target: 'verify' },
+    ]);
+  });
+
+  it('offers a reason only on a rejection', () => {
+    render(<Harness stepName="verify" initial={custom} onChange={vi.fn()} />);
+
+    expect(screen.getAllByRole('checkbox', { name: 'CHALLENGE_EXPIRED' })).toHaveLength(1);
+  });
+
+  it('drops the target when the transition stays on the step', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness stepName="verify" initial={custom} onChange={onChange} />);
+
+    await user.click(screen.getByRole('combobox', { name: 'Target of success' }));
+    await user.click(await screen.findByRole('option', { name: 'Stay on this step' }));
+
+    expect(transitionsOf(onChange)).toEqual([
+      { status: 'success' },
+      { status: 'rejected', reason: ['CHALLENGE_EXPIRED'], target: 'verify' },
+    ]);
+  });
+
+  it('leaves transitions out of the settings form', async () => {
+    const user = userEvent.setup();
+    render(<Harness stepName="verify" initial={custom} onChange={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: /Configure/ }));
+    const more = screen.queryByRole('button', { name: /Show \d+ more settings?/ });
+    if (more) await user.click(more);
+
+    expect(screen.queryByRole('group', { name: /^Transitions/ })).toBeNull();
+  });
+});
