@@ -1,7 +1,6 @@
 import type { ComponentType, ReactElement } from 'react';
 import { FIELD_TYPE } from '@tsh/ddl-schema/workflow-contract';
 import { Typography } from '@/components/ui/Typography/Typography';
-import { cn } from '@/lib/cn';
 import { findRefName, type Schema } from '../../../../utils/config-schema';
 import { asObject } from '../form-values';
 import { ArrayValidation } from './ArrayValidation';
@@ -49,7 +48,6 @@ export interface FieldValidationProps {
   value: unknown;
   onChange: (value: unknown) => void;
   readOnly: boolean;
-  framed?: boolean;
 }
 
 /** The editor for one field type's `validation`, writing only the keys that type allows. */
@@ -58,12 +56,7 @@ export function FieldValidation({
   value,
   onChange,
   readOnly,
-  framed = false,
 }: FieldValidationProps): ReactElement {
   const Editor = EDITORS[type] ?? NoValidation;
-  return (
-    <div className={cn(framed && 'border-l-2 border-border-rule pl-3')}>
-      <Editor value={asObject(value)} onChange={onChange} readOnly={readOnly} />
-    </div>
-  );
+  return <Editor value={asObject(value)} onChange={onChange} readOnly={readOnly} />;
 }

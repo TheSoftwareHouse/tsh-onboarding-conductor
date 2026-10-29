@@ -47,7 +47,7 @@ export function ConnectorPicker({
         size="sm"
         aria-label={label}
         disabled={readOnly}
-        placeholder={isPending ? 'loading connectors…' : 'connectors unavailable'}
+        placeholder={isPending ? 'Loading connectors…' : 'Connectors unavailable'}
         value={current}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -57,7 +57,7 @@ export function ConnectorPicker({
   const matching = connectors.filter((connector) => types.some((type) => type === connector.type));
   const isKnown = matching.some((connector) => connector.id === current);
   const items = [
-    ...(current === UNSET ? [{ value: UNSET, label: '— choose a connector —' }] : []),
+    ...(current === UNSET ? [{ value: UNSET, label: 'Choose a connector' }] : []),
     ...(!isKnown && current !== UNSET
       ? [{ value: current, label: `${current} (not available)` }]
       : []),

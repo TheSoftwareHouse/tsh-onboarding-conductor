@@ -1,10 +1,9 @@
 import type { ReactElement } from 'react';
-import { Button } from '@/components/ui/Button/Button';
 import { Input } from '@/components/ui/Input/Input';
-import { Add, Close } from '@/components/ui/icons';
 import { Select } from '@/components/ui/Select/Select';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { FIELD_TYPE } from '@tsh/ddl-schema/workflow-contract';
+import { AddButton, DeleteButton } from '../../EntryActions';
 import { FieldRow } from '../FieldRow';
 import { parseNumberInput, setMember } from '../form-values';
 import { ANY, type ValidationEditorProps } from './validation-values';
@@ -109,28 +108,17 @@ export function AllowedValues({
                 />
               </div>
               {!readOnly && entries.length > 1 && (
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  className="h-6 px-1"
-                  aria-label={`Remove allowed value ${index + 1}`}
+                <DeleteButton
+                  label={`Remove allowed value ${index + 1}`}
                   onClick={() => writeEntries(entries.filter((_, at) => at !== index))}
-                >
-                  <Close aria-hidden className="size-4" />
-                </Button>
+                />
               )}
             </div>
           ))}
           {!readOnly && (
-            <Button
-              size="sm"
-              className="self-start"
-              aria-label="Add allowed value"
-              onClick={() => writeEntries([...entries, STARTING_ENTRY[kind]])}
-            >
-              <Add aria-hidden className="size-4" />
-              Add
-            </Button>
+            <AddButton onClick={() => writeEntries([...entries, STARTING_ENTRY[kind]])}>
+              allowed value
+            </AddButton>
           )}
         </>
       )}

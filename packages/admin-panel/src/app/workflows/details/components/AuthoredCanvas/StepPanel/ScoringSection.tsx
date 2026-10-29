@@ -1,6 +1,4 @@
 import { useId, useState, type ReactElement } from 'react';
-import { Button } from '@/components/ui/Button/Button';
-import { Close } from '@/components/ui/icons';
 import { Input } from '@/components/ui/Input/Input';
 import { Select } from '@/components/ui/Select/Select';
 import { Typography } from '@/components/ui/Typography/Typography';
@@ -8,6 +6,8 @@ import { STEP_TYPE } from '@tsh/ddl-schema/step-types';
 import { readConfigScoring, type AuthoredStep } from '../../../utils/authored-document';
 import { DEFAULT_CONDITION } from '../../../utils/config-schema';
 import { pluralize } from '../../../utils/pluralize';
+import { EntryCard } from '../EntryCard';
+import { AddButton, ClearButton, DeleteButton } from '../EntryActions';
 import { ConditionEditor } from '../SchemaForm/ConditionEditor';
 import { InspectorBand } from '../InspectorBand';
 
@@ -79,17 +79,15 @@ export function ScoringSection({
       meta={pluralize(entries.length, 'rule')}
       trailing={
         !readOnly && declared[0] !== undefined ? (
-          <Button
-            variant="outline"
-            size="sm"
+          <AddButton
             onClick={() => {
               const rule = { score: declared[0]!, add: NEW_RULE_POINTS };
               if (addsToConfig) onConfigRules([...configRules, rule]);
               else onRules([...stepRules, rule]);
             }}
           >
-            + Add rule
-          </Button>
+            rule
+          </AddButton>
         ) : undefined
       }
     >
@@ -145,11 +143,7 @@ function RuleRow({
   const scores = isDeclared ? declared : [...declared, rule.score];
 
   return (
-    <div
-      role="group"
-      aria-label={`Rule ${number}`}
-      className="flex flex-col gap-2 border border-border-rule p-3"
-    >
+    <EntryCard role="group" aria-label={`Rule ${number}`}>
       <div className="flex items-center gap-2">
         <Select
           aria-label={`Score of rule ${number}`}
@@ -178,17 +172,7 @@ function RuleRow({
             if (points !== null) onChange({ ...rule, add: points });
           }}
         />
-        {!readOnly && (
-          <Button
-            variant="quiet"
-            size="sm"
-            className="h-7 px-1"
-            aria-label={`Remove rule ${number}`}
-            onClick={onRemove}
-          >
-            <Close aria-hidden className="size-5" />
-          </Button>
-        )}
+        {!readOnly && <DeleteButton label={`Remove rule ${number}`} onClick={onRemove} />}
       </div>
       {draft !== null && (
         <Typography id={errorId} variant="meta" className="text-tsh-red" role="alert">
@@ -197,14 +181,12 @@ function RuleRow({
       )}
       {rule.when === undefined ? (
         !readOnly && (
-          <Button
-            size="sm"
-            className="self-start"
+          <AddButton
             aria-label={`Add condition to rule ${number}`}
             onClick={() => onChange({ ...rule, when: DEFAULT_CONDITION })}
           >
-            + Add condition
-          </Button>
+            condition
+          </AddButton>
         )
       ) : (
         <div className="flex items-start gap-1">
@@ -217,18 +199,13 @@ function RuleRow({
             />
           </div>
           {!readOnly && (
-            <Button
-              variant="quiet"
-              size="sm"
-              className="h-6 px-1"
-              aria-label={`Remove condition of rule ${number}`}
+            <ClearButton
+              label={`Remove condition of rule ${number}`}
               onClick={() => onChange({ score: rule.score, add: rule.add })}
-            >
-              <Close aria-hidden className="size-4" />
-            </Button>
+            />
           )}
         </div>
       )}
-    </div>
+    </EntryCard>
   );
 }

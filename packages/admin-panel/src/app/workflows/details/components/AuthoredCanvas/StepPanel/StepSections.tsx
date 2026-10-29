@@ -19,6 +19,9 @@ import { pluralize } from '../../../utils/pluralize';
 import { ConfigFormContext } from '../SchemaForm/config-form-context';
 import { SchemaForm } from '../SchemaForm/SchemaForm';
 import { FieldList } from './FieldList';
+import { DeleteButton } from '../EntryActions';
+import { EntryCard } from '../EntryCard';
+import { EntryTitle } from '../EntryTitle';
 import { InspectorBand } from '../InspectorBand';
 import { JsonConfig } from './JsonConfig';
 
@@ -158,32 +161,8 @@ function SectionBlock({
     baseSchema && withHttpRequestSchema(section.type, baseSchema, section.config);
   const schema = requestSchema && withoutListsEditedElsewhere(section.type, requestSchema);
 
-  return (
-    <div className={cn('flex flex-col gap-3', carded && 'border border-border-rule p-3')}>
-      {/* The step's own type heads the panel; a heading here only tells sections apart. */}
-      {carded && (
-        <div className="flex items-center justify-between">
-          <Typography variant="mono" as="span">
-            {section.type}
-          </Typography>
-          <span className="flex items-center gap-2">
-            <Typography variant="meta" as="span">
-              {section.include === null ? 'step type' : 'included section'}
-            </Typography>
-            {onRemove && !readOnly && (
-              <Button
-                variant="danger"
-                size="sm"
-                aria-label={`Remove section ${section.type}`}
-                onClick={onRemove}
-              >
-                Remove
-              </Button>
-            )}
-          </span>
-        </div>
-      )}
-
+  const body = (
+    <>
       {showFields && (
         <div className="flex flex-col gap-1">
           {/* form, wait-for-external and connector-call take their fields from config.fields verbatim. */}
@@ -241,6 +220,29 @@ function SectionBlock({
           <JsonConfig config={section.config} readOnly={readOnly} onConfig={onConfig} />
         )}
       </div>
-    </div>
+    </>
+  );
+
+  // The step's own type heads the panel; a card heading only tells several sections apart.
+  return carded ? (
+    <EntryCard
+      header={
+        <>
+          <EntryTitle>{section.type}</EntryTitle>
+          <span className="flex items-center gap-2">
+            <Typography variant="meta" as="span">
+              {section.include === null ? 'step type' : 'included section'}
+            </Typography>
+            {onRemove && !readOnly && (
+              <DeleteButton label={`Remove section ${section.type}`} onClick={onRemove} />
+            )}
+          </span>
+        </>
+      }
+    >
+      {body}
+    </EntryCard>
+  ) : (
+    <div className="flex flex-col gap-3">{body}</div>
   );
 }

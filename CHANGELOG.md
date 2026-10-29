@@ -27,7 +27,9 @@ One product version covers the whole monorepo. Every pull request adds its line 
   and labels its edges the way the Authored graph does, and dashes only loops back. A connector
   fallback offers only connectors of the primary's type, and changing the primary's type clears the
   connector ids it no longer fits. A custom step's transitions are edited under Ports — added,
-  removed, reordered, with their status, condition and reason — instead of deep in its settings.
+  removed, reordered, with their status, condition and reason — instead of deep in its settings. Each inspector section's title stays pinned while the section scrolls. The inspector's labels, add and remove buttons, list entries and empty values follow one
+  style across every section. Card titles, field labels and secondary text read as three distinct levels. List entries are white cards and named groups of settings, such as
+  Validation, sit on a tinted panel, so a form's structure shows at a glance.
 - Forking under a new ID — The admin panel renames the copy's connector `sourceKey`s from the new
   workflow ID, so the fork no longer fails its first publish with `WORKFLOW_SOURCE_KEY_CONFLICT`.
 - Unsaved-changes guard — Leaving a workflow draft with unsaved edits, for another page or another

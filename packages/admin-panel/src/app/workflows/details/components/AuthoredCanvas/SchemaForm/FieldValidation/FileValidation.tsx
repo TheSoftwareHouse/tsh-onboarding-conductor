@@ -1,7 +1,6 @@
 import type { ReactElement } from 'react';
-import { Button } from '@/components/ui/Button/Button';
 import { Input } from '@/components/ui/Input/Input';
-import { Add, Close } from '@/components/ui/icons';
+import { AddButton, DeleteButton } from '../../EntryActions';
 import { FieldRow } from '../FieldRow';
 import { setMember } from '../form-values';
 import { ValidationNumberInput } from './ValidationNumberInput';
@@ -79,28 +78,17 @@ export function FileValidation({ value, onChange, readOnly }: ValidationEditorPr
                 />
               </div>
               {!readOnly && contentTypes.length > 1 && (
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  className="h-6 px-1"
-                  aria-label={`Remove content type ${index + 1}`}
+                <DeleteButton
+                  label={`Remove content type ${index + 1}`}
                   onClick={() => removeContentType(index)}
-                >
-                  <Close aria-hidden className="size-4" />
-                </Button>
+                />
               )}
             </div>
           ))}
           {!readOnly && (
-            <Button
-              size="sm"
-              className="self-start"
-              aria-label="Add content type"
-              onClick={() => writeContentTypes([...contentTypes, ''])}
-            >
-              <Add aria-hidden className="size-4" />
-              Add
-            </Button>
+            <AddButton onClick={() => writeContentTypes([...contentTypes, ''])}>
+              content type
+            </AddButton>
           )}
         </div>
       </FieldRow>

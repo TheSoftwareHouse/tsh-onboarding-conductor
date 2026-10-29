@@ -618,7 +618,7 @@ describe('StepPanel transitions of a custom step', () => {
     const onChange = vi.fn();
     render(<Harness stepName="verify" initial={custom} onChange={onChange} />);
 
-    await user.click(screen.getByRole('button', { name: '+ Transition' }));
+    await user.click(screen.getByRole('button', { name: '+ Add transition' }));
 
     expect(transitionsOf(onChange)).toEqual([
       { status: 'success', target: 'done' },

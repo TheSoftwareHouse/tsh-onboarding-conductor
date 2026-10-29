@@ -231,7 +231,7 @@ describe('file validation', () => {
       screen.getByRole('spinbutton', { name: 'Maximum image width (px)' }),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Add content type' }));
+    await user.click(screen.getByRole('button', { name: '+ Add content type' }));
     await user.type(screen.getByRole('textbox', { name: 'Content type 2' }), 'application/pdf');
     await user.tab();
 
@@ -252,7 +252,7 @@ describe('file validation', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Add content type' }));
+    await user.click(screen.getByRole('button', { name: '+ Add content type' }));
     await user.type(screen.getByRole('textbox', { name: 'Content type 2' }), 'image/webp');
     await user.tab();
 
@@ -312,7 +312,7 @@ describe('file validation', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Add content type' }));
+    await user.click(screen.getByRole('button', { name: '+ Add content type' }));
 
     expect(lastCall(onChange)).toEqual({
       contentTypes: ['image/png', ''],

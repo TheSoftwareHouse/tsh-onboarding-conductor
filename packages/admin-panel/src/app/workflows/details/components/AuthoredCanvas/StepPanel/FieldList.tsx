@@ -17,11 +17,7 @@ export function FieldList({ fields }: { fields: StepSection['fields'] }): ReactE
     );
   }
   if (fields.length === 0) {
-    return (
-      <Typography variant="meta" className="text-fg-disabled">
-        no fields
-      </Typography>
-    );
+    return <Typography variant="meta">No fields</Typography>;
   }
   const isLong = fields.length > VISIBLE_FIELDS;
   const shown = isLong && !showAll ? fields.slice(0, VISIBLE_FIELDS) : fields;

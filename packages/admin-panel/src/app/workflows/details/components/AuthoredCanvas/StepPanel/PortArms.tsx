@@ -4,6 +4,9 @@ import { Typography } from '@/components/ui/Typography/Typography';
 import { UNWIRED, type AuthoredArm } from '../../../utils/authored-document';
 import { buildDefault, toRef, TRANSITION_CONDITION_REF } from '../../../utils/config-schema';
 import { ConditionEditor } from '../SchemaForm/ConditionEditor';
+import { AddButton, DeleteButton } from '../EntryActions';
+import { EntryCard } from '../EntryCard';
+import { EntryTitle } from '../EntryTitle';
 import { TargetSelect } from './TargetSelect';
 
 export interface PortArmsProps {
@@ -56,11 +59,7 @@ export function PortArms({
       fallback,
     );
 
-  const addButton = !readOnly && (
-    <Button variant="quiet" size="sm" className="self-start px-0" onClick={addCondition}>
-      + Condition
-    </Button>
-  );
+  const addButton = !readOnly && <AddButton onClick={addCondition}>condition</AddButton>;
 
   // A plain edge is one target, plus a way to start branching it.
   if (guarded.length === 0) {
@@ -86,47 +85,45 @@ export function PortArms({
     <div className="flex flex-col gap-2">
       {label}
       {guarded.map((arm, index) => (
-        <div key={index} className="flex flex-col gap-2 border border-border-rule p-2">
-          <div className="flex items-center justify-between gap-2">
-            <Typography variant="meta" as="span">
-              {index === 0 ? 'If' : 'Else if'}
-            </Typography>
-            {!readOnly && (
-              <span className="flex gap-1">
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  disabled={index === 0}
-                  aria-label="Move condition up"
-                  onClick={() => moveArm(index, -1)}
-                >
-                  ↑
-                </Button>
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  disabled={index === guarded.length - 1}
-                  aria-label="Move condition down"
-                  onClick={() => moveArm(index, 1)}
-                >
-                  ↓
-                </Button>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  aria-label={`Remove arm ${index + 1} of ${portName}`}
-                  onClick={() =>
-                    emit(
-                      guarded.filter((_, candidate) => candidate !== index),
-                      fallback,
-                    )
-                  }
-                >
-                  Remove
-                </Button>
-              </span>
-            )}
-          </div>
+        <EntryCard
+          key={index}
+          header={
+            <>
+              <EntryTitle>{index === 0 ? 'If' : 'Else if'}</EntryTitle>
+              {!readOnly && (
+                <span className="flex gap-1">
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    disabled={index === 0}
+                    aria-label="Move condition up"
+                    onClick={() => moveArm(index, -1)}
+                  >
+                    ↑
+                  </Button>
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    disabled={index === guarded.length - 1}
+                    aria-label="Move condition down"
+                    onClick={() => moveArm(index, 1)}
+                  >
+                    ↓
+                  </Button>
+                  <DeleteButton
+                    label={`Remove arm ${index + 1} of ${portName}`}
+                    onClick={() =>
+                      emit(
+                        guarded.filter((_, candidate) => candidate !== index),
+                        fallback,
+                      )
+                    }
+                  />
+                </span>
+              )}
+            </>
+          }
+        >
           <ConditionEditor
             value={arm.when}
             readOnly={readOnly}
@@ -134,7 +131,7 @@ export function PortArms({
           />
           <div className="flex items-center justify-between gap-2">
             <Typography variant="meta" as="span">
-              go to
+              Go to
             </Typography>
             <TargetSelect
               aria-label={`Target of ${portName} condition ${index + 1}`}
@@ -145,7 +142,7 @@ export function PortArms({
               onChange={(target) => updateArm(index, { ...arm, target: target ?? UNWIRED })}
             />
           </div>
-        </div>
+        </EntryCard>
       ))}
       <div className="flex items-center justify-between gap-2">
         <Typography variant="meta" as="span">

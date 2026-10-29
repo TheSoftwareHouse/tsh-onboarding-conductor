@@ -1,7 +1,6 @@
 import { memo, type ReactElement } from 'react';
 import { getWorkflowJsonSchema } from '@tsh/ddl-schema/workflow-schema';
 import { Button } from '@/components/ui/Button/Button';
-import { Close } from '@/components/ui/icons';
 import { Select } from '@/components/ui/Select/Select';
 import { Typography } from '@/components/ui/Typography/Typography';
 import type { AuthoredDocument } from '../../../utils/authored-document';
@@ -15,6 +14,7 @@ import {
   type Schema,
 } from '../../../utils/config-schema';
 import { AgreementList } from '../Agreements/AgreementList';
+import { ClearButton } from '../EntryActions';
 import { InspectorBand } from '../InspectorBand';
 import { PanelClose } from '../PanelClose';
 import { SchemaForm } from '../SchemaForm/SchemaForm';
@@ -103,15 +103,10 @@ export const WorkflowSettings = memo(function WorkflowSettings({
         let trailing: ReactElement | undefined;
         if (!readOnly && isSet) {
           trailing = (
-            <Button
-              variant="quiet"
-              size="sm"
-              className="h-7 px-1"
-              aria-label={`Remove ${label.toLowerCase()}`}
+            <ClearButton
+              label={`Remove ${label.toLowerCase()}`}
               onClick={() => setKey(key, undefined)}
-            >
-              <Close aria-hidden className="size-5" />
-            </Button>
+            />
           );
         } else if (!readOnly && isComposite(schema)) {
           trailing = (
@@ -128,9 +123,7 @@ export const WorkflowSettings = memo(function WorkflowSettings({
         return (
           <InspectorBand key={key} title={label} trailing={trailing}>
             {!isSet && isComposite(schema) ? (
-              <Typography variant="meta" className="text-fg-disabled">
-                Not set
-              </Typography>
+              <Typography variant="meta">Not set</Typography>
             ) : (
               <SchemaForm
                 schema={schema}

@@ -1,6 +1,4 @@
 import { useState, type ReactElement } from 'react';
-import { Button } from '@/components/ui/Button/Button';
-import { Close } from '@/components/ui/icons';
 import { Input } from '@/components/ui/Input/Input';
 import { Select } from '@/components/ui/Select/Select';
 import { Typography } from '@/components/ui/Typography/Typography';
@@ -11,6 +9,7 @@ import {
   type WorkflowScoreComparator,
 } from '@tsh/ddl-schema/workflow-contract';
 import { DEFAULT_CONDITION, FIELD_NAMES_LIST_ID } from '../../../utils/config-schema';
+import { AddButton, DeleteButton } from '../EntryActions';
 import { asObject, parseNumberInput } from './form-values';
 
 /** A stored condition as read back: whatever the document holds, probed key by key. */
@@ -451,28 +450,19 @@ function ConditionList({
                 />
               </div>
               {!readOnly && items.length > 1 && (
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  className="h-6 px-1"
-                  aria-label={`Remove condition ${rowPath}`}
+                <DeleteButton
+                  label={`Remove condition ${rowPath}`}
                   onClick={() => onChange(items.filter((_, at) => at !== index))}
-                >
-                  <Close aria-hidden className="size-4" />
-                </Button>
+                />
               )}
             </div>
           </div>
         );
       })}
       {!readOnly && (
-        <Button
-          size="sm"
-          className="self-start"
-          onClick={() => onChange([...items, { ...DEFAULT_CONDITION }])}
-        >
-          + Add condition
-        </Button>
+        <AddButton onClick={() => onChange([...items, { ...DEFAULT_CONDITION }])}>
+          condition
+        </AddButton>
       )}
     </div>
   );

@@ -1,9 +1,9 @@
 import type { ReactElement } from 'react';
-import { Button } from '@/components/ui/Button/Button';
-import { Close } from '@/components/ui/icons';
 import { Select } from '@/components/ui/Select/Select';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { suggestAgreementKey, type Agreement } from '../../../utils/agreements';
+import { EntryCard } from '../EntryCard';
+import { AddButton, DeleteButton } from '../EntryActions';
 import { AgreementKeyInput } from './AgreementKeyInput';
 
 export interface AgreementListProps {
@@ -63,12 +63,11 @@ export function AgreementList({
           label: fields.includes(field) ? field : `${field} (not a stored yes/no field)`,
         }));
         return (
-          <div
+          <EntryCard
             // Agreements are identified by key, which is being edited here; the place is stable.
             key={index}
             role="group"
             aria-label={`Agreement ${number}`}
-            className="flex flex-col gap-2 border border-border-rule p-3"
           >
             <div className="flex items-start gap-2">
               <AgreementKeyInput
@@ -79,15 +78,10 @@ export function AgreementList({
                 onKey={(key) => update(index, { key })}
               />
               {!readOnly && (
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  className="h-7 px-1"
-                  aria-label={`Remove agreement ${number}`}
+                <DeleteButton
+                  label={`Remove agreement ${number}`}
                   onClick={() => onChange(agreements.filter((_, at) => at !== index))}
-                >
-                  <Close aria-hidden className="size-5" />
-                </Button>
+                />
               )}
             </div>
             <div className="flex gap-2">
@@ -111,14 +105,11 @@ export function AgreementList({
                 onValueChange={(acceptedWhen) => update(index, { acceptedWhen })}
               />
             </div>
-          </div>
+          </EntryCard>
         );
       })}
       {!readOnly && firstCandidate !== undefined && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="self-start"
+        <AddButton
           onClick={() =>
             onChange([
               ...agreements,
@@ -130,8 +121,8 @@ export function AgreementList({
             ])
           }
         >
-          + Add agreement
-        </Button>
+          agreement
+        </AddButton>
       )}
     </div>
   );
