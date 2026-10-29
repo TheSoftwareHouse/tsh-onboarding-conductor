@@ -1,12 +1,4 @@
-/**
- * Turns the polyline dagre routed an edge along into an SVG path, and finds the point on it to
- * hang the label from.
- *
- * dagre already solves the hard part. It inserts a dummy node on every rank an edge crosses, so
- * the polyline it returns goes around the boxes in between rather than through them — including
- * for a retry loop that climbs back up the drawing. Drawing anything other than these points
- * throws that away and reintroduces the crossings.
- */
+/** Turns the corners an edge's route passes into an SVG path with rounded bends. */
 
 export interface EdgePoint {
   x: number;
@@ -20,7 +12,7 @@ export interface EdgePoint {
  * Generous on purpose: a bend this soft reads as a flowing line rather than a right angle with the
  * point filed off. It costs nothing in correctness — a quadratic curve lies inside the triangle of
  * its own start, control and end points, so rounding only ever cuts the inside of a corner and can
- * never bow the line outward into a box dagre routed it around.
+ * never bow the line outward into a box its route keeps clear of.
  */
 const CORNER_RADIUS = 18;
 
@@ -86,41 +78,4 @@ export function buildEdgePath(points: readonly EdgePoint[]): string {
   path += ` L ${round(last.x)},${round(last.y)}`;
 
   return path;
-}
-
-/**
- * The point half the polyline's length along it, which is where the label sits.
- *
- * By length rather than by index: dagre spaces its points one per crossed rank, so an edge that
- * skips three ranks has its middle *index* nowhere near its middle, and the label would drift
- * towards whichever end happened to need fewer bends.
- */
-export function findEdgeMidpoint(points: readonly EdgePoint[]): EdgePoint {
-  if (points.length === 0) {
-    return { x: 0, y: 0 };
-  }
-
-  if (points.length === 1) {
-    return { ...points[0]! };
-  }
-
-  let total = 0;
-  for (let index = 1; index < points.length; index += 1) {
-    total += distance(points[index - 1]!, points[index]!);
-  }
-
-  let remaining = total / 2;
-  for (let index = 1; index < points.length; index += 1) {
-    const from = points[index - 1]!;
-    const to = points[index]!;
-    const segment = distance(from, to);
-
-    if (segment >= remaining) {
-      return along(from, to, remaining);
-    }
-
-    remaining -= segment;
-  }
-
-  return { ...points[points.length - 1]! };
 }

@@ -9,8 +9,8 @@ import {
 import { Typography } from '@/components/ui/Typography/Typography';
 import { cn } from '@/lib/cn';
 import { tv } from '@/lib/tv';
-import { EDGE_OFFSET, type EdgeRoute } from '../../utils/edge-routing';
-import { buildEdgePath, type EdgePoint } from '../../utils/workflow-edge-path';
+import { EDGE_OFFSET, listRoutePoints, type EdgeRoute } from '../../utils/edge-routing';
+import { buildEdgePath } from '../../utils/workflow-edge-path';
 
 export type ConditionEdgeData = {
   port: string;
@@ -98,21 +98,5 @@ export function ConditionEdge({
         </EdgeLabelRenderer>
       )}
     </>
-  );
-}
-
-/** The corners an edge passes, as its route lays them out; see `EdgeRoute`. */
-function listRoutePoints(source: EdgePoint, target: EdgePoint, route: EdgeRoute): EdgePoint[] {
-  const points = [source];
-  if (route.dropY !== null) points.push({ x: source.x, y: route.dropY });
-  if (route.laneX !== null && route.turnY !== null) {
-    points.push({ x: route.laneX, y: route.dropY ?? source.y }, { x: route.laneX, y: route.turnY });
-  } else if (route.turnY !== null) {
-    points.push({ x: source.x, y: route.turnY });
-  }
-  points.push({ x: target.x, y: points[points.length - 1]!.y }, target);
-  return points.filter(
-    (point, index) =>
-      index === 0 || point.x !== points[index - 1]!.x || point.y !== points[index - 1]!.y,
   );
 }
