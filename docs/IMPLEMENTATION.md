@@ -3741,6 +3741,12 @@ canvas" instead.
     is an image; they are dropped when a non-image type is left (on blur) or the last image type is
     removed, never while a type is being typed.
 
+  A connector binding's `id` is a select over the engine's connectors of the binding's type: its
+  own `type`, else the slot's `defaultType`, else the slot's only type
+  (`SchemaForm/connector-binding.ts`). Fallback entries are narrowed to the primary's type, since
+  the compile refuses any other, and their own `type` shows only when it disagrees. Changing the
+  primary's resolved type drops every `id` in the chain, because an adapter has exactly one type.
+
   Each map entry, such as a form's field, is a card headed by its editable name. A rename keeps
   the entry's position and refuses an empty or duplicate name. Renaming a field of a step's own
   `config.fields` is one undoable edit (`renameField`) that also rewrites every reference to it —
