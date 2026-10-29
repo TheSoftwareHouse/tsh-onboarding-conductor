@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import { useContext, useState, type ReactElement } from 'react';
 import { Button } from '@/components/ui/Button/Button';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { cn } from '@/lib/cn';
@@ -12,6 +12,7 @@ import {
 } from '../../../utils/config-schema';
 import { toMemberPath } from '../../../utils/check-config';
 import { useConfigFormContext } from './config-form-context';
+import { findConnectorType, PrimaryConnectorContext, retypeConnector } from './connector-binding';
 import { ConnectorPicker, readConnectorTypes } from './ConnectorPicker';
 import { FieldRow } from './FieldRow';
 import { asObject, describeFallback, setMember } from './form-values';
@@ -54,8 +55,31 @@ export function ObjectForm({
 }: ObjectFormProps): ReactElement {
   const [showUnset, setShowUnset] = useState(false);
   const { stepType, renameField } = useConfigFormContext();
+  const primary = useContext(PrimaryConnectorContext);
   const object = asObject(value);
-  const properties = Object.entries(schema.properties ?? {}).filter(([key]) => !skip.includes(key));
+  // A connector binding's `id` names one of the engine's connectors of the binding's type; a fallback takes the primary's.
+  const connectorTypes = readConnectorTypes(schema);
+  const isFallback = connectorTypes !== null && primary !== null;
+  const boundType =
+    connectorTypes === null
+      ? undefined
+      : isFallback
+        ? primary.type
+        : findConnectorType(object, connectorTypes, stepType);
+  const pickableTypes =
+    connectorTypes === null ? null : boundType === undefined ? connectorTypes : [boundType];
+  const hintOwner = readHintOwner(schema, connectorTypes);
+  // A fallback's `type` follows the primary's, so it shows only when it disagrees.
+  const hidesType = isFallback && (object.type === undefined || object.type === boundType);
+  const properties = Object.entries(schema.properties ?? {}).filter(
+    ([key]) => !skip.includes(key) && !(hidesType && key === 'type'),
+  );
+  const writeMember = (key: string, member: unknown): void =>
+    onChange(
+      key === 'type' && connectorTypes !== null && !isFallback
+        ? retypeConnector(object, member, connectorTypes, stepType)
+        : setMember(object, key, member),
+    );
   const required = new Set(schema.required ?? []);
   // A member once set stays shown after it is cleared, so clearing it to retype keeps the input.
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(() => new Set(Object.keys(object)));
@@ -65,13 +89,8 @@ export function ObjectForm({
     hidesUnset && !required.has(key) && !(key in object) && !revealed.has(key);
   const hiddenCount = properties.filter(([key]) => isHidden(key)).length;
   const shown = showUnset ? properties : properties.filter(([key]) => !isHidden(key));
-  // A connector binding's `id` names one of the engine's connectors, narrowed by a declared `type`.
-  const connectorTypes = readConnectorTypes(schema);
-  const boundType = connectorTypes?.find((type) => type === object.type);
-  const pickableTypes = boundType === undefined ? connectorTypes : [boundType];
-  const hintOwner = readHintOwner(schema, connectorTypes);
 
-  return (
+  const form = (
     <div className={cn('flex flex-col gap-4', framed && 'border-l-2 border-border-rule pl-3')}>
       {shown.map(([key, member]) => {
         const isOptional = !required.has(key);
@@ -86,9 +105,7 @@ export function ObjectForm({
             required={!isOptional}
             hint={findConfigHint(hintOwner, stepType, key)}
             onRemove={
-              readOnly || !isOptional || !isSet
-                ? undefined
-                : () => onChange(setMember(object, key, undefined))
+              readOnly || !isOptional || !isSet ? undefined : () => writeMember(key, undefined)
             }
           >
             {isOptional && !isSet && isComposite(member) ? (
@@ -131,9 +148,7 @@ export function ObjectForm({
                   hidesUnset && key === 'fields' ? (renameField ?? undefined) : undefined
                 }
                 onChange={(next) =>
-                  onChange(
-                    setMember(object, key, isOptional && isEmptyValue(next) ? undefined : next),
-                  )
+                  writeMember(key, isOptional && isEmptyValue(next) ? undefined : next)
                 }
               />
             )}
@@ -153,5 +168,13 @@ export function ObjectForm({
         </Button>
       )}
     </div>
+  );
+
+  return connectorTypes === null || isFallback ? (
+    form
+  ) : (
+    <PrimaryConnectorContext.Provider value={{ type: boundType }}>
+      {form}
+    </PrimaryConnectorContext.Provider>
   );
 }
