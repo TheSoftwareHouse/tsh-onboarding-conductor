@@ -1,3 +1,4 @@
+import { FIELD_TYPE } from './field-type-names';
 import { isPlainObject } from '../value-guards';
 import type {
   AnyNormalizedField,
@@ -19,7 +20,7 @@ const isNormalizedObjectField = (field: AnyNormalizedField): field is Normalized
   field.type === 'object';
 
 export const objectFieldTypeDefinition = {
-  type: 'object',
+  type: FIELD_TYPE.object,
   aliases: [],
   levels: ['root', 'nested', 'arrayItem'],
   // An object shapes its children through `fields`; it accepts no validation object of its own.

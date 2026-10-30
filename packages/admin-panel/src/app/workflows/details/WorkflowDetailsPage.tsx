@@ -17,6 +17,7 @@ import {
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { NewDraftDialog } from '../components/NewDraftDialog/NewDraftDialog';
 import { DraftEditor, type DraftHeaderSlots } from './components/DraftEditor/DraftEditor';
+import { VersionCanvas } from './components/VersionCanvas/VersionCanvas';
 import { VersionDocument } from './components/VersionDocument/VersionDocument';
 import { VersionGraph } from './components/VersionGraph';
 import { VersionTabs } from './components/VersionTabs/VersionTabs';
@@ -260,8 +261,15 @@ export function WorkflowDetailsPage(): ReactElement {
       {isVersionsSuccess && !isVersionsStale && missingVersionMessage === null && (
         <VersionTabs
           key={version}
-          value={params.view ?? 'graph'}
+          value={params.view ?? 'compiled'}
           onValueChange={params.setView}
+          canvas={
+            version === null ? (
+              <StatusRegion className="px-8 py-6">Loading version…</StatusRegion>
+            ) : (
+              <VersionCanvas workflowId={workflowId} version={version} />
+            )
+          }
           graph={
             <ReactFlowProvider>
               <WorkflowStats definition={details} />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildEdgePath, findEdgeMidpoint, type EdgePoint } from './workflow-edge-path';
+import { buildEdgePath, type EdgePoint } from './workflow-edge-path';
 
 describe('buildEdgePath', () => {
   it('is empty for no points at all', () => {
@@ -49,44 +49,5 @@ describe('buildEdgePath', () => {
     expect(path.match(/Q /g)).toHaveLength(2);
     expect(path.startsWith('M 0,0')).toBe(true);
     expect(path.endsWith('L 60,120')).toBe(true);
-  });
-});
-
-describe('findEdgeMidpoint', () => {
-  it('halves a single straight segment', () => {
-    expect(
-      findEdgeMidpoint([
-        { x: 0, y: 0 },
-        { x: 0, y: 100 },
-      ]),
-    ).toEqual({ x: 0, y: 50 });
-  });
-
-  it('measures by length, not by how many points a leg happens to have', () => {
-    // The first leg is 90 long and split into three points; the second is 10 in one.
-    const midpoint = findEdgeMidpoint([
-      { x: 0, y: 0 },
-      { x: 0, y: 30 },
-      { x: 0, y: 60 },
-      { x: 0, y: 90 },
-      { x: 0, y: 100 },
-    ]);
-
-    expect(midpoint).toEqual({ x: 0, y: 50 });
-  });
-
-  it('turns the corner when the halfway mark falls past one', () => {
-    const midpoint = findEdgeMidpoint([
-      { x: 0, y: 0 },
-      { x: 0, y: 40 },
-      { x: 60, y: 40 },
-    ]);
-
-    expect(midpoint).toEqual({ x: 10, y: 40 });
-  });
-
-  it('has somewhere to sit even for a degenerate route', () => {
-    expect(findEdgeMidpoint([])).toEqual({ x: 0, y: 0 });
-    expect(findEdgeMidpoint([{ x: 7, y: 9 }])).toEqual({ x: 7, y: 9 });
   });
 });

@@ -134,8 +134,8 @@ export function NewDraftForm({
     source !== 'fork' || fork === null
       ? null
       : fork.scope === 'users'
-        ? 'Changing the ID creates a new workflow.'
-        : 'Built-in workflows are copied under a new ID.';
+        ? 'Changing the ID creates a new workflow and renames its connector source keys.'
+        : 'Built-in workflows are copied under a new ID, with their connector source keys renamed.';
 
   const identityFields = (
     <>

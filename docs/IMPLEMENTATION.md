@@ -611,7 +611,9 @@ author can write — a `custom` step's or `connector-call`'s connectors and tran
 validated against the compiled schema's own definitions before compilation, so a failure the
 compiled schema reports afterwards (`steps[k]…`, indexing compiled steps) can only come from a
 type's `compile` and is restated as `steps[i]`, the authored step whose type produced compiled step
-`k`. The semantic invariants below carry a reason and no path, for either phase.
+`k`. A semantic invariant checked inside one step — its connectors' field mappings, field
+conditions, scoring and transitions — is located at that step (`steps[i]`); one spanning steps
+carries a reason and no path.
 
 **`compileWorkflowReport`** returns the compiled form _and_ each step's resolved shape — type,
 category, the compiled steps it owns (`compiledStepNames`), and per port the arms it leads along, in
@@ -763,8 +765,8 @@ runs it over each scope directory or the paths it is given, and reports the reas
 would report — plus the loader's own duplicate `(id, version)` check. A bare run resolves the user
 scope from `WORKFLOWS_USERS_DIR` exactly as the loader does, and paths that match no file exit `1`
 rather than reading as a pass. It carries none of the engine-level checks, which need a running
-engine. Reasons carry no path to the offending
-declaration; `.claude/skills/creating-workflows/references/startup-failures.md` maps each one back
+engine. A reason names at most the offending step, never the declaration
+inside it; `.claude/skills/creating-workflows/references/startup-failures.md` maps each one back
 to the checks that raise it.
 
 One further startup invariant crosses document boundaries and sits outside that per-document list:
@@ -3260,9 +3262,11 @@ parser for that key, so a control and the URL cannot disagree about what is requ
 has to resolve to absent at the boundary rather than be filtered out downstream. Zod plays no part
 in either section's filter path, only in response-payload validation under `api/*.ts`. See
 `docs/decisions/0018-nuqs-for-admin-panel-search-params.md`. `NuqsAdapter` (from
-`nuqs/adapters/react-router/v8`) is mounted in `src/app/App.tsx` inside `BrowserRouter`, wrapping
-`Routes`, not in `AppProviders` — the adapter reads react-router's own hooks, which
-`AppProviders`, rendered above the router, cannot give it.
+`nuqs/adapters/react-router/v8`) is mounted in `src/app/App.tsx` as the data router's root route
+element, wrapping an `<Outlet />`, not in `AppProviders` — the adapter reads react-router's own
+hooks, which `AppProviders`, rendered above the router, cannot give it. The router is built with
+`createBrowserRouter` inside a component under `AuthGate`, so pages can call `useBlocker`
+(`docs/decisions/0050-admin-panel-data-router.md`).
 
 The page header carries the design's **Export CSV** button: an outline button with a download icon
 calls `GET /v1/onboardings/export` with the applied filters (never the draft, and without
@@ -3479,12 +3483,18 @@ highest `published` version. Without `?version=`, a family with no published ver
 does not hold, or no `?version=` with nothing published or drafted, replaces the tabs with "Version N does not exist." or
 "This workflow has no published version." and keeps the picker; neither tab renders, and no pinned definition or document
 is read. A list served from cache that lacks the pinned version is re-read once first, since a
-version may have been published elsewhere since; the page shows its loading state meanwhile. A 404 on the definition read itself, the list being stale, gives the same message inside the Graph tab. A
+version may have been published elsewhere since; the page shows its loading state meanwhile. A 404 on the definition read itself, the list being stale, gives the same message inside the Compiled graph tab. A
 `retired` version is listed and selectable. `version`, `step` and `view` live in the URL (nuqs, `history: 'replace'`, `shallow: false`); an
 unknown `step` falls back to the definition's `initialStep`, and switching version clears `step`
-and `view`, so every version opens on its initial step and its default tab. `?view=graph|json` picks
-the tab (`VersionTabs`, Base UI `Tabs`, Graph | JSON); a published or retired version defaults to
-Graph and a draft to JSON, and any other value falls back to that default. Under the title, a "View onboardings →" line, the
+and `view`, so every version opens on its initial step and its default tab. `?view=authored|compiled|json`
+picks the tab (`VersionTabs`, Base UI `Tabs`: "Authored graph", "Compiled graph", "JSON"); a published
+or retired version defaults to `compiled` and a draft to `authored`. The former `?view=graph` is an alias
+for `compiled`, so old links still open the compiled graph; any other value falls back to the default.
+The "Authored graph" tab of a published or retired version is `VersionCanvas`, the same `AuthoredCanvas`
+read-only, over `workflowQueries.document`, fetched once the tab mounts. The header (`WorkflowDetailsHeader`) puts the breadcrumb
+and the title, which wraps, on the left, and under the title a line with the version's status chip, the editor's note and the
+onboardings link; on the right the version picker sits above the `actions` row, which wraps onto further rows when the title
+column reaches its minimum width rather than dropping under the title. On that line, a "View onboardings →" link, the
 onboarding details header's Workflow line mirrored, links to `/onboardings?workflowId=<id>` through
 the same shared serializer — the workflow only, never the shown version, and only once the versions
 have loaded. It is hidden on a draft, which cannot start an onboarding. It sits there rather than among the header's controls, which the design reserves for the
@@ -3492,9 +3502,22 @@ picker and Edit as draft. The graph, with the
 inspector, is `VersionGraph`, which draws `WorkflowGraph` under `src/app/workflows/details/components/` (dagre, top to bottom), with selection
 controlled by intercepting React Flow's node `select` changes. `WorkflowZoomControls` (zoom out, zoom level, zoom in,
 Fit) float in a React Flow `Panel` at the canvas's top right, so the draft graph has them too and the stats band above
-holds only the counts. Every edge except a plain, unguarded `success` carries a label
+holds only the counts. When one authored step compiled to several steps, the compiled graph draws a dashed
+frame around them (`WorkflowGroupNode`), tinted by the step type's category and labelled
+`<step> · <type>`; the frames come from each compiled step's `source`, and a workflow with none lays
+out as before. The inspector names the same source under the step's name, as `From <step> · <type>`, with no friendly type label. Every edge except a plain, unguarded `success` carries a label
 (the condition, the `manual.*` action, the status with its reasons, or `<status> · fallback`),
-capped at 22 characters and expanded in place on hover or focus while kept inside the canvas; the
+capped at 22 characters and expanded in place on hover or focus while kept inside the canvas.
+Edges are routed like the Authored graph's: dagre ranks every step, loops included, and each rank
+becomes a top-aligned row. Each step's edges leave from exits spread along its bottom, ordered by
+where each edge heads so they never cross there, and `routeLines` in `edge-routing.ts` routes them.
+An edge that skips rows, loops included, keeps to the column dagre threaded it down (`columnXs`),
+slid past a step in its way and never shared with another line; a loop with no clear column
+climbs an outer lane. Each label is boxed and sits on its own edge, at the first spot along it
+clear of steps, other labels and other lines (`placeLabels`). A pair joined both ways is two
+edges. Only a loop back, an edge to a step at or above its source, is dashed, as on the Authored
+graph; an edge's status shows in its label, not its stroke. Each gap is `RANK_GAP` plus a label height per labelled edge
+leaving the row above it (`RowSpacing`), so only a gap with labels grows. The
 selected node is drawn with an outline, so its content never shifts. From the `xl` breakpoint the
 graph and inspector sit side by side and only the inspector scrolls; below it they stack and the
 area scrolls as a whole. On the JSON tab of a published or retired version, `VersionDocument`
@@ -3503,7 +3526,7 @@ the stored document in a read-only `JsonEditor` (`components/JsonEditor.tsx`, sh
 editor; read-only is CodeMirror's `EditorState.readOnly`, so Backspace and Delete change nothing), with
 a **Copy JSON** button that toasts "JSON copied." or the clipboard's failure, including a missing
 `navigator.clipboard` outside a secure context. While the unpinned
-definition is still loading the JSON tab shows "Loading version…", and a failure of that read the Graph tab's failure
+definition is still loading the JSON tab shows "Loading version…", and a failure of that read the Compiled graph tab's failure
 with Retry. App-wide, the `--font-display` and `--font-body` stacks in
 `tailwind.css` name `Inter Tight Variable` ahead of `Inter Tight`, the family the self-hosted
 variable font registers. The inspector beside it shows the selected step's fields,
@@ -3572,9 +3595,10 @@ defaults to the latest published one, else the latest retired (`defaultForkVersi
 version reads `workflowQueries.document(id, v)` and prefills the form; choosing the
 selected one again, or leaving Fork for Empty and coming back, keeps the operator's edits; coming back from a read upload clears the upload and prefills the source again. A `users` family keeps its ID and takes Version `max + 1` over every listed
 version of any status (`nextWorkflowVersion`); a `built-in` or `fixtures` family gets an empty
-ID, the hint "Built-in workflows are copied under a new ID." and Version 1, since a
-new ID is a new family. Name comes from the document, and editing the ID never changes the
-Version. A hint, "Changing the ID creates a new workflow.", sits in the ID field's hint slot for a `users` source.
+ID, the hint "Built-in workflows are copied under a new ID, with their connector source keys
+renamed." and Version 1, since a new ID is a new family. Name comes from the document, and editing
+the ID never changes the Version. A hint, "Changing the ID creates a new workflow and renames its
+connector source keys.", sits in the ID field's hint slot for a `users` source.
 While a chosen source's reads load, including the lookup of a preselected family, the identity fields and Create are disabled and the combobox shows its loading row; a late document never prefills while another source is chosen. A failed read shows a
 `StatusRegion` with Retry. The **draft-exists guard** fires when the trimmed ID equals the
 source's and its versions list holds a draft: a notice band (`role="status"`) above the ID row reads "This
@@ -3582,7 +3606,12 @@ workflow already has draft v{N}. Open it, or change the ID to create a new workf
 it" linking to `/workflows/<id>?version=N`; the footer's primary action becomes **Open draft v{N}**
 (a link to the same path), Create is disabled and outlined; the engine's
 `409 WORKFLOW_DRAFT_EXISTS` toast stays as the fallback. The schema's `fork` arm posts
-`{ ...fork.document, id, version, name? }` and rejects a form with no source ("Choose a workflow
+`{ ...fork.document, id, version, name? }`. Under a new ID it first renames the `sourceKey` the engine reads —
+`config.sourceKey` of a `kyc-identity-verification` step, and `config.sourceKey` of each connector and
+its `fallback` entries on a `custom` or `connector-call` step and on a `notify` step's `connector` (`renameSourceKeys`) — to one derived from that ID — `my-flow` → `my_flow`, then `my_flow_2`
+for a second distinct key — since only one workflow id may own a key and the copy would otherwise
+fail its first publish with `409 WORKFLOW_SOURCE_KEY_CONFLICT`; steps that shared a key still share
+one, and a fork under the same ID keeps its keys. It rejects a form with no source ("Choose a workflow
 and a version."). All three sources validate through one
 `zod` schema, `utils/new-draft-schema.ts`, wired with `zodResolver`
 ([0035](decisions/0035-zod-schemas-for-client-validated-forms.md)): the engine's save
@@ -3612,8 +3641,8 @@ item and the filtering (`filter={null}`), and it shows loading, error and empty 
 When the selected version is a `draft` (a pinned `?version=`, or the draft a family with no published
 version opens on), `WorkflowDetailsPage` renders `DraftEditor`
 (`src/app/workflows/details/components/DraftEditor/`) in place of the read-only tabs; it has the same
-Graph | JSON `VersionTabs`, defaulting to JSON, with the JSON panel kept mounted while hidden so the
-editor's undo history survives.
+Authored graph | Compiled graph | JSON `VersionTabs`, defaulting to Authored graph, with the JSON
+panel kept mounted while hidden so the editor's undo history survives.
 The page's `detail` query is disabled while the pinned status is `draft` or still unknown behind a
 loading versions list, so an invalid draft is never compiled for the page. `DraftEditor` reads
 `workflowQueries.document` and handles pending, error with Retry and 404 ("This draft no longer
@@ -3624,6 +3653,13 @@ refetched list moves the page to the read-only tabs. The text is edited in `Json
 themed from `@theme` variables. The header's `actions` slot holds, for a draft:
 
 - **Discard** resets the text to the last fetched document; it and Save are disabled while clean.
+- **Leaving with unsaved changes** (`UnsavedChangesGuard`, `useBlocker`): a navigation to another
+  path or another `?version=` while dirty opens "Leave without saving?" with **Stay** and
+  **Discard and leave**; a tab or step change is not blocked, nor is the navigation a successful
+  write makes (a save that moves the draft, a delete, a publish), which marks the editor written first;
+  the next edit clears that mark.
+  A navigation while a validate or save is still pending is blocked. While dirty, a reload or tab close
+  gets the browser's `beforeunload` prompt.
 - **Publish**, after Save draft, is `variant="primary"` and disabled while a request is pending,
   and while the buffer is dirty. The engine publishes the stored
   row, so only a saved buffer can be published; while dirty, the header note reads "Unsaved changes ·
@@ -3652,7 +3688,9 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
   both versions lists, navigates with `replace` to the new `?version=`, and removes what no longer
   exists: the old `detail(id, v)`, or the whole old family when the rename emptied it (the engine
   deleted it).
-- **Graph tab** (`DraftGraph`) draws the compiled `workflow` of the shared compile result, with
+- **Authored graph tab** (`DraftCanvas`, over `AuthoredCanvas`) edits the draft's authored document;
+  see "The draft canvas" below.
+- **Compiled graph tab** (`DraftGraph`) draws the compiled `workflow` of the shared compile result, with
   `?step` selecting a step as on a published version. Its inspector is wholly read-only:
   `StepConnectors` gets `readOnly`, so no connector `<select>` or Restore button is
   offered, since a selection binds published versions, never the draft's text; the
@@ -3669,6 +3707,143 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
   other versions, and to `/workflows` otherwise, then removes the deleted `detail(id, v)` — or the
   whole family, when it was the last version — and invalidates the versions list of a family that
   remains.
+
+**The draft canvas**
+([0051](decisions/0051-admin-panel-graph-workflow-editor.md)). `AuthoredCanvas`
+(`details/components/AuthoredCanvas/`, React Flow) draws the authored document and holds no state of
+its own: every edit hands the whole next document to `onChange`. `DraftCanvas` parses the editor's text
+(`parseDocument`), passes `doc`, `readOnly={false}`, `failure` and the undo and redo props, and writes
+each change back as `JSON.stringify(next, null, 2)` into the same text the JSON tab edits, so Save,
+Validate and Discard need nothing new. Text that is not a document shows "Fix the JSON to see the
+canvas" instead.
+
+- **Mapping.** A node is an authored step, an edge a wired port (`edges.<port>`, or a condition arm
+  or transition). A step's position is `meta.position` (`{ x, y }`, snapped to an 8 px grid);
+  `meta` is carried and never read by the engine. A step with none is placed by the layout, so a
+  hand-written document opens laid out. Once any step has a position, every canvas edit writes one for
+  every step at its shown spot (`pinPositions`), so undo restores a whole layout, never a mix. A
+  hand-written `meta.position` is overwritten when that step is dragged.
+- **Layout.** `canvas-layout.ts` ranks steps with dagre and re-places each rank under the ports that
+  lead to it; `edge-routing.ts` routes edges orthogonally, with retry loops on the right; an edge that turns
+  early comes down at whichever slot on its target crosses the fewest other lines. The
+  toolbar's **Auto-arrange** lays out again and, when the document has positions, writes the new
+  layout to every step's `meta.position`.
+- **Editing.** The palette lists every registered step type by category (click or drag to add).
+  A clicked step goes under the selected one, or mid-pane, and the canvas pans only when it lands
+  out of view; a dropped step stays where it was dropped, and a drop never pans. Dragging from a port wires it, the step panel and each port's `Select` rewire it, and Backspace or
+  Delete removes a step or edge; a `custom` step's transitions are its ports, so the panel's Ports
+  band adds, removes, reorders and edits them (status, `when`, a rejection's `reason`, `webhook`,
+  target) and its settings form leaves `transitions` out (`StepPanel/CustomTransitions.tsx`); deleting a step also drops the `agreements` that name it. A
+  composable type dropped on a collect step, or picked in its "Include a section" select, becomes a
+  section; each type appears once per step, the step's own type included. Node
+  summaries show the terminal outcome, the connector id, or the status and field count, and a
+  `scores: risk, trust` line when the step has scoring rules. Undo and redo (`useEditHistory`, up to 100 whole-text versions, edits
+  within 500 ms merged) are in the toolbar and on Cmd/Ctrl+Z (redo: Shift+Z or Y). From the
+  keyboard, Enter or Space on a focused step opens its inspector, and the arrow keys move the
+  selected step, written to `meta.position` once the key is released.
+- **Inspector forms.** `SchemaForm` generates each step type's config form from the authored JSON
+  Schema (`utils/config-schema.ts`) and writes into the document. They do not use react-hook-form,
+  an exception to 0019 for the canvas only. A field's `validation` gets its own editor per field
+  type (`SchemaForm/FieldValidation/`).
+  - **Boolean:** a choice between any value, must be true and must be false.
+  - **Text, number and date:** allowed values are "pick one of" (`oneOf`) or "pick several of"
+    (`manyOf`), never both.
+  - **Number:** each bound has an inclusive toggle, which switches between `minimum` and
+    `exclusiveMinimum` (and the same for maximum).
+  - **File:** the size is entered in MB. Image width and height show only while every content type
+    is an image; they are dropped when a non-image type is left (on blur) or the last image type is
+    removed, never while a type is being typed.
+
+  A connector binding's `id` is a select over the engine's connectors of the binding's type: its
+  own `type`, else the slot's `defaultType`, else the slot's only type
+  (`SchemaForm/connector-binding.ts`). Fallback entries are narrowed to the primary's type, since
+  the compile refuses any other, and their own `type` shows only when it disagrees. Changing the
+  primary's resolved type drops every `id` in the chain, because an adapter has exactly one type.
+
+  Each map entry, such as a form's field, is a card headed by its editable name. A rename keeps
+  the entry's position and refuses an empty or duplicate name. Renaming a field of a step's own
+  `config.fields` is one undoable edit (`renameField`) that also rewrites every reference to it —
+  `fieldMapping` sources included — unless another step stores a field of the same name
+  (built-in, declared or included; a step that does not compile falls back to its declared
+  fields), when only the key changes and the card says "References not updated: another step has
+  a field with this name". An `http-call`'s `{{payload.<key>}}` placeholders name payload keys,
+  not fields, so a rename never rewrites the request: a placeholder left reading a field that no
+  longer exists shows as the step's problem ("payload `<key>` reads missing field `<field>`").
+
+  An `http-call` step's `request` and `response` are only `{ type: 'object' }` in ddl-schema, so
+  the panel substitutes its own schema for them (`utils/http-request-schema.ts`, mirroring the
+  engine's `http-request-config.ts`). Headers, query and an object body are then edited as key–value
+  rows; a body that is an array or a single value keeps the plain JSON editor. Settings whose name
+  does not explain them carry one line of help, all written in `constants/config-hints.ts` and
+  keyed by owner (step config, connector declaration or field descriptor), step type and key.
+
+  A setting that fails its type's schema gets a red one-line reason under its control, with
+  `aria-invalid` and `aria-describedby` on the control. `utils/check-config.ts` checks the config
+  against the same JSON Schema the form is drawn from, without `ajv`: `required`, `type`, `enum`,
+  `minLength`, `minimum`/`maximum`, `pattern`, `minItems`, `uniqueItems`, nested objects, arrays and
+  maps. The reasons are short ("Required", "Must be 100–30000", "Not one of the allowed values"),
+  and each failure is keyed by its path in the config (`request.url`, `docs[1].type`). The step's
+  problem list names those settings, as `invalid config: channel (Not one of the allowed values)`;
+  a config that fails only a rule `parseConfig` holds in code, such as a decision's duplicate
+  branches, keeps the bare `invalid config: <CODE>`.
+
+- **Scoring rules.** A step's own `scoring` rules (see "Scoring") are edited in a Scoring section
+  of its inspector (`StepPanel/ScoringSection.tsx`), on every step type that takes them: not
+  `terminal` or `risk-score`, which `acceptsScoring` reads from the type's `resolveScoringStepKey`.
+  A rule is a score `Select` over the root-declared scores, a non-zero whole `add` (negative
+  allowed; anything else is flagged and not written) and an optional `when` in the condition
+  editor, which offers no score leaf there. While the workflow declares no score the section is one
+  line pointing to Workflow settings. Every change is one undoable edit (`setScoringRules`, or
+  `setConfigScoringRules` for a custom step's `config.scoring`), and
+  removing the last rule removes the `scoring` key. A `custom` step keeps its own rules in
+  `config.scoring`, so the section lists those first (then any step-level ones), adds new rules
+  there, and the type's settings form leaves its `scoring` list out. A rule naming a score that is
+  no longer declared stays, shown as "(not declared)", and the step lists "scoring names undeclared
+  score".
+- **Names in conditions and settings.** `projectDocument` also returns `contents`: every field a
+  step stores, once, with its type and the steps that store it (connector callback fields such as
+  `kycOutcome` included; a step that does not compile offers its declared fields, untyped), and
+  every root-declared score with its bounds. `AuthoredCanvas` provides it to both inspectors
+  through `WorkflowContentsContext` (`workflow-contents.ts`), because the controls that read it sit
+  at the bottom of recursive trees (`SchemaForm` → `ObjectForm`/`ArrayForm`/`MapForm`/`VariantForm`,
+  and `ConditionEditor` → `ConditionList`). A condition's score is a `Select` over the declared
+  scores, starting on the first; one naming an undeclared score shows "(not declared)" and is
+  marked invalid. A condition's field, and a setting that names a field (`recipientField`), is an
+  `Autocomplete` (`components/ui/Autocomplete`) that suggests the stored fields but keeps any text,
+  since a transition reads the onboarding's data from earlier steps as well as its own.
+- **Agreements.** The root `agreements` (see "Agreements") are picked, not typed. The engine
+  accepts any stored boolean of the step's compiled entry step as an agreement's field, but the
+  panel offers only consents: on a typed step the booleans a `consents` section builds (the step's
+  own type or an `include`), on a `custom` step every stored boolean, since the panel cannot tell a
+  hand-written consent from any other flag. The projection lists those as `agreementFields`, plus
+  any stored boolean an agreement already names, so an agreement written in JSON on another field
+  stays visible and removable. A step with such fields gets an Agreements section in its inspector
+  (`Agreements/StepAgreements.tsx`): a "Track `<field>` as agreement" checkbox per field, which adds
+  an entry with a key derived from the field name (`termsAccepted` → `terms-accepted`) and shows
+  its key box. Workflow settings lists every agreement (`Agreements/AgreementList.tsx`) with a key
+  box, a step `Select` over the steps that offer a field (and the agreement's own step) and a field
+  `Select` over that step's fields; changing the step picks its first field. A key is checked as the normalizer checks it (`^[a-z0-9][a-z0-9-]*$`, unique;
+  restated in `utils/agreements.ts`), and a bad one keeps its reason under the box and is not
+  written. An agreement whose field the step no longer stores stays, with a remove button, and the
+  step lists `agreement <key>: <field> is not a stored yes/no field` — judged by the engine's rule,
+  not the narrower offer. Removing the last agreement
+  removes the `agreements` key (`setAgreements`).
+- **Ports and fields come from ddl-schema.** `authored-projection.ts` and `compiled-preview.ts`
+  call `tryResolveStep` and `tryCompileStep` from `@tsh/ddl-schema/step-types`, per step and in the
+  browser, so one broken step blanks only its own preview. The authored JSON Schema comes from
+  `@tsh/ddl-schema/workflow-schema` (`getWorkflowJsonSchema`).
+- **Problems.** The status box lists every step with problems, each issue in full, and the step
+  panel repeats the selected step's issues above its sections. Problems no step owns — an
+  `initial` or an agreement naming a missing step — head the list as "Workflow settings", which
+  opens that panel. The last Validate failure's
+  `steps[i]` path is resolved to a step name (`find-failed-step.ts`) and the node is marked.
+
+The panel imports three ddl-schema subpaths — `workflow-contract`, `step-types`, `workflow-schema` —
+and nothing else from ddl-schema or `@tsh/engine`; an ESLint `no-restricted-imports` rule in
+`packages/admin-panel/eslint.config.js` enforces it. Each of the three reaches no `ajv`;
+`packages/shared/ddl-schema/src/runtime-free-subpaths.spec.ts` checks every subpath except the
+root and `workflow-validator`. `step-types/step-compile.ts` holds the compiler's per-step part
+and is called by both `workflow.compiler.ts` and the panel.
 
 Each write is its own hook — `hooks/useValidateDraft.ts`, `useSaveDraft.ts`, `useDeleteDraft.ts`,
 `usePublishDraft.ts` and `useCreateWorkflowDraft.ts` on the list — that spreads a `workflowMutations` factory
@@ -3850,10 +4025,13 @@ Decisions worth keeping:
   `src/api/onboardings/admin-onboardings.ts` holds the five statuses the engine emits, and
   the Zod response enum, the filter normalizer's guard, the status tab strip and the row chip all
   read it. The label map is typed `Record<AdminOnboardingStatus, string>`, so adding a status fails
-  the build rather than leaving that status unfilterable or unlabelled. The panel keeps its own copy rather than
-  importing `WORKFLOW_STATUSES` from `@tsh/ddl-schema`: it has no workspace dependency on the
-  engine itself and reaches it over HTTP only. The two `.cjs` e2e harness files carry a
+  the build rather than leaving that status unfilterable or unlabelled. The panel keeps its own copy for now rather than
+  importing `WORKFLOW_STATUSES` from `@tsh/ddl-schema`; moving it to an import under the new rule
+  is a pending follow-up (ADR 0051). The two `.cjs` e2e harness files carry a
   third copy for the same reason — they are plain CommonJS and cannot import the TypeScript module.
+
+- **Some domain lists are imported, not copied.** The panel may import `step-types` and
+  `workflow-schema` as well (ADR 0051); the draft canvas does (see "The draft canvas").
 
 - **Connector capabilities are imported, not copied.** `CONNECTOR_TYPES` is the one domain list the
   panel does _not_ restate: `src/app/connectors/types/connector.ts` imports it from

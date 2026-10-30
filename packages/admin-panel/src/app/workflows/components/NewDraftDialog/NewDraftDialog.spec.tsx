@@ -515,7 +515,7 @@ describe('NewDraftDialog fork', () => {
     expect(screen.getByLabelText(/^Version/)).toHaveValue('4');
     expect(screen.getByLabelText('Name')).toHaveValue('KYC flow');
     expect(screen.getByLabelText(/Workflow ID/)).toHaveAccessibleDescription(
-      'Changing the ID creates a new workflow.',
+      'Changing the ID creates a new workflow and renames its connector source keys.',
     );
   });
 
@@ -529,7 +529,7 @@ describe('NewDraftDialog fork', () => {
     expect(screen.getByLabelText(/Workflow ID/)).toHaveValue('');
     expect(screen.getByLabelText(/^Version/)).toHaveValue('1');
     expect(screen.getByLabelText(/Workflow ID/)).toHaveAccessibleDescription(
-      'Built-in workflows are copied under a new ID.',
+      'Built-in workflows are copied under a new ID, with their connector source keys renamed.',
     );
   });
 
@@ -882,7 +882,11 @@ describe('NewDraftDialog with initialFork', () => {
     expect(screen.getByLabelText(/Workflow ID/)).toHaveValue('mine');
     expect(screen.getByLabelText(/^Version/)).toHaveValue('1');
     expect(screen.getByLabelText('Name')).toHaveValue('');
-    expect(screen.queryByText('Changing the ID creates a new workflow.')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        'Changing the ID creates a new workflow and renames its connector source keys.',
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('shows the loading state and blocks Create while the preselected family is looked up', async () => {
