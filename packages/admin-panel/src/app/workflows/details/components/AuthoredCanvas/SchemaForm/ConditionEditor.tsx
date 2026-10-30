@@ -1,4 +1,5 @@
 import { useState, type ReactElement } from 'react';
+import { Autocomplete } from '@/components/ui/Autocomplete/Autocomplete';
 import { Input } from '@/components/ui/Input/Input';
 import { Select } from '@/components/ui/Select/Select';
 import { Typography } from '@/components/ui/Typography/Typography';
@@ -8,8 +9,9 @@ import {
   type WorkflowConditionScalar,
   type WorkflowScoreComparator,
 } from '@tsh/ddl-schema/workflow-contract';
-import { DEFAULT_CONDITION, FIELD_NAMES_LIST_ID } from '../../../utils/config-schema';
+import { DEFAULT_CONDITION } from '../../../utils/config-schema';
 import { AddButton, DeleteButton } from '../EntryActions';
+import { useFieldSuggestions, useWorkflowContents } from '../workflow-contents';
 import { asObject, parseNumberInput } from './form-values';
 
 /** A stored condition as read back: whatever the document holds, probed key by key. */
@@ -133,12 +135,16 @@ function writeFieldCondition(
   }
 }
 
-function buildSubject(subject: Subject, field: string): RawWorkflowCondition {
+function buildSubject(
+  subject: Subject,
+  field: string,
+  scores: readonly string[],
+): RawWorkflowCondition {
   switch (subject) {
     case 'field':
       return { field, isSet: true };
     case 'score':
-      return { score: '', gte: 0 };
+      return { score: scores[0] ?? '', gte: 0 };
     case 'all':
       return { all: [{ field, isSet: true }] };
     case 'any':
@@ -190,6 +196,7 @@ export function ConditionEditor({
   path,
 }: ConditionEditorProps): ReactElement {
   const { subject, operator, base } = readCondition(value);
+  const scores = useWorkflowContents().scores.map((score) => score.name);
   const field = typeof base.field === 'string' ? base.field : '';
   const groupItems = subject === 'all' ? base.all : base.any;
   const items = Array.isArray(groupItems) ? (groupItems as RawWorkflowCondition[]) : [];
@@ -210,7 +217,7 @@ export function ConditionEditor({
             onChange(
               isGroup(subject) && isGroup(next)
                 ? writeGroup(next, items)
-                : buildSubject(next, field),
+                : buildSubject(next, field, scores),
             )
           }
         />
@@ -225,7 +232,13 @@ export function ConditionEditor({
           />
         )}
         {subject === 'score' && (
-          <ScoreComparison condition={base} onChange={onChange} readOnly={readOnly} path={path} />
+          <ScoreComparison
+            condition={base}
+            scores={scores}
+            onChange={onChange}
+            readOnly={readOnly}
+            path={path}
+          />
         )}
         {hint !== undefined && (
           <Typography variant="meta" as="span">
@@ -264,20 +277,21 @@ function FieldComparison({
   path,
   onChange,
 }: FieldComparisonProps): ReactElement {
+  const suggestions = useFieldSuggestions();
   const takesValue = operator !== 'isSet' && operator !== 'isNotSet';
   const isList = operator === 'in' || operator === 'notIn';
 
   return (
     <>
-      <Input
+      <Autocomplete
         font="mono"
         size="sm"
-        list={FIELD_NAMES_LIST_ID}
+        items={suggestions}
         placeholder="field"
         aria-label={nameControl('Field', path)}
         disabled={readOnly}
         value={field}
-        onChange={(event) => onChange(writeFieldCondition(event.target.value, operator, compared))}
+        onValueChange={(next) => onChange(writeFieldCondition(next, operator, compared))}
       />
       <Select
         aria-label={nameControl('Operator', path)}
@@ -346,6 +360,8 @@ function ComparedValue({
 
 interface ScoreComparisonProps {
   condition: StoredCondition;
+  /** The score names the workflow declares. */
+  scores: readonly string[];
   onChange: (value: RawWorkflowCondition) => void;
   readOnly: boolean;
   path: string | undefined;
@@ -361,23 +377,33 @@ function writeScoreCondition(
 
 function ScoreComparison({
   condition,
+  scores,
   onChange,
   readOnly,
   path,
 }: ScoreComparisonProps): ReactElement {
   const operator = WORKFLOW_SCORE_COMPARATORS.find((key) => key in condition) ?? 'gte';
   const threshold = typeof condition[operator] === 'number' ? condition[operator] : undefined;
+  const score =
+    typeof condition.score === 'string' && condition.score !== '' ? condition.score : null;
+  // A stored name the workflow does not declare still shows, flagged, so it can be replaced.
+  const undeclared = score !== null && !scores.includes(score) ? score : null;
 
   return (
     <>
-      <Input
-        font="mono"
-        size="sm"
-        placeholder="score"
+      <Select
         aria-label={nameControl('Score', path)}
+        aria-invalid={undeclared !== null}
+        items={[
+          ...scores.map((name) => ({ value: name, label: name })),
+          ...(undeclared === null
+            ? []
+            : [{ value: undeclared, label: `${undeclared} (not declared)` }]),
+        ]}
+        value={score}
+        placeholder={scores.length === 0 ? 'No scores declared' : 'Choose a score'}
         disabled={readOnly}
-        value={String(condition.score ?? '')}
-        onChange={(event) => onChange(writeScoreCondition(event.target.value, operator, threshold))}
+        onValueChange={(next) => onChange(writeScoreCondition(next, operator, threshold))}
       />
       <Select
         aria-label={nameControl('Comparison', path)}

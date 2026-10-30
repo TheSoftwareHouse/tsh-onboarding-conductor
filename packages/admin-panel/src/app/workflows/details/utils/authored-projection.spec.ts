@@ -401,6 +401,41 @@ describe('projectDocument summaries', () => {
   });
 });
 
+describe('projectDocument contents', () => {
+  it('lists each stored field once, with its type and every step that stores it', () => {
+    const twin: AuthoredStep = { ...form('b'), config: form('a').config };
+
+    const { contents } = project(form('a', { success: 'b' }), twin, form('c'));
+
+    expect(contents.fields).toEqual([
+      { name: 'aField', type: 'text', steps: ['a', 'b'] },
+      { name: 'cField', type: 'text', steps: ['c'] },
+    ]);
+  });
+
+  it('keeps the declared fields of a step that does not compile, untyped', () => {
+    const broken: AuthoredStep = {
+      name: 'b',
+      type: 'nope',
+      config: { fields: { email: { type: 'text' } } },
+    };
+
+    expect(project(form('a'), broken).contents.fields).toContainEqual({
+      name: 'email',
+      type: null,
+      steps: ['b'],
+    });
+  });
+
+  it('lists the declared scores with their bounds, and none when there are none', () => {
+    expect(
+      projectDocument({ steps: [form('a')], scoring: { risk: { min: 0, max: 100 } } }).contents
+        .scores,
+    ).toEqual([{ name: 'risk', min: 0, max: 100 }]);
+    expect(project(form('a')).contents.scores).toEqual([]);
+  });
+});
+
 describe('projectDocument stored and duplicate fields', () => {
   it('lists the fields a step stores, sub-steps included', () => {
     const contact: AuthoredStep = {
