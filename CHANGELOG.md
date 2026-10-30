@@ -18,7 +18,7 @@ One product version covers the whole monorepo. Every pull request adds its line 
   references following; an HTTP call's request is a form; unclear settings carry a hint; every
   problem a step has is listed in full, on the canvas and in its inspector. The compiled graph's
   inspector names the authored step a compiled step came from. A step's scoring rules are edited in
-  its inspector, and its node lists the scores they touch. A setting that fails its step type's
+  its inspector, and its node lists the scores they touch; a condition picks its score from the ones the workflow declares, and a field name in a condition or setting is suggested from the fields the workflow stores. A setting that fails its step type's
   schema shows a short reason under it, and the step's problem names the setting instead of a bare
   error code. A consent — a `consents` section's acknowledgement, or a yes/no field of a custom
   step — is tracked as an agreement from its step, and Workflow settings lists every agreement with

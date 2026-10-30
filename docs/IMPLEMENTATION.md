@@ -3800,6 +3800,17 @@ canvas" instead.
   there, and the type's settings form leaves its `scoring` list out. A rule naming a score that is
   no longer declared stays, shown as "(not declared)", and the step lists "scoring names undeclared
   score".
+- **Names in conditions and settings.** `projectDocument` also returns `contents`: every field a
+  step stores, once, with its type and the steps that store it (connector callback fields such as
+  `kycOutcome` included; a step that does not compile offers its declared fields, untyped), and
+  every root-declared score with its bounds. `AuthoredCanvas` provides it to both inspectors
+  through `WorkflowContentsContext` (`workflow-contents.ts`), because the controls that read it sit
+  at the bottom of recursive trees (`SchemaForm` → `ObjectForm`/`ArrayForm`/`MapForm`/`VariantForm`,
+  and `ConditionEditor` → `ConditionList`). A condition's score is a `Select` over the declared
+  scores, starting on the first; one naming an undeclared score shows "(not declared)" and is
+  marked invalid. A condition's field, and a setting that names a field (`recipientField`), is an
+  `Autocomplete` (`components/ui/Autocomplete`) that suggests the stored fields but keeps any text,
+  since a transition reads the onboarding's data from earlier steps as well as its own.
 - **Agreements.** The root `agreements` (see "Agreements") are picked, not typed. The engine
   accepts any stored boolean of the step's compiled entry step as an agreement's field, but the
   panel offers only consents: on a typed step the booleans a `consents` section builds (the step's

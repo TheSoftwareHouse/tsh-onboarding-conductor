@@ -58,6 +58,9 @@ The draft editor's Authored graph tab edits the draft's authored document on a c
   for all steps (`pinPositions`), and Auto-arrange rewrites them all.
 - Ports and stored fields come from `@tsh/ddl-schema/step-types`, never from a panel-side copy of the
   compile.
+- Anything a condition or setting can name (stored fields, declared scores) comes from
+  `projectDocument`'s `contents`, read deep in the forms through `useWorkflowContents()`. Panels one level
+  under the canvas take the projection as props instead.
 - Inspector copy and controls follow one set of rules. ALL CAPS (`caps-tiny`) only for section and panel
   titles and the AND / OR between conditions; labels inside a section are Capitalized. Add, delete and clear go through
   `AuthoredCanvas/EntryActions.tsx`: `AddButton` (`+ Add <thing>`), `DeleteButton` (red trash, removes a list

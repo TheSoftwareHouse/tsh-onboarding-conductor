@@ -166,9 +166,6 @@ export function buildDefault(schema: Schema, depth = 0): unknown {
   }
 }
 
-/** `<datalist>` id holding every field name in the workflow, for inputs that name a field. */
-export const FIELD_NAMES_LIST_ID = 'canvas-field-names';
-
 /** Keys whose value names an existing workflow field; `field` and `codeField` name the field a step creates, so they get no suggestions. */
 const FIELD_REFERENCE_KEYS = new Set(['recipientField']);
 

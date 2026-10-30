@@ -1,11 +1,11 @@
 import { useId, type ReactElement } from 'react';
+import { Autocomplete } from '@/components/ui/Autocomplete/Autocomplete';
 import { Input } from '@/components/ui/Input/Input';
 import { Select } from '@/components/ui/Select/Select';
 import { Typography } from '@/components/ui/Typography/Typography';
 import {
   CONDITION_REFS,
   JSON_VALUE_REF,
-  FIELD_NAMES_LIST_ID,
   findRefName,
   isFieldReference,
   listVariants,
@@ -15,6 +15,7 @@ import {
 } from '../../../utils/config-schema';
 import { ArrayForm } from './ArrayForm';
 import { Checkbox } from '../Checkbox';
+import { useFieldSuggestions } from '../workflow-contents';
 import { useConfigFormContext } from './config-form-context';
 import { ConditionEditor } from './ConditionEditor';
 import { CountryPicker, isCountrySchema } from './CountryPicker';
@@ -189,6 +190,17 @@ function SchemaControl({
         />
       );
     case 'string':
+      if (isFieldReference(name)) {
+        return (
+          <FieldReferenceInput
+            value={value}
+            onChange={onChange}
+            readOnly={readOnly}
+            label={label}
+            aria={aria}
+          />
+        );
+      }
       return (
         <Input
           font="mono"
@@ -196,7 +208,6 @@ function SchemaControl({
           aria-label={label}
           {...aria}
           disabled={readOnly}
-          list={isFieldReference(name) ? FIELD_NAMES_LIST_ID : undefined}
           placeholder={
             placeholder ?? (resolved.pattern ? `pattern ${resolved.pattern}` : undefined)
           }
@@ -240,4 +251,34 @@ function SchemaControl({
     default:
       return <JsonValueInput value={value} onChange={onChange} readOnly={readOnly} label={label} />;
   }
+}
+
+interface FieldReferenceInputProps {
+  value: unknown;
+  onChange: (value: unknown) => void;
+  readOnly: boolean;
+  label: string;
+  aria: ControlAria;
+}
+
+/** A setting that names a field, such as `recipientField`, suggesting the fields the workflow stores. */
+function FieldReferenceInput({
+  value,
+  onChange,
+  readOnly,
+  label,
+  aria,
+}: FieldReferenceInputProps): ReactElement {
+  return (
+    <Autocomplete
+      font="mono"
+      size="sm"
+      items={useFieldSuggestions()}
+      aria-label={label}
+      {...aria}
+      disabled={readOnly}
+      value={typeof value === 'string' ? value : ''}
+      onValueChange={onChange}
+    />
+  );
 }
