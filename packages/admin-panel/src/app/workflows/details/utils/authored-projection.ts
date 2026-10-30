@@ -79,6 +79,14 @@ export type ProjectedStep = {
   duplicateFields: Map<string, string[]>;
 };
 
+/** A field some step stores; `type` is `null` when only a step that does not compile declares it. */
+export type WorkflowField = { name: string; type: string | null; steps: string[] };
+
+export type WorkflowScore = { name: string; min: number; max: number };
+
+/** What the workflow's conditions and settings can name: every stored field and every declared score. */
+export type WorkflowContents = { fields: WorkflowField[]; scores: WorkflowScore[] };
+
 export type ProjectedEdge = {
   id: string;
   source: string;
@@ -490,10 +498,30 @@ function listWorkflowIssues(doc: AuthoredDocument, names: ReadonlySet<string>): 
   return issues;
 }
 
+/** Every field the steps store, in step order, each once with the steps that store it. */
+function listWorkflowFields(steps: readonly ProjectedStep[]): WorkflowField[] {
+  const fields = new Map<string, WorkflowField>();
+  for (const { step, storedFields } of steps) {
+    // A step that does not compile still offers the fields its config declares, untyped.
+    const own = storedFields ?? listDeclaredFields(step).map((name) => ({ name, type: null }));
+    for (const { name, type } of own) {
+      const field = fields.get(name);
+      if (field === undefined) fields.set(name, { name, type, steps: [step.name] });
+      else if (!field.steps.includes(step.name)) field.steps.push(step.name);
+    }
+  }
+  return [...fields.values()];
+}
+
+function listWorkflowScores(doc: AuthoredDocument): WorkflowScore[] {
+  return Object.entries(doc.scoring ?? {}).map(([name, { min, max }]) => ({ name, min, max }));
+}
+
 export function projectDocument(doc: AuthoredDocument): {
   steps: ProjectedStep[];
   edges: ProjectedEdge[];
   workflowIssues: string[];
+  contents: WorkflowContents;
 } {
   const names = new Set(doc.steps.map((step) => step.name));
   const initial = doc.initial ?? doc.steps[0]?.name;
@@ -583,7 +611,12 @@ export function projectDocument(doc: AuthoredDocument): {
     };
   });
 
-  return { steps, edges, workflowIssues: listWorkflowIssues(doc, names) };
+  return {
+    steps,
+    edges,
+    workflowIssues: listWorkflowIssues(doc, names),
+    contents: { fields: listWorkflowFields(steps), scores: listWorkflowScores(doc) },
+  };
 }
 
 /** Edges that loop back to a step already on the path from `initial`, walked depth-first. */

@@ -68,15 +68,6 @@ describe('StepPanel header', () => {
 
     expect(container).toBeEmptyDOMElement();
   });
-
-  it('lists every field name of the document in the datalist', () => {
-    const { container } = render(<Harness stepName="collect" onChange={vi.fn()} />);
-
-    const options = [...container.querySelectorAll('datalist option')].map((option) =>
-      option.getAttribute('value'),
-    );
-    expect(options).toEqual(expect.arrayContaining(['email', 'phoneNumber']));
-  });
 });
 
 describe('StepPanel rename', () => {

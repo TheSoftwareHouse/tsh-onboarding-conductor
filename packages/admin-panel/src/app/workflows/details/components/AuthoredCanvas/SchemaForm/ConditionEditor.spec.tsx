@@ -4,6 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConditionEditor } from './ConditionEditor';
+import { WorkflowContentsContext } from '../workflow-contents';
 
 afterEach(() => {
   cleanup();
@@ -223,6 +224,92 @@ describe('ConditionEditor', () => {
 
     expect(screen.getByRole('combobox', { name: 'Field' })).toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Operator' })).toHaveAttribute('data-disabled');
+  });
+
+  describe('score name', () => {
+    function renderScored(value: unknown): ReturnType<typeof vi.fn> {
+      const onChange = vi.fn();
+      render(
+        <WorkflowContentsContext.Provider
+          value={{
+            fields: [],
+            scores: [
+              { name: 'risk', min: 0, max: 100 },
+              { name: 'trust', min: 0, max: 50 },
+            ],
+          }}
+        >
+          <ConditionEditor value={value} onChange={onChange} readOnly={false} />
+        </WorkflowContentsContext.Provider>,
+      );
+      return onChange;
+    }
+
+    it('picks the score from the ones the workflow declares', async () => {
+      const user = userEvent.setup();
+      const onChange = renderScored({ score: 'risk', gte: 40 });
+
+      await user.click(screen.getByRole('combobox', { name: 'Score' }));
+      await user.click(await screen.findByRole('option', { name: 'trust' }));
+
+      expect(onChange).toHaveBeenLastCalledWith({ score: 'trust', gte: 40 });
+    });
+
+    it('starts a new score condition on the first declared score', async () => {
+      const user = userEvent.setup();
+      const onChange = renderScored({ field: 'a', isSet: true });
+
+      await user.click(screen.getByRole('combobox', { name: 'Condition type' }));
+      await user.click(await screen.findByRole('option', { name: 'Score' }));
+
+      expect(onChange).toHaveBeenLastCalledWith({ score: 'risk', gte: 0 });
+    });
+
+    it('flags a stored score the workflow does not declare', () => {
+      renderScored({ score: 'fraud', gte: 1 });
+
+      const score = screen.getByRole('combobox', { name: 'Score' });
+      expect(score).toHaveTextContent('fraud (not declared)');
+      expect(score).toHaveAttribute('aria-invalid', 'true');
+    });
+  });
+
+  it('suggests the fields the workflow stores and keeps any typed name', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    function Held(): ReactElement {
+      const [value, setValue] = useState<unknown>({ field: '', isSet: true });
+      return (
+        <WorkflowContentsContext.Provider
+          value={{
+            fields: [
+              { name: 'email', type: 'email', steps: ['collect'] },
+              { name: 'kycOutcome', type: 'string', steps: ['kyc'] },
+            ],
+            scores: [],
+          }}
+        >
+          <ConditionEditor
+            value={value}
+            readOnly={false}
+            onChange={(next) => {
+              setValue(next);
+              onChange(next);
+            }}
+          />
+        </WorkflowContentsContext.Provider>
+      );
+    }
+    render(<Held />);
+    const field = screen.getByRole('combobox', { name: 'Field' });
+
+    await user.type(field, 'kyc');
+    await user.click(await screen.findByRole('option', { name: /kycOutcome/ }));
+    expect(onChange).toHaveBeenLastCalledWith({ field: 'kycOutcome', isSet: true });
+
+    await user.clear(field);
+    await user.type(field, 'startPayload');
+    expect(onChange).toHaveBeenLastCalledWith({ field: 'startPayload', isSet: true });
   });
 
   it('offers no Score subject when scores are not allowed', async () => {

@@ -31,12 +31,7 @@ import {
   setSectionConfig,
   setTransitions,
 } from '../../../utils/authored-edits';
-import {
-  acceptsScoring,
-  listSections,
-  type ProjectedStep,
-} from '../../../utils/authored-projection';
-import { FIELD_NAMES_LIST_ID } from '../../../utils/config-schema';
+import { acceptsScoring, type ProjectedStep } from '../../../utils/authored-projection';
 import { pluralize } from '../../../utils/pluralize';
 import { StepAgreements } from '../Agreements/StepAgreements';
 import { InspectorBand } from '../InspectorBand';
@@ -94,18 +89,6 @@ function StepNameInput({ doc, name, readOnly, onRename }: StepNameInputProps): R
   );
 }
 
-function listFieldNames(doc: AuthoredDocument): string[] {
-  return [
-    ...new Set(
-      doc.steps.flatMap((step) =>
-        listSections(step).flatMap((section) =>
-          Array.isArray(section.fields) ? section.fields.map((field) => field.name) : [],
-        ),
-      ),
-    ),
-  ];
-}
-
 /** The inspector for one step of the authored document: rename, wire, configure; every edit is a new document. */
 export const StepPanel = memo(function StepPanel({
   doc,
@@ -143,11 +126,6 @@ export const StepPanel = memo(function StepPanel({
 
   return (
     <aside className="flex w-96 shrink-0 flex-col overflow-y-auto border-l border-border-rule xl:w-md 2xl:w-lg">
-      <datalist id={FIELD_NAMES_LIST_ID}>
-        {listFieldNames(doc).map((field) => (
-          <option key={field} value={field} />
-        ))}
-      </datalist>
       <header className="flex flex-col gap-2 border-b border-border-hair px-6 py-5">
         <div className="flex items-center justify-between gap-3">
           <Typography variant="caps-tiny" as="span" className="text-fg-4">

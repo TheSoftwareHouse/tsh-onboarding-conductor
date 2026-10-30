@@ -44,6 +44,7 @@ import { useCanvasEdges } from './useCanvasEdges';
 import { useCanvasPlacement } from './useCanvasPlacement';
 import { useCanvasViewport } from './useCanvasViewport';
 import { useStepInsertion } from './useStepInsertion';
+import { WorkflowContentsContext } from './workflow-contents';
 import { WorkflowSettings } from './WorkflowSettings/WorkflowSettings';
 
 export interface AuthoredCanvasProps {
@@ -358,28 +359,30 @@ function Canvas({
         )}
       </div>
 
-      {/* One inspector at a time: each owns the field-name datalist. */}
-      {selection.kind === 'settings' && (
-        <WorkflowSettings
-          doc={doc}
-          steps={projection.steps}
-          readOnly={readOnly}
-          onChange={write}
-          onClose={clearSelection}
-        />
-      )}
-      {selectedStep !== null && (
-        <StepPanel
-          key={selectedStep}
-          doc={doc}
-          steps={projection.steps}
-          stepName={selectedStep}
-          readOnly={readOnly}
-          onChange={write}
-          onRenamed={followRename}
-          onClose={clearSelection}
-        />
-      )}
+      {/* One inspector at a time. */}
+      <WorkflowContentsContext.Provider value={projection.contents}>
+        {selection.kind === 'settings' && (
+          <WorkflowSettings
+            doc={doc}
+            steps={projection.steps}
+            readOnly={readOnly}
+            onChange={write}
+            onClose={clearSelection}
+          />
+        )}
+        {selectedStep !== null && (
+          <StepPanel
+            key={selectedStep}
+            doc={doc}
+            steps={projection.steps}
+            stepName={selectedStep}
+            readOnly={readOnly}
+            onChange={write}
+            onRenamed={followRename}
+            onClose={clearSelection}
+          />
+        )}
+      </WorkflowContentsContext.Provider>
     </div>
   );
 }
