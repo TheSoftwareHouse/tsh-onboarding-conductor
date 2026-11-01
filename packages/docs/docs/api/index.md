@@ -12,13 +12,12 @@ description: How the engine's HTTP API is organised, where the OpenAPI document 
 
 Routes are grouped by who calls them.
 
-| Group              | Who calls it                              | Credential                                                                   |
-| ------------------ | ----------------------------------------- | ---------------------------------------------------------------------------- |
-| Onboarding flow    | Your front-end, on behalf of the customer | None. The onboarding id is the only handle, so treat it as a capability.     |
-| Manual review      | An operator                               | None today, which is a known gap; see [Authentication](./authentication.md). |
-| Admin              | The admin panel, or your own tooling      | A Microsoft Entra ID bearer token.                                           |
-| Provider callbacks | A connector's provider                    | The HMAC signature the connector adapter declares.                           |
-| Health             | Orchestration and load balancers          | None.                                                                        |
+| Group              | Who calls it                                                              | Credential                                                               |
+| ------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Onboarding flow    | Your front-end, on behalf of the customer                                 | None. The onboarding id is the only handle, so treat it as a capability. |
+| Admin              | The admin panel, or your own tooling; includes the manual review decision | A Microsoft Entra ID bearer token.                                       |
+| Provider callbacks | A connector's provider                                                    | The HMAC signature the connector adapter declares.                       |
+| Health             | Orchestration and load balancers                                          | None.                                                                    |
 
 Every route lives under `/v1`. Locally that is `http://localhost:3000/v1`; in a deployment, wherever the engine is reachable. Request and response bodies are JSON, except the provider callback, which is read as the raw bytes the provider signed.
 

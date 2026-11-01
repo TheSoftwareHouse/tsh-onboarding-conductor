@@ -63,6 +63,10 @@ oversight this record hides — anyone reading the audit trail for one of these 
 expect no actor on it. Closing the gap is engine work outside this change; when it lands,
 the panel needs no change of its own, since it already sends no actor header for this call.
 
+_Amended 2026-11-01:_ the route is now marked `@AdminRoute()` and requires the same Entra bearer
+token as the other admin routes. The panel needed no change, as predicted. The decision's own
+audit row is still written as the `engine` actor; the guard's `auth.*` row names the operator.
+
 Gating on the definition means the buttons can under-render if the definition fetch fails
 or the pinned version is stale relative to what actually governs the onboarding — the page
 already treats "no definition" the same as "no current step," so this shows as no buttons

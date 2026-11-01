@@ -276,7 +276,10 @@ export class OnboardingsController {
     return this.documentUploadService.completeDocumentUpload(id, documentId);
   }
 
+  // An operator's decision on someone else's onboarding, so it sits behind the same guard as the
+  // admin routes below rather than with the end user's own POST handlers above.
   @Post(':id/review/:action')
+  @AdminRoute()
   @HttpCode(200)
   @ApiTags(API_TAGS.manualReview.name)
   @ApiOperation({
@@ -284,8 +287,8 @@ export class OnboardingsController {
     summary: 'Record a manual review decision',
     description:
       'Applies the `manual.<action>` transition the current step declares and reports where the ' +
-      'onboarding now stands. Unauthenticated today: unlike the admin routes it is not behind the ' +
-      'operator bearer guard, which is a known gap and not a design intent.',
+      'onboarding now stands. An operator route: it requires the same bearer token as the admin ' +
+      'routes.',
   })
   @OnboardingIdParam()
   @ApiParam({
@@ -376,9 +379,9 @@ export class OnboardingsController {
     return this.onboardingsService.acceptAgreement(id, agreementId);
   }
 
-  // Admin read surface. The POST handlers above and `:id/state` stay public: they serve the end
-  // user's own onboarding flow, which has no Entra identity. Everything below is guarded, so the
-  // guard is stated per route rather than on the controller.
+  // Admin read surface. The end user's own POST handlers above and `:id/state` stay public: they
+  // serve the onboarding flow, which has no Entra identity. `review` and everything below are
+  // guarded, so the guard is stated per route rather than on the controller.
   @Get('/')
   @AdminRoute()
   @ApiTags(API_TAGS.adminOnboardings.name)

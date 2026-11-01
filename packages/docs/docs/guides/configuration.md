@@ -85,10 +85,6 @@ Operator sign-in uses Microsoft Entra ID and is **on unless explicitly turned of
 - `VITE_AUTH_ENABLED` only decides whether the panel renders its sign-in gate. It ships as `false` in the sample so a fresh clone runs without a tenant. Never deploy with it false.
 - The two sides must name the same directory: `ADMIN_SSO_PROVIDER` on the engine and `VITE_SSO_PROVIDER` on the panel, both `azure` today, with `AZURE_API_AUDIENCE` matching the app registration `VITE_AZURE_API_SCOPE` is exposed by.
 
-:::warning One route stays open
-`POST /v1/onboardings/{id}/review/{action}`, the manual review decision, is not behind the operator guard today. Keep a network boundary in front of the engine's port. The [authentication page](/api/authentication) of the API reference has the details.
-:::
-
 ## Encrypting data at rest
 
 The onboarding form data a user submits (`onboardings.context`) can be encrypted before it reaches the database. You turn this on and off from the admin panel's **Encryption** page, or by calling `PATCH /v1/admin/encryption` with `{ "enabled": true }` or `{ "enabled": false }`. Nothing in `.env` switches it; what `.env` holds is the key that makes it possible.
