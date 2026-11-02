@@ -187,6 +187,26 @@ describe('Admin access audit persistence (e2e)', () => {
     expect(row.metadata).toEqual({ method: 'GET', reason: 'Missing bearer access token' });
   });
 
+  it('refuses a token-less manual review decision before the onboarding is looked up', async () => {
+    // The one operator write that predated admin sign-in: the guard now runs ahead of the action
+    // pipe and the lookup, so an anonymous caller gets 401 and an audit row, never a 400 or 404
+    // that would reveal whether the id exists.
+    await request(app!.getHttpServer())
+      .post('/v1/onboardings/01912345-6789-7abc-8def-0123456789aa/review/approve')
+      .expect(401);
+
+    const [row] = await waitForRows(1);
+
+    expect(row).toMatchObject({
+      action: 'auth.token_rejected',
+      actor_type: 'anonymous',
+      actor_id: 'unknown',
+      // The registered pattern, not the concrete path, so one route stays one auditable resource.
+      resource_id: '/v1/onboardings/:id/review/:action',
+    });
+    expect(row.metadata).toEqual({ method: 'POST', reason: 'Missing bearer access token' });
+  });
+
   it('persists a role refusal against the operator who was turned away', async () => {
     const token = await signToken({ roles: ['auditor'] });
 
