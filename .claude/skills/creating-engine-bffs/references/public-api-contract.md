@@ -16,7 +16,7 @@ the controller rather than trusting this table alone — auth is declared per ro
 | `POST /v1/onboardings/:id/submit`                         | none        | calls it — body is the step's own fields                                                          |
 | `POST /v1/onboardings/:id/documents`                      | none        | calls it — reserve an upload                                                                      |
 | `POST /v1/onboardings/:id/documents/:docId/complete`      | none        | calls it — body `{}`                                                                              |
-| `POST /v1/onboardings/:id/review/:action`                 | none        | calls it only if the BFF is an operator tool, never for a customer                                |
+| `POST /v1/onboardings/:id/review/:action`                 | Entra JWT   | **never proxies** — an operator's decision, behind the same guard as the admin routes             |
 | `POST /v1/onboardings/:id/agreements/:agreementId/accept` | none        | calls it — empty body, `200`; the customer accepts a version the onboarding already holds         |
 | `GET /v1/health/live`                                     | none        | may use it for readiness                                                                          |
 | `GET /v1/onboardings`                                     | Entra JWT   | **never proxies** — the admin list                                                                |
@@ -27,9 +27,9 @@ the controller rather than trusting this table alone — auth is declared per ro
 | `/v1/admin/*`                                             | Entra JWT   | **never proxies** — audit, connectors, workflows, `step-types`, `workflows/compile`, `agreements` |
 | `POST /v1/webhooks/:providerKey/callback`                 | per-adapter | never calls — providers call this, not the BFF                                                    |
 
-`review/:action` takes `approve`, `reject` or `invalid` and answers `200`. It is public because the
-engine has no operator identity for it; that makes exposing it to a customer a privilege
-escalation the engine will not catch.
+`review/:action` takes `approve`, `reject` or `invalid` and answers `200`. It requires an operator's
+Entra access token, so a BFF serving customers has nothing to send it with and must not try;
+exposing a review decision to a customer would be a privilege escalation.
 
 ## Agreements
 

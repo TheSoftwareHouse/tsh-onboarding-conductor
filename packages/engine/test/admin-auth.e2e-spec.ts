@@ -538,6 +538,9 @@ describe('Admin endpoint authentication (e2e)', () => {
         'OnboardingsController.reconcilePendingConnector',
         OnboardingsController.prototype.reconcilePendingConnector,
       ],
+      // An operator's decision on someone else's onboarding, so it joins the admin surface rather
+      // than the end user's own POST handlers.
+      ['OnboardingsController.review', OnboardingsController.prototype.review],
       ['AuditController.list', AuditController.prototype.list],
     ];
 
@@ -552,9 +555,6 @@ describe('Admin endpoint authentication (e2e)', () => {
         'OnboardingsController.completeDocumentUpload',
         OnboardingsController.prototype.completeDocumentUpload,
       ],
-      // Reached by an operator, not by the end user whose flow the other POST handlers serve.
-      // It is unauthenticated today; this records that as a decision rather than an oversight.
-      ['OnboardingsController.review', OnboardingsController.prototype.review],
       // Serves the end user's own onboarding flow through the BFF, which carries no Entra
       // identity, so it stays public alongside the POST handlers above rather than joining the
       // admin read surface below.

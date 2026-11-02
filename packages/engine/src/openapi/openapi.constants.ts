@@ -44,12 +44,11 @@ export const API_TAGS = {
       'so treat it as a capability and never log or share it.',
   },
   manualReview: {
-    name: 'Manual review',
+    name: 'Admin: manual review',
     description:
-      "An operator's decision on an onboarding waiting in `awaiting_manual_review`. " +
-      'Unauthenticated today, unlike the rest of the operator surface: the route predates admin ' +
-      'sign-in and has not been moved behind it. Treat this as a known gap rather than a design ' +
-      "intent, and keep a network boundary in front of the engine's port.",
+      "An operator's decision on an onboarding waiting in `awaiting_manual_review`. Behind the " +
+      'same bearer guard as the admin routes: the decision is an operator action, not part of the ' +
+      "end customer's flow.",
   },
   providerCallbacks: {
     name: 'Provider callbacks',

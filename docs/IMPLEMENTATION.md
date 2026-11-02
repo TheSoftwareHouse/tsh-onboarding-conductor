@@ -1190,7 +1190,7 @@ business outcome the operator needs to see in the list and the audit log, not a 
 ### Manual review
 
 `POST /v1/onboardings/:id/review/:action` with `action ∈ {approve, reject, invalid}` fires
-`manual.<action>`. Same locking and audit discipline; the audit action is
+`manual.<action>`. An operator route, behind the admin bearer guard (§11). Same locking and audit discipline; the audit action is
 `onboarding.manual_review_decision` and carries the trigger. An unsupported action is rejected by
 `UnsupportedManualReviewActionPipe`, which also writes a `rejected_attempt` audit record before
 throwing — so an operator's bad request is still evidence. A manual decision passes the
@@ -2817,7 +2817,7 @@ values; it renders them into the panel's `/config.js` (§12).
 | GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                                                                                                                                                                                                                                                                                                                             |
 | GET    | `/v1/onboardings/:id/state`                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | POST   | `/v1/onboardings/:id/submit`                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| POST   | `/v1/onboardings/:id/review/:action` — admin; the operator's decision                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | POST   | `/v1/onboardings/:id/pending-connector/reconcile` — admin; reads a parked connector's verdict back from its provider and applies it through the submit path (§5); `200 { outcome: applied \| still_pending \| superseded, onboarding }`, nothing is created                                                                                                                                                                                                                               |
 | POST   | `/v1/onboardings/:id/documents`                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -3000,12 +3000,13 @@ to callers, so the error-code table above gains no `VALIDATION_FAILED` entry.
 
 ### Authentication — Microsoft Entra ID on the admin surface
 
-Every route under `/v1/admin/` and the four admin onboarding reads (`GET /v1/onboardings`,
-`GET /v1/onboardings/export`, `GET /v1/onboardings/:id`, `GET /v1/onboardings/:id/transitions`) require a verified Microsoft Entra
+Every route under `/v1/admin/`, the admin onboarding reads (`GET /v1/onboardings`,
+`GET /v1/onboardings/export`, `GET /v1/onboardings/:id`, `GET /v1/onboardings/:id/transitions`) and the
+operator's manual review decision (`POST /v1/onboardings/:id/review/:action`) require a verified Microsoft Entra
 ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`) through
 the `AdminRoute()` decorator (`packages/engine/src/auth/admin-route.decorator.ts`), which applies the
 guard and writes its contract into the OpenAPI document in one step. Every other route — the
-customer-facing onboarding flow, `POST /v1/onboardings/:id/review/:action` and provider webhooks —
+customer-facing onboarding flow and provider webhooks —
 stays open: there is no Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
 `ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only
 `GET`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`) is that
@@ -3031,9 +3032,11 @@ another), `AZURE_TENANT_ID` / `AZURE_API_AUDIENCE` (required and validated at st
 enabled), and `ADMIN_REQUIRED_ROLES` (comma-separated Entra app-role allowlist, default `admin`,
 matched case-insensitively against the token's `roles` claim).
 
-The manual review route is the one operator action outside the guard: it predates admin sign-in and
-has not been moved behind it. The OpenAPI document tags it on its own and states that this is a
-known gap, not a design intent.
+The manual review route predated admin sign-in and was open until 2026-11-01; it is now marked
+`@AdminRoute()` like every other operator action. The OpenAPI document tags it on its own
+(`Admin: manual review`) because it is a decision, not a read of admin data. Its
+`onboarding.manual_review_decision` audit row is still written as the `engine` actor; the guard's own
+`auth.*` row names the operator who called.
 
 A request to a guarded route is refused as:
 
@@ -3094,7 +3097,7 @@ the authored and compiled workflow JSON Schemas
 document is 3.1 rather than 3.0 (3.0's schema subset has no
 `if`/`then` or `const`). `toOpenApi31Dialect` then rewrites the one 3.0-ism the decorators still
 emit, `nullable: true`, into a `null` type alternative. Tags are per audience (`Onboarding flow`,
-`Manual review`, `Provider callbacks`, `Admin: …`, `Health`), declared in `openapi.constants.ts`.
+`Provider callbacks`, `Admin: …` including `Admin: manual review`, `Health`), declared in `openapi.constants.ts`.
 
 **Errors are documented from the classes that raise them.** `ApiErrorResponses(...)`
 (`api-error-responses.decorator.ts`) takes the exception classes a route can throw, constructs each

@@ -2,7 +2,7 @@
 id: authentication
 title: Authentication
 sidebar_label: Authentication
-description: Which routes need a credential, what the bearer token must carry, how provider callbacks are verified, and the one route that stays open.
+description: Which routes need a credential, what the bearer token must carry, and how provider callbacks are verified.
 ---
 
 → Three audiences, three postures. The onboarding flow is open and keyed by the onboarding id, the admin surface requires a Microsoft Entra ID access token, and a provider callback is verified with the HMAC recipe its connector adapter declares.
@@ -13,7 +13,7 @@ An end customer holds no operator identity, so `POST /v1/onboardings`, the state
 
 ## Admin routes require a bearer token
 
-Every route under `/v1/admin/` and the operator routes on onboardings (`GET /v1/onboardings`, `GET /v1/onboardings/export`, `GET /v1/onboardings/{id}`, `GET /v1/onboardings/{id}/transitions`, `GET /v1/onboardings/{id}/agreements` and `POST /v1/onboardings/{id}/agreements`) carry the `entraBearer` security requirement:
+Every route under `/v1/admin/` and the operator routes on onboardings (`GET /v1/onboardings`, `GET /v1/onboardings/export`, `GET /v1/onboardings/{id}`, `GET /v1/onboardings/{id}/transitions`, `GET /v1/onboardings/{id}/agreements`, `POST /v1/onboardings/{id}/agreements`, `POST /v1/onboardings/{id}/pending-connector/reconcile` and the manual review decision `POST /v1/onboardings/{id}/review/{action}`) carry the `entraBearer` security requirement:
 
 ```http
 Authorization: Bearer <access token>
@@ -32,10 +32,6 @@ Every decision, granted or refused, is written to the audit log, so the trail an
 :::note Local runs
 `ADMIN_AUTH_ENABLED=false` switches the guard off so a fresh clone runs without a tenant. It is a local-only setting: the engine refuses it when `NODE_ENV=production`.
 :::
-
-## Manual review is open today
-
-`POST /v1/onboardings/{id}/review/{action}` records an operator's decision, yet it is not behind the bearer guard: the route predates admin sign-in and has not been moved behind it. Treat this as a known gap rather than a design intent, and keep a network boundary in front of the engine's port until it is closed.
 
 ## Provider callbacks are signed
 

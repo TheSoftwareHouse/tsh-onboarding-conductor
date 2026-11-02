@@ -11,6 +11,10 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ### Changed
 
+- **Breaking:** Engine — `POST /v1/onboardings/:id/review/:action`, the manual review decision,
+  now requires the same Microsoft Entra ID bearer token as the other admin routes; a caller that
+  posted it without a token now gets `401`. It was the one operator action outside the guard. The
+  admin panel already sent the token, so it needs no change.
 - Fonts — The commercial TWK Everett files are no longer in the repository and the typeface is no
   longer referenced. The documentation site and the admin panel ship Inter Tight and JetBrains Mono
   (SIL Open Font License) as their only type.

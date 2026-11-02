@@ -4140,7 +4140,7 @@
     },
     "/v1/onboardings/{id}/review/{action}": {
       "post": {
-        "description": "Applies the `manual.<action>` transition the current step declares and reports where the onboarding now stands. Unauthenticated today: unlike the admin routes it is not behind the operator bearer guard, which is a known gap and not a design intent.",
+        "description": "Applies the `manual.<action>` transition the current step declares and reports where the onboarding now stands. An operator route: it requires the same bearer token as the admin routes.",
         "operationId": "reviewOnboarding",
         "parameters": [
           {
@@ -4180,6 +4180,26 @@
           },
           "400": {
             "description": "`action` is not one of `approve`, `reject`, `invalid`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4290,11 +4310,26 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
           }
         },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
         "summary": "Record a manual review decision",
         "tags": [
-          "Manual review"
+          "Admin: manual review"
         ]
       }
     },
@@ -5234,8 +5269,8 @@
       "description": "The end customer's own onboarding: start it, read the step to render, submit that step's data, upload the documents a step asks for and accept an agreement version it owes. These routes carry no authentication because an end customer holds no operator identity; the onboarding id is the only handle, so treat it as a capability and never log or share it."
     },
     {
-      "name": "Manual review",
-      "description": "An operator's decision on an onboarding waiting in `awaiting_manual_review`. Unauthenticated today, unlike the rest of the operator surface: the route predates admin sign-in and has not been moved behind it. Treat this as a known gap rather than a design intent, and keep a network boundary in front of the engine's port."
+      "name": "Admin: manual review",
+      "description": "An operator's decision on an onboarding waiting in `awaiting_manual_review`. Behind the same bearer guard as the admin routes: the decision is an operator action, not part of the end customer's flow."
     },
     {
       "name": "Provider callbacks",
