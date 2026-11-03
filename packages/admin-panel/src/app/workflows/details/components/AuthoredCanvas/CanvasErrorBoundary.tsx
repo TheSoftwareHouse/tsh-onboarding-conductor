@@ -1,5 +1,7 @@
 import { Component, type ReactNode } from 'react';
-import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
+import { ErrorState } from '@/components/ui/ErrorState/ErrorState';
+import { CANVAS_ERROR_TITLE } from '../../constants/canvas-error';
+import { describeCanvasError } from '../../utils/describe-canvas-error';
 
 interface CanvasErrorBoundaryProps {
   /** Changing it retries the canvas, so an edit that fixes the document brings it back. */
@@ -35,9 +37,7 @@ export class CanvasErrorBoundary extends Component<
   render(): ReactNode {
     if (this.state.error === null) return this.props.children;
     return (
-      <StatusRegion className="px-8 py-6">
-        {`The canvas cannot draw this document: ${this.state.error.message}. Fix it in the JSON tab.`}
-      </StatusRegion>
+      <ErrorState title={CANVAS_ERROR_TITLE} body={describeCanvasError(this.state.error.message)} />
     );
   }
 }

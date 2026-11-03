@@ -1,10 +1,13 @@
-import type { FormEvent, ReactElement } from 'react';
+import type { FormEvent, ReactElement, ReactNode } from 'react';
 import { useState } from 'react';
 import type { AdminPageProps } from '@/lib/admin-page';
 import type { DateTimeRange } from '@/components/ui/filters/DateTimeRangeField/DateTimeRangeField';
+import { Button } from '@/components/ui/Button/Button';
+import { EmptyState } from '@/components/ui/EmptyState/EmptyState';
+import { Loader } from '@/components/ui/Loader/Loader';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
+import { LoadFailure } from '@/components/ui/LoadFailure/LoadFailure';
 import type { AuditEvent } from '@/api/audit/audit-events';
-import type { ApiError } from '@/services/api/api-error';
 import { AuditFilters } from './components/AuditFilters/AuditFilters';
 import { AuditResourceTabs } from './components/AuditResourceTabs/AuditResourceTabs';
 import { AuditResults } from './components/AuditResults/AuditResults';
@@ -15,10 +18,6 @@ import {
   findOccurredWindowError,
   type AuditEventFilters,
 } from './utils/filter-audit-events';
-
-function describeFetchError(error: ApiError): string {
-  return `Unable to load audit events: ${error.message}`;
-}
 
 /** Composes the Logs section: its header, resource-type tabs, filter band, results table, and pager. */
 export function AuditPage({ eyebrow, title }: AdminPageProps): ReactElement {
@@ -88,26 +87,50 @@ export function AuditPage({ eyebrow, title }: AdminPageProps): ReactElement {
   };
 
   const disabled = phase === 'loading';
-  const showTable = phase === 'ready';
   const appliedCount = countActiveAuditFilters(appliedSearchValues);
   const appliedFilterActive = appliedCount > 0;
 
-  let statusMessage: string;
+  let state: ReactNode;
+  let statusMessage: string | null = null;
   let visibleEvents: AuditEvent[] = [];
-  let emptyMessage = '';
 
   if (phase === 'loading') {
-    statusMessage = 'Loading audit events…';
+    state = <Loader label="Loading audit events…" />;
   } else if (phase === 'error') {
-    statusMessage = error ? describeFetchError(error) : 'Unable to load audit events.';
+    state = (
+      <LoadFailure
+        error={error}
+        subject="audit events"
+        deniedSubject="the audit log"
+        onRetry={handleReload}
+      />
+    );
   } else if (occurredError !== null) {
-    statusMessage = occurredError;
-    visibleEvents = events;
+    state = (
+      <EmptyState
+        kind="noMatch"
+        title="Correct the refused filter to see results"
+        body={occurredError}
+      />
+    );
   } else if (events.length === 0 || pagination === null) {
-    statusMessage = appliedFilterActive
-      ? 'No audit events match the current filters.'
-      : 'No audit events were returned.';
-    emptyMessage = statusMessage;
+    state = appliedFilterActive ? (
+      <EmptyState
+        kind="noMatch"
+        title="No audit events match the current filters"
+        body="Change or reset the filters to see more."
+        actions={
+          <Button variant="primary" size="lg" onClick={handleReset}>
+            Reset filters
+          </Button>
+        }
+      />
+    ) : (
+      <EmptyState
+        title="No audit events yet"
+        body="Events are recorded as onboardings, connectors and workflows change."
+      />
+    );
   } else {
     statusMessage = `Showing ${events.length} of ${pagination.total} audit events (page ${pagination.page} of ${pagination.totalPages}).`;
     visibleEvents = events;
@@ -130,9 +153,8 @@ export function AuditPage({ eyebrow, title }: AdminPageProps): ReactElement {
       />
       <AuditResults
         statusMessage={statusMessage}
-        showTable={showTable}
+        state={state}
         visibleEvents={visibleEvents}
-        emptyMessage={emptyMessage}
         pagination={pagination}
         paginationDisabled={disabled}
         onPageChange={goToPage}

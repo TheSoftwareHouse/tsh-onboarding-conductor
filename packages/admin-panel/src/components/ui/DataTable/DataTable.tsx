@@ -1,7 +1,6 @@
 import type {
   HTMLAttributes,
   ReactElement,
-  ReactNode,
   TableHTMLAttributes,
   TdHTMLAttributes,
   ThHTMLAttributes,
@@ -12,7 +11,6 @@ import { tv } from '@/lib/tv';
 
 export interface TableSurfaceProps extends HTMLAttributes<HTMLDivElement> {
   label: string;
-  hidden?: boolean;
 }
 
 /** The scroll region a table lives in; the sticky header rows read against this, not the window. */
@@ -103,20 +101,4 @@ export function LinkedRow({
 /** The row's one real link, its `::after` stretched over the `LinkedRow`; a later `relative` sibling sits above it. */
 export function RowLink({ className, ...rest }: LinkProps): ReactElement {
   return <Link className={cn('after:absolute after:inset-0', className)} {...rest} />;
-}
-
-export interface TableEmptyRowProps {
-  colSpan: number;
-  children: ReactNode;
-}
-
-/** The row a table renders instead of data, spanning every column so the message stays centred. */
-export function TableEmptyRow({ colSpan, children }: TableEmptyRowProps): ReactElement {
-  return (
-    <tr>
-      <Td colSpan={colSpan} className="text-center text-fg-4">
-        {children}
-      </Td>
-    </tr>
-  );
 }

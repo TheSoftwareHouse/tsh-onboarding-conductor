@@ -41,6 +41,9 @@ One product version covers the whole monorepo. Every pull request adds its line 
   now requires the same Microsoft Entra ID bearer token as the other admin routes; a caller that
   posted it without a token now gets `401`. It was the one operator action outside the guard. The
   admin panel already sent the token, so it needs no change.
+- Admin panel — Every page shows loading, error and empty states through one set of components:
+  a spinner that appears after 150 ms, "Unable to load …" with Retry, "No access to …", not-found
+  pages with a link back, and empty and no-match messages under the table's column headers.
 - Compiled workflow graph — The tab formerly named Graph is Compiled graph (`?view=graph` still
   opens it) and draws a dashed frame around the compiled steps one authored step produced.
 - Workflow validation — A failure in one step's connector field mappings, conditions, scoring or

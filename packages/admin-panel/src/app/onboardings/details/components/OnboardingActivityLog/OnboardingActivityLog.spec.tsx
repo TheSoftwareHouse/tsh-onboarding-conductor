@@ -1,7 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/services/api/api-error';
 import { useOnboardingActivity } from '../../hooks/useOnboardingActivity';
 import { OnboardingActivityLog } from './OnboardingActivityLog';
 
@@ -30,44 +32,67 @@ afterEach(() => {
 });
 
 describe('OnboardingActivityLog', () => {
-  it('shows a loading line while the read is pending', () => {
+  it('shows an inline loader while the read is pending', () => {
     mockedUseOnboardingActivity.mockReturnValue({
       phase: 'loading',
       entries: [],
       total: 0,
       error: null,
+      refetch: vi.fn(),
     });
 
     renderLog();
 
-    expect(screen.getByText('Loading activity…')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading activity…');
   });
 
-  it('shows the failure message when the read is refused', () => {
+  it('shows a section failure with Retry that refetches the activity', async () => {
+    const refetch = vi.fn();
     mockedUseOnboardingActivity.mockReturnValue({
       phase: 'error',
       entries: [],
       total: 0,
-      error: 'Request failed with status 403.',
+      error: new ApiError('Request failed with status 500.', { status: 500 }),
+      refetch,
     });
 
     renderLog();
 
-    expect(
-      screen.getByText('Unable to load activity: Request failed with status 403.'),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Unable to load activity');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Request failed with status 500. The rest of this onboarding is up to date.',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 
-  it('shows a plain line when the onboarding carries no recorded activity', () => {
+  it('shows no access, without Retry, when the read is refused', () => {
+    mockedUseOnboardingActivity.mockReturnValue({
+      phase: 'error',
+      entries: [],
+      total: 0,
+      error: new ApiError('Request failed with status 403.', { status: 403 }),
+      refetch: vi.fn(),
+    });
+
+    renderLog();
+
+    expect(screen.getByRole('alert')).toHaveTextContent('No access to activity');
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  });
+
+  it('shows an empty state when the onboarding carries no recorded activity', () => {
     mockedUseOnboardingActivity.mockReturnValue({
       phase: 'ready',
       entries: [],
       total: 0,
       error: null,
+      refetch: vi.fn(),
     });
 
     renderLog();
 
+    expect(screen.getByRole('heading', { level: 3, name: 'No activity yet' })).toBeInTheDocument();
     expect(
       screen.getByText('No activity has been recorded for this onboarding yet.'),
     ).toBeInTheDocument();
@@ -86,6 +111,7 @@ describe('OnboardingActivityLog', () => {
       ],
       total: 24,
       error: null,
+      refetch: vi.fn(),
     });
 
     renderLog();
@@ -118,6 +144,7 @@ describe('OnboardingActivityLog', () => {
       ],
       total: 3,
       error: null,
+      refetch: vi.fn(),
     });
 
     renderLog();
@@ -140,6 +167,7 @@ describe('OnboardingActivityLog', () => {
       ],
       total: 1,
       error: null,
+      refetch: vi.fn(),
     });
 
     renderLog();
@@ -162,6 +190,7 @@ describe('OnboardingActivityLog', () => {
       ],
       total: 1,
       error: null,
+      refetch: vi.fn(),
     });
 
     renderLog();
@@ -185,6 +214,7 @@ describe('OnboardingActivityLog', () => {
       ],
       total: 1,
       error: null,
+      refetch: vi.fn(),
     });
 
     renderLog();
@@ -206,6 +236,7 @@ describe('OnboardingActivityLog', () => {
       ],
       total: 1,
       error: null,
+      refetch: vi.fn(),
     });
 
     renderLog();

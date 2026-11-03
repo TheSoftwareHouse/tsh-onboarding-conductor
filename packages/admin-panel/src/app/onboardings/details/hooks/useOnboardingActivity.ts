@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { auditQueries } from '@/api/audit/audit-queries';
 import type { AuditEvent, AuditEventQueryFilters } from '@/api/audit/audit-events';
+import type { ApiError } from '@/services/api/api-error';
 import { ONBOARDING_AUDIT_RESOURCE_TYPE } from '@/lib/audit-search-params';
 import { DEFAULT_PAGE } from '@/lib/pagination';
 
@@ -24,7 +25,8 @@ export interface UseOnboardingActivityResult {
   entries: OnboardingActivityEntry[];
   /** Total the endpoint reports, which may exceed `entries.length`. */
   total: number;
-  error: string | null;
+  error: ApiError | null;
+  refetch: () => void;
 }
 
 /** This band's request: the trail scoped to one onboarding, every other criterion absent. */
@@ -55,13 +57,14 @@ function projectActivityEntry(event: AuditEvent): OnboardingActivityEntry {
 /** Reads the most recent activity-log entries the audit trail carries for one onboarding. */
 export function useOnboardingActivity(onboardingId: string): UseOnboardingActivityResult {
   const query = useQuery(auditQueries.list(toActivityQueryFilters(onboardingId)));
-  const { data, isFetching, isError, error } = query;
+  const { data, isFetching, isError, error, refetch } = query;
 
   return {
     phase: isFetching ? 'loading' : isError ? 'error' : 'ready',
     entries:
       isFetching || isError ? NO_ENTRIES : (data?.events.map(projectActivityEntry) ?? NO_ENTRIES),
     total: data?.pagination.total ?? 0,
-    error: error?.message ?? null,
+    error,
+    refetch: () => void refetch(),
   };
 }

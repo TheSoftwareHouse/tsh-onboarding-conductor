@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { EmptyState } from '@/components/ui/EmptyState/EmptyState';
 import { Typography } from '@/components/ui/Typography/Typography';
 import type { EncryptionKey } from '@/api/encryption/admin-encryption';
 import { EncryptionKeyCard } from './EncryptionKeyCard/EncryptionKeyCard';
@@ -8,7 +9,8 @@ export interface EncryptionKeyListProps {
   keys: EncryptionKey[];
 }
 
-const EMPTY_MESSAGE = 'No encryption keys yet. Turn encryption on to create the first one.';
+const EMPTY_TITLE = 'No encryption keys yet';
+const EMPTY_BODY = 'Turn encryption on to create the first one.';
 
 /** The key history under its own heading: one card per key, or the empty message. */
 export function EncryptionKeyList({ keys }: EncryptionKeyListProps): ReactElement {
@@ -26,7 +28,7 @@ export function EncryptionKeyList({ keys }: EncryptionKeyListProps): ReactElemen
         Keys
       </Typography>
       {keys.length === 0 ? (
-        <p className="text-body-sm text-fg-3">{EMPTY_MESSAGE}</p>
+        <EmptyState layout="section" title={EMPTY_TITLE} body={EMPTY_BODY} />
       ) : (
         <div className="flex flex-col gap-4">
           {keys.map((key) => (

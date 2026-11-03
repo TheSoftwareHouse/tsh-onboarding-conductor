@@ -112,6 +112,6 @@ describe('useOnboardingActivity', () => {
     await waitFor(() => expect(result.current.phase).toBe('error'));
 
     expect(result.current.entries).toEqual([]);
-    expect(result.current.error).toBe('Request failed with status 403.');
+    expect(result.current.error?.message).toBe('Request failed with status 403.');
   });
 });

@@ -5,7 +5,6 @@ import type { ManualReviewAction } from '@/api/onboardings/onboarding-review';
 import type { WorkflowDefinition } from '@/api/workflows/workflow-definitions';
 import { Button } from '@/components/ui/Button/Button';
 import { Refresh } from '@/components/ui/icons';
-import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
 import { TextLink } from '@/components/ui/TextLink/TextLink';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { ADMIN_ROUTES } from '@/constants/routes';
@@ -29,8 +28,6 @@ export interface OnboardingDetailsHeaderProps {
   /** True while the parked connector's provider is being asked for its verdict. */
   isReconciling: boolean;
   onReconcile: () => void;
-  /** The page's live status line; null when there is nothing to report. */
-  statusMessage: string | null;
 }
 
 /** The details header band; summary-dependent parts render only once the summary has loaded. */
@@ -45,13 +42,12 @@ export function OnboardingDetailsHeader({
   onReviewSubmit,
   isReconciling,
   onReconcile,
-  statusMessage,
 }: OnboardingDetailsHeaderProps): ReactElement {
   // One write at a time: a review decision and a provider check both move the same onboarding.
   const actionPending = pendingAction !== null || isReconciling;
 
   return (
-    <header className="flex flex-col gap-2 border-b border-border-rule px-8 py-5">
+    <header className="flex flex-none flex-col gap-2 border-b border-border-rule px-8 py-5">
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
         <div className="flex min-w-0 flex-col gap-1.5">
           <div className="flex items-center gap-2">
@@ -120,7 +116,6 @@ export function OnboardingDetailsHeader({
           </Button>
         </div>
       </div>
-      {statusMessage !== null && <StatusRegion>{statusMessage}</StatusRegion>}
     </header>
   );
 }

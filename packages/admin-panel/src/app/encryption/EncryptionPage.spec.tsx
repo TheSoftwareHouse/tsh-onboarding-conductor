@@ -146,7 +146,7 @@ describe('EncryptionPage', () => {
 
     renderPage();
 
-    expect(statusLine()).toHaveTextContent('Loading encryption settings…');
+    expect(screen.getByRole('status')).toHaveTextContent('Loading encryption settings…');
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Encryption status' })).not.toBeInTheDocument();
   });
@@ -158,11 +158,24 @@ describe('EncryptionPage', () => {
 
     renderPage();
 
-    await waitFor(() => {
-      expect(statusLine()).toHaveTextContent(
-        'Unable to load encryption settings: Request failed with status 500.',
-      );
-    });
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Unable to load encryption settings');
+    expect(alert).toHaveTextContent('Request failed with status 500.');
+    expect(screen.queryByText(/Showing \d+ encryption key/)).not.toBeInTheDocument();
+  });
+
+  it('retries a failed request from the failure state', async () => {
+    mockedFetchEncryptionState.mockRejectedValueOnce(
+      new ApiError('Request failed with status 500.', { status: 500 }),
+    );
+    renderPage();
+    await screen.findByRole('alert');
+    mockedFetchEncryptionState.mockResolvedValueOnce(OFF_STATE);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByRole('region', { name: 'Encryption status' })).toBeInTheDocument();
+    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(2);
   });
 
   it('summarises the state and renders one card per key, in each of the three chip states', async () => {
@@ -201,9 +214,7 @@ describe('EncryptionPage', () => {
     await renderReady(OFF_STATE);
 
     expect(statusLine()).toHaveTextContent('Encryption is off. Showing 0 encryption keys.');
-    expect(
-      screen.getByText('No encryption keys yet. Turn encryption on to create the first one.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('No encryption keys yet')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Turn encryption on' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Add key' })).not.toBeInTheDocument();
   });
@@ -217,9 +228,7 @@ describe('EncryptionPage', () => {
         'The engine has no ENCRYPTION_KEY configured, so encryption cannot be turned on. Set it and restart the engine.',
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText('No encryption keys yet. Turn encryption on to create the first one.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('No encryption keys yet')).toBeInTheDocument();
   });
 
   it('also disables Add key when encryption is on but the key-encryption key has gone missing', async () => {

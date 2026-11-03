@@ -1,8 +1,11 @@
 import { useMemo, type ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
-import { Button } from '@/components/ui/Button/Button';
-import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
+import { LoadFailure } from '@/components/ui/LoadFailure/LoadFailure';
+import { ErrorState } from '@/components/ui/ErrorState/ErrorState';
+import { Loader } from '@/components/ui/Loader/Loader';
+import { CANVAS_ERROR_TITLE } from '../../constants/canvas-error';
+import { describeCanvasError } from '../../utils/describe-canvas-error';
 import { parseDocument } from '../../utils/authored-document';
 import { AuthoredCanvas } from '../AuthoredCanvas/AuthoredCanvas';
 
@@ -20,24 +23,15 @@ export function VersionCanvas({ workflowId, version }: VersionCanvasProps): Reac
   );
 
   if (error !== null) {
-    return (
-      <div className="flex flex-col items-start gap-4 p-8">
-        <StatusRegion>{`Unable to load the document: ${error.message}`}</StatusRegion>
-        <Button variant="secondary" size="md" onClick={() => void refetch()}>
-          Retry
-        </Button>
-      </div>
-    );
+    return <LoadFailure subject="the document" error={error} onRetry={() => void refetch()} />;
   }
 
   if (doc === null) {
-    return <StatusRegion className="px-8 py-6">Loading document…</StatusRegion>;
+    return <Loader label="Loading document…" />;
   }
 
   if (typeof doc === 'string') {
-    return (
-      <StatusRegion className="px-8 py-6">{`Unable to draw this version: ${doc}`}</StatusRegion>
-    );
+    return <ErrorState title={CANVAS_ERROR_TITLE} body={describeCanvasError(doc)} />;
   }
 
   return <AuthoredCanvas doc={doc} readOnly />;
