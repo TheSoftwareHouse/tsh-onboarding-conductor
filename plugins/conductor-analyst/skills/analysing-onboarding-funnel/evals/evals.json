@@ -1,0 +1,185 @@
+{
+  "skill_name": "analysing-onboarding-funnel",
+  "threshold": 70,
+  "model": "sonnet",
+  "mcp_config": "plugins/conductor-analyst/.mcp.json",
+  "evals": [
+    {
+      "id": "status-mix-and-rejections",
+      "prompt": "How are our onboardings converting overall, and why were the rejected ones rejected? I want a status breakdown and the rejection reasons, all time, all workflows.",
+      "expected_output": "Assumes a fresh `pnpm stack:reset` plus `pnpm onboardings:seed -- --spread-days 90` (seed 42): 46 onboardings. States the assumption of all time and all workflows. Status mix from onboarding_stats: awaiting_user 17, rejected 12, approved 11, awaiting_manual_review 4, invalid 2 - so 11 approved of 46; final outcomes (approved, rejected, invalid) are 25 and 21 onboardings (17 awaiting_user plus 4 awaiting_manual_review) are still open. Rejected 12 split by reason: CONNECTOR_REJECTED 4, ATTEMPTS_EXHAUSTED 2, and 6 with no reason code, which are the ones rejected by a score threshold or by a reviewer decision. Cites onboarding_stats, computes any share with code or leaves it out, never from memory, and notes small counts.",
+      "golden": "golden/status-mix-and-rejections.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "onboarding_stats",
+          "min": 2
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "CONNECTOR_REJECTED"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "ATTEMPTS_EXHAUSTED"
+        }
+      ],
+      "assertions": [
+        "The answer reports the status mix with these counts: approved 11, rejected 12, awaiting_user 17, awaiting_manual_review 4 and invalid 2, out of 46 onboardings",
+        "The answer splits the 12 rejected onboardings by reason: CONNECTOR_REJECTED 4, ATTEMPTS_EXHAUSTED 2, and 6 with no reason code that it attributes to a score threshold or a reviewer decision",
+        "The answer states its assumption of all time and all workflows",
+        "The answer does not present the still-open onboardings (awaiting_user or awaiting_manual_review) as lost or rejected when it discusses conversion",
+        {
+          "text": "The answer says it read these figures from onboarding_stats, and mentions that the call reads an audited export or that results may be a few minutes old",
+          "severity": "warn"
+        },
+        {
+          "text": "Any percentage in the answer is consistent with the counts (11 of 46 is about 24 percent; 12 of 46 about 26 percent)",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "where-applicants-drop-off",
+      "prompt": "Where do applicants drop off in the analyst-investigation workflow? Which step loses the most people, and are those people really gone?",
+      "expected_output": "Assumes the same fresh seed 42 population. From onboarding_funnel for analyst-investigation (all time): collect_profile reached 46, 39 moved on, 4 rejected, 3 waiting; send_email_code reached 39, 35 moved on, 4 waiting; verify_email_code reached 35, 31 moved on, 2 rejected, 2 waiting; upload_identity_document reached 31, 29 moved on, 2 waiting; check_identity reached 29, 10 went to review_identity, 9 approved, 4 rejected, 6 waiting; review_identity reached 10, 2 approved, 2 rejected, 2 invalid, 4 waiting. check_identity has the most waiting (6) but 4 of those are parked on the mock_async_callback_2 provider callback (connector_health parked 4), so they have not left - only 2 are applicants who stopped. Medians in step are about a second or less and should not be ranked.",
+      "golden": "golden/where-applicants-drop-off.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "onboarding_funnel",
+          "min": 1
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "connector_health",
+          "min": 1
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "check_identity"
+        }
+      ],
+      "assertions": [
+        "The answer identifies check_identity as the step with the most onboardings still waiting, 6 of the 29 that reached it",
+        "The answer says 4 of those 6 waiting at check_identity are parked on a provider callback (mock_async_callback_2), so they are waiting for the provider and have not dropped out, leaving 2 who stopped on their own",
+        "The answer gives the funnel entry counts: 46 reached collect_profile, 39 reached send_email_code, 35 reached verify_email_code, 31 reached upload_identity_document, 29 reached check_identity and 10 reached review_identity",
+        "The answer reports the 4 rejections at collect_profile and the 2 at verify_email_code as outcomes at those steps, not as applicants who dropped off",
+        {
+          "text": "The answer notes that the 4 onboardings waiting at review_identity are waiting for a reviewer",
+          "severity": "warn"
+        },
+        {
+          "text": "The answer does not rank steps by median time in step, or says those medians are about a second or less and show no real difference",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "connector-health-and-parked",
+      "prompt": "Is any of our providers misbehaving? Which connector has onboardings sitting parked on it, and are there any failures?",
+      "expected_output": "Assumes the same fresh seed 42 population. From connector_health (all time): mock_async_callback_2 has 4 onboardings parked right now, 23 callbacks applied and no failures (retried, fellBack, ignored, propagated and unavailable all 0); smtp_email_otp has none parked, no failures, 2 rejected and 8 invalid - wrong verification codes, matching the 2 ATTEMPTS_EXHAUSTED rejections. Concludes that no provider is failing; the parked 4 are waiting for a callback, not an outage, and that the rejected/invalid counts on the email connector are applicants entering wrong codes, which the tool does not itself prove. May cross-check the parked count with onboarding_stats parked=true.",
+      "golden": "golden/connector-health-and-parked.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "connector_health",
+          "min": 1
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "mock_async_callback_2"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "smtp_email_otp"
+        }
+      ],
+      "assertions": [
+        "The answer says 4 onboardings are parked on mock_async_callback_2",
+        "The answer says no connector shows failures: the retried, fellBack, ignored, propagated and unavailable counts are all zero for both mock_async_callback_2 and smtp_email_otp",
+        "The answer reports that smtp_email_otp has 2 rejected and 8 invalid and that nothing is parked on it",
+        "The answer does not claim a provider outage or that the provider is failing",
+        {
+          "text": "The answer reports 23 callbacks applied for mock_async_callback_2",
+          "severity": "warn"
+        },
+        {
+          "text": "The answer describes the parked onboardings as waiting for a provider callback, not as failures, and does not claim a cause for the rejected and invalid counts that the tool does not show",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "country-risk-and-refused-email",
+      "prompt": "Which countries do our applicants come from and where do risk scores run highest? Then give me the same split per applicant email address.",
+      "expected_output": "Assumes the same fresh seed 42 population. Country split from onboarding_stats groupBy country: FR 7, ES 5, GB 5, SE 5, IE 4, PL 4, IT 3, NL 3, TR 3, AE 2, DE 2 and 3 with no country yet. Highest risk: TR (3 onboardings, risk min 70, median 70, max 90) then AE (2 onboardings, min 40, median 50, max 60); every other country has a median of 0. Flags that TR and AE are tiny groups - 3 and 2 onboardings - so they are a pattern worth a look, not a rate, and extrapolates nothing. For the email split: explains that grouping by email is refused by design because it is personal data, offers a field that passes in clear instead, and does not rebuild the split by paging through individual onboardings.",
+      "golden": "golden/country-risk-and-refused-email.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "onboarding_stats",
+          "min": 1
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "\\bTR\\b"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "refus|by design|personal data",
+          "flags": "i"
+        }
+      ],
+      "assertions": [
+        "The answer names TR as the country with the highest risk scores, with 3 onboardings and a median of 70, and AE next with 2 onboardings and a median of 50",
+        "The answer flags that the groups behind the highest scores (TR with 3 onboardings, AE with 2) are small and does not project them into a rate or a trend",
+        "The answer says the split per email address cannot be produced because grouping by personal data is refused by design, and offers a non-personal field instead",
+        "The answer gives no email address, pseudonym or per-person listing as a substitute for the refused split",
+        {
+          "text": "The answer reports FR as the largest country with 7 onboardings",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "negative-single-onboarding",
+      "prompt": "Why was onboarding {{manifest:score-reject-01}} rejected?",
+      "invocation": "natural",
+      "expected_output": "A question about one onboarding; the population-analysis skill does not apply (investigating-onboarding does). Whether the agent then answers it correctly is not asserted here.",
+      "judge": false,
+      "checks": [
+        {
+          "type": "skill-fired",
+          "skill": "analysing-onboarding-funnel",
+          "expected": false
+        },
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        }
+      ]
+    }
+  ]
+}

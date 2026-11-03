@@ -21,6 +21,10 @@ export type ClaudeRunOptions = {
   readonly systemPrompt?: string;
   readonly jsonSchema?: Record<string, unknown>;
   readonly strictMcpConfig?: boolean;
+  /** A `--mcp-config` file; with `strictMcpConfig`, the only MCP servers the run reaches. */
+  readonly mcpConfig?: string;
+  /** Plugin directories loaded for this run only (`--plugin-dir`). */
+  readonly pluginDirs?: readonly string[];
   readonly disableSkills?: boolean;
 };
 

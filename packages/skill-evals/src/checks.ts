@@ -11,6 +11,10 @@ export type CheckContext = {
   readonly sandbox: string;
   readonly changedFiles: readonly ChangedFile[];
   readonly skillsUsed: readonly string[];
+  /** Every tool the agent called, by the name the harness reported, in order. */
+  readonly toolNames: readonly string[];
+  /** The MCP server names the set's `mcp_config` declares; none when the set declares no config. */
+  readonly mcpServers: readonly string[];
   readonly resultText: string;
   /** The skill's `evals/` directory, which `golden` paths are relative to. */
   readonly evalsDirectory: string;
@@ -108,10 +112,43 @@ function workflowCandidates(
   return files.length === 0 ? { problem: `no changed file matches ${glob}` } : { files };
 }
 
+const MCP_TOOL_PREFIX = 'mcp__';
+const MCP_SEPARATOR = '__';
+
+/**
+ * Whether a skill the harness reported is the one a check names. A plugin skill is reported under
+ * its plugin's namespace (`conductor-analyst:investigating-onboarding`) and a repository skill
+ * under its bare name, so a check written with the bare name accepts both; one written with the
+ * namespace accepts only that.
+ */
+export function isSkillNamed(used: string, name: string): boolean {
+  return used === name || used.endsWith(`:${name}`);
+}
+
+/**
+ * Whether a tool call is the MCP tool `tool` of one of `servers`, or of any server when none is
+ * known. The harness names it `mcp__<server>__<tool>` and rewrites every character of the server
+ * name outside letters, digits, `_` and `-` to `_`, so the configured names are rewritten alike.
+ */
+export function isMcpToolCall(name: string, tool: string, servers: readonly string[]): boolean {
+  if (servers.length === 0) {
+    return (
+      name.startsWith(MCP_TOOL_PREFIX) &&
+      name.endsWith(`${MCP_SEPARATOR}${tool}`) &&
+      name.length > MCP_TOOL_PREFIX.length + MCP_SEPARATOR.length + tool.length
+    );
+  }
+
+  return servers.some(
+    (server) =>
+      name === `${MCP_TOOL_PREFIX}${server.replace(/[^A-Za-z0-9_-]/g, '_')}${MCP_SEPARATOR}${tool}`,
+  );
+}
+
 export function runCheck(check: Check, context: CheckContext): CheckResult {
   switch (check.type) {
     case 'skill-fired': {
-      const fired = context.skillsUsed.includes(check.skill);
+      const fired = context.skillsUsed.some((used) => isSkillNamed(used, check.skill));
 
       return {
         check,
@@ -258,6 +295,27 @@ export function runCheck(check: Check, context: CheckContext): CheckResult {
         passed: matched === check.expected,
         detail: `/${check.pattern}/${check.flags} ${matched ? 'matched' : 'did not match'} the final answer${
           check.expected ? '' : ' (expected not to)'
+        }`,
+      };
+    }
+
+    case 'mcp-tool-called': {
+      const calls = context.toolNames.filter((name) =>
+        isMcpToolCall(name, check.tool, context.mcpServers),
+      );
+      const mcpCalls = [
+        ...new Set(context.toolNames.filter((name) => name.startsWith(MCP_TOOL_PREFIX))),
+      ];
+      const scope =
+        context.mcpServers.length === 0 ? 'any server' : `server ${context.mcpServers.join(', ')}`;
+
+      return {
+        check,
+        passed: calls.length >= check.min,
+        detail: `${check.tool} was called ${calls.length} time(s) on ${scope}, expected at least ${check.min}${
+          mcpCalls.length === 0
+            ? ' (no MCP tool was called)'
+            : ` (MCP tools called: ${mcpCalls.join(', ')})`
         }`,
       };
     }

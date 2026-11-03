@@ -36,3 +36,6 @@ packages/docs/static/openapi/
 packages/docs/api_versions.json
 packages/docs/api_versioned_docs/
 packages/docs/api_versioned_sidebars/
+
+# Written by `pnpm onboardings:seed`: the manifest of seeded scenarios, regenerated on every run.
+packages/onboarding-seeder/out/

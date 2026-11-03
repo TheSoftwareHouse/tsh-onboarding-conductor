@@ -1,0 +1,13 @@
+{
+  "name": "conductor-analyst",
+  "version": "0.1.2",
+  "description": "Investigate onboardings, analyse the population and prepare compliance evidence through the Conductor MCP server.",
+  "author": { "name": "The Software House" },
+  "license": "MIT",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Conductor analyst",
+    "shortDescription": "Investigate onboardings and prepare compliance evidence",
+    "category": "Productivity"
+  }
+}

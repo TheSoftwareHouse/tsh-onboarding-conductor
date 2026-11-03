@@ -22,6 +22,38 @@ describe('skillOf', () => {
     );
   });
 
+  it('names the skill of a plugin path, wherever inside the skill the file sits', () => {
+    expect(skillOf('plugins/conductor-analyst/skills/investigating-onboarding/SKILL.md')).toBe(
+      'investigating-onboarding',
+    );
+    expect(
+      skillOf('plugins/conductor-analyst/skills/investigating-onboarding/evals/evals.json'),
+    ).toBe('investigating-onboarding');
+    expect(
+      skillOf('./plugins/conductor-analyst/skills/triaging-review-queue/references/a.md'),
+    ).toBe('triaging-review-queue');
+  });
+
+  it('counts a file inside a skill directory and not a plain file directly under skills/', () => {
+    expect(skillOf('.claude/skills/creating-workflows/SKILL.md')).toBe('creating-workflows');
+    expect(skillOf('.claude/skills/.gitkeep')).toBeUndefined();
+    expect(skillOf('.claude/skills/README.md')).toBeUndefined();
+    expect(skillOf('plugins/conductor-analyst/skills/investigating-onboarding/SKILL.md')).toBe(
+      'investigating-onboarding',
+    );
+    expect(skillOf('plugins/conductor-analyst/skills/.gitkeep')).toBeUndefined();
+    expect(skillOf('plugins/conductor-analyst/skills/README.md')).toBeUndefined();
+    expect(skillsForPaths(['.claude/skills/.gitkeep', 'plugins/p/skills/.gitkeep'])).toEqual([]);
+  });
+
+  it('names nothing for a plugin path outside its skills', () => {
+    expect(skillOf('plugins/conductor-analyst/README.md')).toBeUndefined();
+    expect(skillOf('plugins/conductor-analyst/agents/onboarding-investigator.md')).toBeUndefined();
+    expect(skillOf('plugins/conductor-analyst/.claude-plugin/plugin.json')).toBeUndefined();
+    expect(skillOf('plugins/conductor-analyst/skills')).toBeUndefined();
+    expect(skillOf('plugins/conductor-analyst/skills/')).toBeUndefined();
+  });
+
   it('names nothing for a path outside the skills', () => {
     expect(skillOf('.claude/rules/testing.md')).toBeUndefined();
     expect(skillOf('packages/engine/src/main.ts')).toBeUndefined();
@@ -33,6 +65,7 @@ describe('skillsForPaths', () => {
   it('reports each skill once, in a stable order, ignoring what is not a path', () => {
     expect(
       skillsForPaths([
+        'plugins/conductor-analyst/skills/investigating-onboarding/SKILL.md',
         '.claude/skills/creating-workflows/SKILL.md',
         '.claude/skills/creating-workflows/evals/evals.json',
         '.claude/skills/creating-engine-bffs/SKILL.md',
@@ -40,7 +73,7 @@ describe('skillsForPaths', () => {
         undefined,
         '',
       ]),
-    ).toEqual(['creating-engine-bffs', 'creating-workflows']);
+    ).toEqual(['creating-engine-bffs', 'creating-workflows', 'investigating-onboarding']);
   });
 });
 
@@ -48,7 +81,7 @@ describe('reminder', () => {
   it('carries the command for the skill that changed and the account the suite runs on', () => {
     const text = reminder(['creating-workflows']);
 
-    expect(text).toContain('pnpm skills:evals --case creating-workflows');
+    expect(text).toContain('pnpm skills:evals --skill creating-workflows');
     expect(text).toContain('signed-in Claude Code account');
     expect(text).toContain('no CI workflow');
   });
@@ -57,8 +90,8 @@ describe('reminder', () => {
     const text = reminder(['creating-engine-bffs', 'creating-workflows']);
 
     expect(text).toContain('2 skills changed');
-    expect(text).toContain('pnpm skills:evals --case creating-engine-bffs');
-    expect(text).toContain('pnpm skills:evals --case creating-workflows');
+    expect(text).toContain('pnpm skills:evals --skill creating-engine-bffs');
+    expect(text).toContain('pnpm skills:evals --skill creating-workflows');
   });
 });
 
@@ -113,6 +146,38 @@ describe('collectSkillChanges', () => {
     expect(collectSkillChanges(repository).skills).toEqual(['new-skill']);
   });
 
+  it('reports a plugin skill, edited or new, and ignores the rest of the plugin', () => {
+    write(join('plugins', 'analyst', 'skills', 'investigating', 'SKILL.md'), '# new\n');
+    write(join('plugins', 'analyst', 'agents', 'investigator.md'), '# agent\n');
+    write(join('plugins', 'analyst', 'README.md'), '# readme\n');
+
+    const first = collectSkillChanges(repository);
+
+    expect(first.skills).toEqual(['investigating']);
+
+    write(join('plugins', 'analyst', 'skills', 'investigating', 'SKILL.md'), '# edited\n');
+
+    expect(collectSkillChanges(repository).fingerprint).not.toBe(first.fingerprint);
+  });
+
+  it('reports nothing for a plain file directly under a skills directory', () => {
+    write(join('.claude', 'skills', '.gitkeep'), '');
+    write(join('plugins', 'analyst', 'skills', '.gitkeep'), '');
+
+    expect(collectSkillChanges(repository)).toEqual({ skills: [], fingerprint: undefined });
+
+    write(join('plugins', 'analyst', 'skills', 'investigating', 'SKILL.md'), '# new\n');
+
+    expect(collectSkillChanges(repository).skills).toEqual(['investigating']);
+  });
+
+  it('reports nothing for a plugin change that touches no skill', () => {
+    write(join('plugins', 'analyst', 'README.md'), '# readme\n');
+    write(join('plugins', 'analyst', '.mcp.json'), '{}\n');
+
+    expect(collectSkillChanges(repository)).toEqual({ skills: [], fingerprint: undefined });
+  });
+
   it('reports a deleted skill file', () => {
     git(repository, 'rm', '-q', skillFile);
 
@@ -138,7 +203,7 @@ describe('stopDecision', () => {
 
     expect(decision.block).toBe(true);
     expect(decision.fingerprint).toBe('abc');
-    expect(decision.reason).toContain('pnpm skills:evals --case creating-workflows');
+    expect(decision.reason).toContain('pnpm skills:evals --skill creating-workflows');
     expect(decision.reason).toContain('does not repeat');
   });
 

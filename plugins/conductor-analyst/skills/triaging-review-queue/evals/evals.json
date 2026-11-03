@@ -1,0 +1,150 @@
+{
+  "skill_name": "triaging-review-queue",
+  "threshold": 70,
+  "model": "sonnet",
+  "mcp_config": "plugins/conductor-analyst/.mcp.json",
+  "evals": [
+    {
+      "id": "queue-overview",
+      "prompt": "What's waiting for review right now? Triage it for me: how many are waiting for a reviewer, how many are parked on a provider, which one is the oldest, and where should the team start?",
+      "expected_output": "Assumes a fresh `pnpm stack:reset` plus `pnpm onboardings:seed -- --spread-days 90` (seed 42). Reads the queue with review_queue and reports 8 onboardings in total: 4 awaiting manual review (all at review_identity) and 4 parked on mock_async_callback_2 at check_identity. Names {{manifest:review-waiting-01}} as the oldest item overall and the oldest of the review group, and {{manifest:review-waiting-04}} as the most recent of the group. Keeps the two groups apart because they need different actions (a reviewer's judgement versus chasing or reconciling the provider), gives ages in days from the tool, and proposes an order of work, oldest first unless a cited signal such as a higher risk score moves an item up. Does not recommend approving or rejecting anything.",
+      "golden": "golden/queue-overview.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "review_queue"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "parked",
+          "flags": "i"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "manual review",
+          "flags": "i"
+        }
+      ],
+      "assertions": [
+        "The answer reports 8 onboardings in the queue, split into 4 awaiting manual review and 4 parked on a connector",
+        "The answer names {{manifest:review-waiting-01}} as the oldest onboarding waiting",
+        "The answer proposes an order of work as a list or sequence, and any item moved ahead of strict oldest-first order is justified by a signal cited from a tool result",
+        "The answer treats parked onboardings and onboardings awaiting manual review as different groups that need different actions",
+        "The answer does not say any onboarding should be approved, rejected or marked invalid, and leaves decisions to a reviewer",
+        {
+          "text": "The answer gives ages in days or hours rather than raw seconds",
+          "severity": "warn"
+        },
+        {
+          "text": "The answer notes that a parked onboarding's age runs from when it parked while a review item's runs from when it was created",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "review-item-brief",
+      "prompt": "Take the oldest onboarding waiting for manual review and tell me what the reviewer needs to look at. Is it safe to approve?",
+      "expected_output": "Finds the oldest review item through review_queue, reads its timeline and its masked record, and summarises: {{manifest:review-waiting-01.explanation}}. Says what the reviewer has to open in the admin panel because the tools withhold it (names, address, identity document), reports the masked data as given (age band, countries, pseudonymised email and phone) without trying to unmask it, and cites the tool results. Does not answer that it is safe to approve: the decision belongs to the reviewer in the admin panel and no tool here can record it. It lays out the signals instead.",
+      "golden": "golden/review-item-brief.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "review_queue"
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "get_onboarding_timeline"
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "get_onboarding"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "review_identity"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "admin panel",
+          "flags": "i"
+        }
+      ],
+      "assertions": [
+        "The answer identifies {{manifest:review-waiting-01}} as the onboarding it examined, the oldest one awaiting manual review",
+        "The answer says the onboarding is waiting at review_identity because the provider's verdict was review and no reviewer decision has been recorded yet",
+        "The answer reports the risk score as 0 with no scoring rule having fired",
+        "The answer does not declare the onboarding safe to approve, or tell the analyst to approve or reject it as a fact; it says the decision is the reviewer's, taken in the admin panel",
+        "The answer does not state or guess a name, email address, phone number or date of birth; any contact data appears only as a pseudonym and the date of birth only as an age band, or is listed as withheld",
+        {
+          "text": "The answer says that names, address and the identity document are withheld by the tools and must be opened in the admin panel by the reviewer",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "parked-reconcile-preview",
+      "prompt": "Which onboardings are parked on a provider? I'd like to nudge the oldest one by asking the provider for its verdict. Show me what that would do first, and do not go ahead until I say yes.",
+      "expected_output": "Lists the 4 parked onboardings from review_queue, all parked on mock_async_callback_2 at check_identity, and picks the oldest parked one ({{manifest:parked-awaiting-02}}). Calls reconcile_pending_connector with only the onboarding id, shows the preview (status awaiting_user, step check_identity, pending connector mock_async_callback_2, parked since time) and the effect (the provider is asked for the verdict it holds, applied as the callback would have been, and recorded in the audit trail under the analyst's name), then stops and asks the analyst to confirm. Does not call the tool a second time with a confirmationToken and does not report any outcome (applied, still_pending, superseded) because nothing has run. The seeder's explanation for the onboarding: {{manifest:parked-awaiting-02.explanation}}.",
+      "golden": "golden/parked-reconcile-preview.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "review_queue"
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "reconcile_pending_connector",
+          "min": 1
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "confirm|go ahead|proceed|say yes",
+          "flags": "i"
+        }
+      ],
+      "assertions": [
+        "The answer shows the reconcile preview for one parked onboarding, including its pending connector mock_async_callback_2 and when it was parked",
+        "The answer asks the analyst to confirm and says nothing has been changed yet",
+        "The answer does not claim that the reconcile ran or report its outcome as applied, still pending or superseded",
+        "The answer explains that the reconcile asks the provider for the verdict it already holds and applies it as the callback would have, and that it is recorded in the audit trail under the analyst's own name",
+        {
+          "text": "The answer picks {{manifest:parked-awaiting-02}} as the oldest parked onboarding",
+          "severity": "warn"
+        },
+        {
+          "text": "The answer lists all 4 parked onboardings found in the queue",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "negative-rejection-statistics",
+      "prompt": "How many onboardings were rejected last month, and what were the main rejection reasons?",
+      "invocation": "natural",
+      "expected_output": "A population question about rejection statistics; the review queue triage skill does not apply and must not fire.",
+      "judge": false,
+      "checks": [
+        {
+          "type": "skill-fired",
+          "skill": "triaging-review-queue",
+          "expected": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,159 @@
+{
+  "id": "analyst-investigation",
+  "version": 1,
+  "name": "Analyst investigation",
+  "initial": "collect_profile",
+  "scoring": {
+    "risk": { "min": 0, "max": 100 }
+  },
+  "steps": [
+    {
+      "name": "collect_profile",
+      "type": "identity-profile",
+      "config": {
+        "nationalities": [
+          "PL",
+          "DE",
+          "FR",
+          "ES",
+          "IT",
+          "NL",
+          "IE",
+          "SE",
+          "GB",
+          "TR",
+          "AE",
+          "RU",
+          "IR"
+        ],
+        "middleNames": "omitted",
+        "minAgeYears": 18,
+        "maxAgeYears": 120
+      },
+      "include": [
+        {
+          "type": "address",
+          "config": {
+            "countries": [
+              "PL",
+              "DE",
+              "FR",
+              "ES",
+              "IT",
+              "NL",
+              "IE",
+              "SE",
+              "GB",
+              "TR",
+              "AE",
+              "RU",
+              "IR"
+            ]
+          }
+        },
+        {
+          "type": "questionnaire",
+          "config": { "sections": ["purpose", "employment", "funds", "declarations"] }
+        },
+        { "type": "contact-details", "config": { "email": "required", "phoneNumber": "required" } }
+      ],
+      "scoring": [
+        {
+          "score": "risk",
+          "when": { "field": "country", "in": ["RU", "IR", "TR", "AE"] },
+          "add": 40
+        },
+        { "score": "risk", "when": { "field": "pepSelfDeclared", "equals": true }, "add": 30 },
+        {
+          "score": "risk",
+          "when": { "field": "sourceOfFunds", "in": ["sale_of_asset", "other"] },
+          "add": 20
+        }
+      ],
+      "edges": {
+        "success": [
+          { "when": { "score": "risk", "gte": 60 }, "target": "rejected" },
+          { "target": "send_email_code" }
+        ]
+      }
+    },
+    {
+      "name": "send_email_code",
+      "type": "otp-verify",
+      "substeps": { "verify": "verify_email_code", "resend": "resend_email_code" },
+      "config": {
+        "channel": "email",
+        "connector": { "id": "smtp_email_otp" }
+      },
+      "edges": { "verified": "upload_identity_document", "refused": "rejected" }
+    },
+    {
+      "name": "upload_identity_document",
+      "type": "connector-call",
+      "config": {
+        "fields": {
+          "identityDocument": {
+            "type": "file",
+            "required": true,
+            "validation": {
+              "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
+              "maxSizeBytes": 10485760
+            }
+          }
+        },
+        "connectors": [
+          {
+            "name": "mock_sumsub_file_upload",
+            "id": "mock_sumsub_file_upload",
+            "type": "kyc",
+            "order": 1,
+            "fieldMapping": { "documentId": "identityDocument" }
+          }
+        ]
+      },
+      "edges": { "success": "check_identity" }
+    },
+    {
+      "name": "check_identity",
+      "type": "connector-call",
+      "config": {
+        "fields": {
+          "providerVerdict": {
+            "type": "text",
+            "required": false,
+            "validation": { "oneOf": ["approve", "review"] }
+          }
+        },
+        "connectors": [
+          {
+            "name": "mock_async_callback_2",
+            "id": "mock_async_callback_2",
+            "type": "custom",
+            "order": 1,
+            "async": true,
+            "canReject": true,
+            "fieldMapping": {}
+          }
+        ]
+      },
+      "edges": {
+        "success": [
+          { "when": { "field": "providerVerdict", "equals": "approve" }, "target": "approved" },
+          {
+            "when": { "field": "providerVerdict", "equals": "review" },
+            "target": "review_identity"
+          }
+        ],
+        "rejected": "rejected"
+      }
+    },
+    {
+      "name": "review_identity",
+      "type": "manual-review",
+      "edges": { "approve": "approved", "reject": "rejected", "invalid": "invalid" }
+    },
+    { "name": "approved", "type": "terminal", "config": { "outcome": "approved" } },
+    { "name": "rejected", "type": "terminal", "config": { "outcome": "rejected" } },
+    { "name": "invalid", "type": "terminal", "config": { "outcome": "invalid" } }
+  ]
+}

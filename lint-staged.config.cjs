@@ -34,11 +34,16 @@ module.exports = {
   // it and Prettier only reformats it, so a citation that went stale when a file was renamed
   // reaches the model as an instruction. `validate-skills.cjs` takes the staged paths and validates
   // the whole skill each one belongs to — editing a single reference document still checks the
-  // SKILL.md that has to cite it.
-  '.claude/{skills,rules}/**/*.md': ['node scripts/validate-skills.cjs'],
+  // SKILL.md that has to cite it. A plugin's skills and subagents (`plugins/<plugin>/skills`,
+  // `plugins/<plugin>/agents`) are the same prose and get the same check.
+  '{.claude/{skills,rules}/**/*.md,plugins/*/skills/**/*.md,plugins/*/agents/*.md}': [
+    'node scripts/validate-skills.cjs',
+  ],
 
   // A golden set is JSON nothing else validates, and its golden workflows are documents the
   // engine has to be able to load. `--validate` checks both without a model; it takes no paths,
-  // so the function form keeps lint-staged from appending them.
-  '.claude/skills/**/evals/**': () => 'pnpm skills:evals --validate',
+  // so the function form keeps lint-staged from appending them. One key for both homes of a golden
+  // set, so a commit that stages both runs the check once: two runs at once would each rebuild the
+  // DDL package the oracles import.
+  '{.claude/skills,plugins/*/skills}/**/evals/**': () => 'pnpm skills:evals --validate',
 };

@@ -1,0 +1,50 @@
+{
+  "name": "@tsh/mcp",
+  "version": "0.1.2",
+  "private": true,
+  "description": "MCP server in front of the engine's admin API: delegated Entra identity, masking by default, read tools for compliance and risk analysis.",
+  "scripts": {
+    "build": "nest build",
+    "format": "prettier --check \"src/**/*.ts\"",
+    "start": "nest start",
+    "start:dev": "node --watch -r ts-node/register -r tsconfig-paths/register src/main.ts",
+    "start:prod": "node dist/main.js",
+    "inspect": "mcp-inspector",
+    "lint": "eslint \"src/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" --fix",
+    "test": "jest --config ./jest.config.cjs --passWithNoTests",
+    "test:cov": "jest --config ./jest.config.cjs --coverage --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@azure/msal-node": "7.1.2",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@nestjs/common": "11.1.28",
+    "@nestjs/config": "4.0.4",
+    "@nestjs/core": "11.1.28",
+    "@nestjs/platform-express": "11.1.28",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "jose": "6.2.14",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/inspector": "2.13.0",
+    "@nestjs/cli": "11.0.24",
+    "@nestjs/schematics": "11.1.0",
+    "@nestjs/testing": "11.1.28",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^26.1.0",
+    "@types/supertest": "^7.2.0",
+    "jest": "^29.5.0",
+    "source-map-support": "^0.5.21",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.1.0",
+    "ts-loader": "^9.6.2",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.9.3"
+  }
+}

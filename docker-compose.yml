@@ -317,6 +317,52 @@ services:
       garage:
         condition: service_healthy
 
+  # The MCP server in front of the engine's admin API, for analyst clients (Claude, Inspector).
+  # Behind a profile, so a plain `pnpm stack:up` does not build or start it; `pnpm stack:mcp:up`
+  # enables the profile. `stack:down` and `stack:reset` use `--profile "*"` and cover it.
+  mcp:
+    profiles: ['mcp']
+    image: tsh-onboarding-conductor-mcp:local
+    build:
+      context: .
+      dockerfile: packages/mcp/Dockerfile
+    environment:
+      NODE_ENV: ${NODE_ENV:?NODE_ENV must be set in .env (development, production or test)}
+      ENVIRONMENT_NAME: ${ENVIRONMENT_NAME:?ENVIRONMENT_NAME must be set in .env (e.g. dev, staging, prod)}
+      # The container always listens on 3100; MCP_PORT remaps only the host side below.
+      MCP_PORT: 3100
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-http://localhost:${MCP_PORT:-3100}}
+      MCP_ENGINE_BASE_URL: http://engine:3000
+      # Off by default for local development: no token checks and no token to the engine. The
+      # server refuses to start with auth off when NODE_ENV=production.
+      MCP_AUTH_ENABLED: ${MCP_AUTH_ENABLED:-false}
+      MCP_AZURE_TENANT_ID: ${MCP_AZURE_TENANT_ID:-}
+      MCP_AZURE_CLIENT_ID: ${MCP_AZURE_CLIENT_ID:-}
+      MCP_AZURE_CLIENT_SECRET: ${MCP_AZURE_CLIENT_SECRET:-}
+      MCP_REQUIRED_SCOPE: ${MCP_REQUIRED_SCOPE:-Mcp.Access}
+      MCP_ENGINE_SCOPE: ${MCP_ENGINE_SCOPE:-}
+      # Empty means the sign-in relay hands clients MCP_AZURE_CLIENT_ID.
+      MCP_PUBLIC_CLIENT_ID: ${MCP_PUBLIC_CLIENT_ID:-}
+      # DEVELOPMENT-ONLY default so a fresh clone starts. It is public in this repository, so
+      # pseudonyms and confirmation tokens made with it protect nothing: set a private
+      # MCP_MASKING_KEY in `.env` for any shared or non-local deployment.
+      MCP_MASKING_KEY: ${MCP_MASKING_KEY:-dev-only-masking-key-do-not-use-outside-local-development}
+      MCP_MASKING_PASS_FIELDS: ${MCP_MASKING_PASS_FIELDS:-country,nationality}
+      # On for local development so the write tools can be tried; the server's own default is false.
+      MCP_WRITE_TOOLS_ENABLED: ${MCP_WRITE_TOOLS_ENABLED:-true}
+    ports:
+      - '${MCP_PORT:-3100}:3100'
+    depends_on:
+      engine:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:3100/health >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+      start_interval: 2s
+
 volumes:
   postgres-data:
   redis-data:

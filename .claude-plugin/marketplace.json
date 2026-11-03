@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "tsh-onboarding-conductor",
+  "description": "Analyst plugins for the TSH Onboarding Conductor.",
+  "owner": { "name": "The Software House" },
+  "plugins": [
+    {
+      "name": "conductor-analyst",
+      "source": "./plugins/conductor-analyst",
+      "description": "Investigate onboardings, analyse the population and prepare compliance evidence through the Conductor MCP server.",
+      "version": "0.1.2",
+      "category": "productivity"
+    }
+  ]
+}

@@ -59,6 +59,8 @@ describe('checks', () => {
     sandbox,
     changedFiles: [],
     skillsUsed: [],
+    toolNames: [],
+    mcpServers: [],
     resultText: '',
     evalsDirectory,
     ddl: () => ddl,
@@ -97,6 +99,107 @@ describe('checks', () => {
         detail: expect.stringContaining('did not fire'),
       },
     );
+  });
+
+  it('skill-fired recognises a plugin skill under its namespace as well as bare', () => {
+    const fired = context({ skillsUsed: ['conductor-analyst:investigating-onboarding'] });
+
+    expect(
+      runCheck({ type: 'skill-fired', skill: 'investigating-onboarding', expected: true }, fired)
+        .passed,
+    ).toBe(true);
+    expect(
+      runCheck(
+        {
+          type: 'skill-fired',
+          skill: 'conductor-analyst:investigating-onboarding',
+          expected: true,
+        },
+        fired,
+      ).passed,
+    ).toBe(true);
+    // A bare name is not a suffix match on a word: `onboarding` is not `investigating-onboarding`.
+    expect(
+      runCheck({ type: 'skill-fired', skill: 'onboarding', expected: true }, fired).passed,
+    ).toBe(false);
+    expect(
+      runCheck(
+        { type: 'skill-fired', skill: 'other-plugin:investigating-onboarding', expected: true },
+        fired,
+      ).passed,
+    ).toBe(false);
+  });
+
+  describe('mcp-tool-called', () => {
+    const check = { type: 'mcp-tool-called', tool: 'get_onboarding', min: 1 } as const;
+
+    it('counts the calls of the tool on the set servers and honours the minimum', () => {
+      const called = context({
+        mcpServers: ['conductor'],
+        toolNames: [
+          'Read',
+          'mcp__conductor__get_onboarding',
+          'mcp__conductor__get_onboarding',
+          'mcp__conductor__list_onboardings',
+        ],
+      });
+
+      expect(runCheck(check, called)).toMatchObject({
+        passed: true,
+        detail: expect.stringContaining('called 2 time(s) on server conductor'),
+      });
+      expect(runCheck({ ...check, min: 2 }, called).passed).toBe(true);
+      expect(runCheck({ ...check, min: 3 }, called).passed).toBe(false);
+    });
+
+    it('fails, naming what was called instead, when the tool was not', () => {
+      const result = runCheck(
+        check,
+        context({
+          mcpServers: ['conductor'],
+          toolNames: ['Bash', 'mcp__conductor__list_onboardings'],
+        }),
+      );
+
+      expect(result.passed).toBe(false);
+      expect(result.detail).toContain('called 0 time(s)');
+      expect(result.detail).toContain('mcp__conductor__list_onboardings');
+      expect(
+        runCheck(check, context({ mcpServers: ['conductor'], toolNames: ['Bash'] })).detail,
+      ).toContain('no MCP tool was called');
+    });
+
+    it('does not take a tool of the same name on a server the set did not declare', () => {
+      expect(
+        runCheck(
+          check,
+          context({ mcpServers: ['conductor'], toolNames: ['mcp__other__get_onboarding'] }),
+        ).passed,
+      ).toBe(false);
+    });
+
+    it('matches the server name as the harness spells it', () => {
+      expect(
+        runCheck(
+          check,
+          context({
+            mcpServers: ['conductor mcp.v1'],
+            toolNames: ['mcp__conductor_mcp_v1__get_onboarding'],
+          }),
+        ).passed,
+      ).toBe(true);
+    });
+
+    it('accepts any server when the set declares none, but never a non-MCP tool of that name', () => {
+      expect(
+        runCheck(check, context({ toolNames: ['mcp__anything__get_onboarding'] })).passed,
+      ).toBe(true);
+      expect(runCheck(check, context({ toolNames: ['get_onboarding'] })).passed).toBe(false);
+      expect(runCheck(check, context({ toolNames: ['mcp____get_onboarding'] })).passed).toBe(false);
+      expect(runCheck(check, context({ toolNames: ['mcp__x__other_get_onboarding'] })).passed).toBe(
+        false,
+      );
+    });
   });
 
   it('files-changed counts matching files of the wanted status within the bounds', () => {

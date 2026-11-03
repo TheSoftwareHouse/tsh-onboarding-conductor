@@ -47,7 +47,8 @@ export function usage(): string {
   return [
     'Usage: pnpm skills:evals [options]',
     '',
-    'Runs every golden-set case under .claude/skills/<skill>/evals/evals.json through headless',
+    'Runs every golden-set case under .claude/skills/<skill>/evals/evals.json and',
+    'plugins/<plugin>/skills/<skill>/evals/evals.json through headless',
     'Claude Code, grades the sandbox with the repository oracles and a Claude judge, and writes a',
     'report. Exit code 0 when every case passes.',
     '',

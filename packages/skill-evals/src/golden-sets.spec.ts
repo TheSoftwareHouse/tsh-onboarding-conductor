@@ -18,7 +18,9 @@ describe('the checked-in golden sets', () => {
   it('parse without a problem and cover every skill', () => {
     expect(loaded.problems).toEqual([]);
     expect(loaded.skillsWithoutEvals).toEqual([]);
-    expect(loaded.sets.map((set) => set.skill)).toEqual([
+    // The repository's own skills. A plugin's sets go through the same parse, so the problems
+    // check above covers them, and the list of them is whatever the plugins ship.
+    expect(loaded.sets.filter((set) => set.plugin === undefined).map((set) => set.skill)).toEqual([
       'creating-engine-bffs',
       'creating-workflows',
     ]);

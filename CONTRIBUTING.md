@@ -115,7 +115,7 @@ and blocks the commit on either. CI runs lint → `skills:validate` → typechec
 coverage → end-to-end → the MailHog integration suite, and a pull request needs that sequence green.
 
 A change to a skill under `.claude/skills/` or to its golden set is verified on your own machine,
-and nowhere else: run `pnpm skills:evals --case <skill>` for the skill you changed, and
+and nowhere else: run `pnpm skills:evals --skill <skill>` for the skill you changed, and
 `pnpm skills:evals` before you open the pull request. The golden sets drive headless Claude Code on
 your signed-in Claude Code account — no workflow runs them, the command refuses to start in CI, and
 any key or gateway setting in your environment is dropped rather than used — so no pipeline will

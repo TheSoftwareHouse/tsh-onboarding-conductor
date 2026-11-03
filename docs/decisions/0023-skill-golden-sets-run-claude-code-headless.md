@@ -42,7 +42,7 @@ What makes a local check reliable is that the harness asks for it rather than a 
 edits and a `Stop` hook before a turn ends. The `Stop` hook decides from `git status --porcelain`
 under `.claude/skills/` and a hash of the changed files' content — reports are gitignored and say
 nothing about which state of which skill was graded — and blocks once per state, naming
-`pnpm skills:evals --case <skill>`. A further edit earns another reminder; a rerun of the suite,
+`pnpm skills:evals --skill <skill>`. A further edit earns another reminder; a rerun of the suite,
 which changes nothing tracked, does not. Inside an eval sandbox both hooks are off, by the copied
 settings losing their `hooks` key and by `SKILL_EVALS_SANDBOX` in the child's environment.
 

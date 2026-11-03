@@ -37,6 +37,8 @@ const DESCRIPTIONS = {
   'sendgrid-email': 'Sending an email through SendGrid.',
   'otp-sms': 'A one-time code the engine generates and delivers by SMS, then checks.',
   'otp-email-typed': 'A one-time code the engine generates and delivers by email, then checks.',
+  'analyst-investigation':
+    'A risk-scored profile, an email code, a document upload and an identity check that parks until the provider calls back, ending in approval, rejection or a manual review.',
   'eu-b2c-individual-kyc-eea':
     'The production reference flow written as custom steps: EU B2C individual KYC across the EEA, where the applicant chooses between a passport and a national ID card.',
   'eu-b2c-individual-kyc-eea-v2':

@@ -28,7 +28,8 @@ describe('parseGoldenSet', () => {
     checks: [{ type: 'skill-fired' }],
   });
 
-  const parse = (raw: unknown) => parseGoldenSet(raw, { skill: SKILL, directory });
+  const parse = (raw: unknown) =>
+    parseGoldenSet(raw, { skill: SKILL, directory, repoRoot: directory });
 
   it('parses a minimal set with defaults filled in', () => {
     const { set, problems } = parse({ skill_name: SKILL, evals: [minimalCase()] });
@@ -63,6 +64,37 @@ describe('parseGoldenSet', () => {
       expect.stringContaining('unknown key "extra"'),
       expect.stringContaining('unknown key "asertions"'),
     ]);
+  });
+
+  it('accepts manifest placeholders and refuses a malformed one wherever it is written', () => {
+    const placeholders = {
+      ...minimalCase(),
+      prompt: 'Why was {{manifest:score-reject-03}} rejected?',
+      expected_output: '{{manifest:score-reject-03.explanation}}',
+      assertions: ['Says {{manifest:score-reject-03.explanation}}'],
+    };
+
+    expect(parse({ skill_name: SKILL, evals: [placeholders] }).problems).toEqual([]);
+
+    const { problems } = parse({
+      skill_name: SKILL,
+      evals: [
+        {
+          ...placeholders,
+          prompt: 'Why was {{manifest:}} rejected?',
+          expected_output: '{{manifest:a.id}}',
+          assertions: ['{{manifest:a}', { text: '{{manifest:b c}}' }],
+        },
+      ],
+    });
+
+    expect(problems.map((problem) => problem.at)).toEqual([
+      expect.stringContaining('.prompt'),
+      expect.stringContaining('.expected_output'),
+      expect.stringContaining('assertions[0]'),
+      expect.stringContaining('assertions[1].text'),
+    ]);
+    expect(problems[0].message).toContain('malformed {{manifest:');
   });
 
   it('refuses duplicate case ids and ids outside the kebab-case grammar', () => {
@@ -198,6 +230,87 @@ describe('parseGoldenSet', () => {
     ]);
   });
 
+  describe('mcp_config', () => {
+    let repoRoot: string;
+
+    const mcpFile = (servers: unknown = { conductor: { type: 'http', url: 'http://x/mcp' } }) =>
+      JSON.stringify({ mcpServers: servers });
+    const parseWith = (mcpConfig: unknown, context: { plugin?: string } = {}) =>
+      parseGoldenSet(
+        { skill_name: SKILL, mcp_config: mcpConfig, evals: [minimalCase()] },
+        { skill: SKILL, directory, repoRoot, ...context },
+      );
+
+    beforeEach(() => {
+      repoRoot = mkdtempSync(join(tmpdir(), 'skill-evals-golden-repo-'));
+    });
+
+    afterEach(() => {
+      rmSync(repoRoot, { force: true, recursive: true });
+    });
+
+    it('is optional and leaves a set without MCP servers', () => {
+      expect(parse({ skill_name: SKILL, evals: [minimalCase()] }).set?.mcp).toBeUndefined();
+    });
+
+    it('resolves a path relative to the repository and reads the server names', () => {
+      mkdirSync(join(repoRoot, 'plugins', 'analyst'), { recursive: true });
+      writeFileSync(
+        join(repoRoot, 'plugins', 'analyst', '.mcp.json'),
+        mcpFile({ conductor: {}, audit: {} }),
+      );
+
+      const { set, problems } = parseWith('plugins/analyst/.mcp.json');
+
+      expect(problems).toEqual([]);
+      expect(set?.mcp).toEqual({
+        file: join(repoRoot, 'plugins', 'analyst', '.mcp.json'),
+        servers: ['conductor', 'audit'],
+      });
+    });
+
+    it('prefers a path relative to the set over one relative to the repository', () => {
+      writeFileSync(join(directory, 'files', 'mcp.json'), mcpFile({ local: {} }));
+      mkdirSync(join(repoRoot, 'files'), { recursive: true });
+      writeFileSync(join(repoRoot, 'files', 'mcp.json'), mcpFile({ shared: {} }));
+
+      expect(parseWith('files/mcp.json').set?.mcp).toEqual({
+        file: join(directory, 'files', 'mcp.json'),
+        servers: ['local'],
+      });
+    });
+
+    it('refuses a missing file, a path that escapes, a non-string and unparseable JSON', () => {
+      writeFileSync(join(repoRoot, 'broken.json'), '{ nope');
+
+      expect(parseWith('missing.json').problems[0]?.message).toContain('no such file');
+      expect(parseWith('../outside.json').problems[0]?.message).toContain('relative path inside');
+      expect(parseWith('/etc/mcp.json').problems[0]?.message).toContain('relative path inside');
+      expect(parseWith(7).problems[0]?.message).toContain('relative path inside');
+      expect(parseWith('broken.json').problems[0]?.message).toContain('unparseable JSON');
+    });
+
+    it('refuses a document that is not the { mcpServers } form or declares no server', () => {
+      writeFileSync(join(repoRoot, 'bare.json'), JSON.stringify({ conductor: { type: 'http' } }));
+      writeFileSync(join(repoRoot, 'empty.json'), mcpFile({}));
+
+      expect(parseWith('bare.json').problems[0]?.message).toContain('{ "mcpServers"');
+      expect(parseWith('empty.json').problems[0]?.message).toContain('declares no MCP server');
+    });
+
+    it('names a plugin set by its path in a problem and carries the plugin', () => {
+      mkdirSync(join(repoRoot, 'plugins', 'analyst'), { recursive: true });
+      writeFileSync(join(repoRoot, 'plugins', 'analyst', '.mcp.json'), mcpFile());
+
+      expect(parseWith('plugins/analyst/.mcp.json', { plugin: 'analyst' }).set?.plugin).toBe(
+        'analyst',
+      );
+      expect(parseWith('missing.json', { plugin: 'analyst' }).problems[0]?.at).toBe(
+        `plugins/analyst/skills/${SKILL}/evals/evals.json.mcp_config`,
+      );
+    });
+  });
+
   describe('checks', () => {
     const withCheck = (check: unknown) =>
       parse({ skill_name: SKILL, evals: [{ ...minimalCase(), checks: [check] }] });
@@ -256,6 +369,33 @@ describe('parseGoldenSet', () => {
       ).toEqual([]);
     });
 
+    it('validates mcp-tool-called: a bare tool name and a positive minimum', () => {
+      expect(
+        withCheck({ type: 'mcp-tool-called', tool: 'get_onboarding' }).set?.cases[0].checks[0],
+      ).toEqual({
+        type: 'mcp-tool-called',
+        tool: 'get_onboarding',
+        min: 1,
+      });
+      expect(
+        withCheck({ type: 'mcp-tool-called', tool: 'get_onboarding', min: 3 }).set?.cases[0]
+          .checks[0],
+      ).toMatchObject({ min: 3 });
+      expect(withCheck({ type: 'mcp-tool-called' }).problems[0]?.at).toContain('tool');
+      expect(withCheck({ type: 'mcp-tool-called', tool: 'a b' }).problems[0]?.at).toContain('tool');
+      expect(
+        withCheck({ type: 'mcp-tool-called', tool: 'mcp__conductor__get_onboarding' }).problems[0]
+          ?.message,
+      ).toContain('tool name alone');
+      expect(
+        withCheck({ type: 'mcp-tool-called', tool: 'get_onboarding', min: 0 }).problems[0]?.at,
+      ).toContain('min');
+      expect(
+        withCheck({ type: 'mcp-tool-called', tool: 'get_onboarding', server: 'x' }).problems[0]
+          ?.message,
+      ).toContain('unknown key "server"');
+    });
+
     it('validates workflow-revision', () => {
       expect(
         withCheck({ type: 'workflow-revision', glob: '*.json', id: 'x', version: 0 }).problems[0]
@@ -305,6 +445,66 @@ describe('loadGoldenSets', () => {
     expect(loaded.sets[0].directory).toBe(join(repoRoot, '.claude', 'skills', 'alpha', 'evals'));
     expect(loaded.skillsWithoutEvals).toEqual(['beta']);
     expect(loaded.problems).toEqual([expect.objectContaining({ at: 'gamma/evals/evals.json' })]);
+  });
+
+  const addPluginSkill = (plugin: string, skill: string, evals?: string) => {
+    const evalsDirectory = join(repoRoot, 'plugins', plugin, 'skills', skill, 'evals');
+
+    mkdirSync(evalsDirectory, { recursive: true });
+    if (evals !== undefined) {
+      writeFileSync(join(evalsDirectory, 'evals.json'), evals);
+    }
+  };
+  const minimalSet = (skill: string, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      skill_name: skill,
+      ...extra,
+      evals: [{ id: 'one', prompt: 'p', expected_output: 'e', checks: [{ type: 'skill-fired' }] }],
+    });
+
+  it('loads the golden sets of plugin skills beside the repository ones', () => {
+    addSkill('alpha', minimalSet('alpha'));
+    addPluginSkill('analyst', 'investigating', minimalSet('investigating'));
+    addPluginSkill('analyst', 'triaging');
+    addPluginSkill('analyst', 'broken', '{ not json');
+
+    const loaded = loadGoldenSets(repoRoot);
+
+    expect(loaded.sets.map((set) => [set.skill, set.plugin])).toEqual([
+      ['alpha', undefined],
+      ['investigating', 'analyst'],
+    ]);
+    expect(loaded.sets[1].directory).toBe(
+      join(repoRoot, 'plugins', 'analyst', 'skills', 'investigating', 'evals'),
+    );
+    expect(loaded.skillsWithoutEvals).toEqual(['analyst:triaging']);
+    expect(loaded.problems).toEqual([
+      expect.objectContaining({ at: 'plugins/analyst/skills/broken/evals/evals.json' }),
+    ]);
+  });
+
+  it('requires a plugin skill_name to equal its directory, and reads its mcp_config from the repository', () => {
+    writeFileSync(join(repoRoot, 'mcp.json'), JSON.stringify({ mcpServers: { conductor: {} } }));
+    addPluginSkill(
+      'analyst',
+      'investigating',
+      minimalSet('investigating', { mcp_config: 'mcp.json' }),
+    );
+    addPluginSkill('analyst', 'triaging', minimalSet('other'));
+
+    const loaded = loadGoldenSets(repoRoot);
+
+    expect(loaded.sets).toEqual([
+      expect.objectContaining({
+        skill: 'investigating',
+        mcp: { file: join(repoRoot, 'mcp.json'), servers: ['conductor'] },
+      }),
+    ]);
+    expect(loaded.problems).toEqual([
+      expect.objectContaining({
+        at: 'plugins/analyst/skills/triaging/evals/evals.json.skill_name',
+      }),
+    ]);
   });
 
   it('returns nothing for a repository without skills', () => {

@@ -2,6 +2,7 @@ packages:
   - 'packages/*'
   - 'packages/shared/*'
 allowBuilds:
+  '@modelcontextprotocol/inspector': false
   '@parcel/watcher': false
   '@scarf/scarf': false
   core-js: false

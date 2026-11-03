@@ -1,11 +1,16 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, normalize } from 'node:path';
 
+import { hasMalformedPlaceholder } from './manifest';
+
 /** The judge score a run needs unless the set or the case says otherwise. */
 export const DEFAULT_THRESHOLD = 70;
 
 export const SCORE_MIN = 0;
 export const SCORE_MAX = 100;
+
+/** Where a plugin keeps its skills: `plugins/<plugin>/skills/<skill>/`. */
+export const PLUGINS_DIRECTORY = 'plugins';
 
 /** Where a skill keeps its golden set, after the Agent Skills convention (`evals/evals.json`). */
 export const EVALS_DIRECTORY = 'evals';
@@ -46,7 +51,8 @@ export type Check =
       readonly pattern: string;
       readonly flags: string;
       readonly expected: boolean;
-    };
+    }
+  | { readonly type: 'mcp-tool-called'; readonly tool: string; readonly min: number };
 
 export type CheckType = Check['type'];
 
@@ -75,6 +81,11 @@ export type GoldenCase = {
   readonly expectedOutput: string;
   /** A reference artifact or answer the judge sees beside the expected output. */
   readonly golden?: string;
+  /**
+   * The golden answer's text with its `{{manifest:…}}` placeholders replaced; set only for a case
+   * whose golden answer has any, once a run has resolved them against the seed manifest.
+   */
+  readonly goldenContent?: string;
   readonly files: readonly InputFile[];
   readonly checks: readonly Check[];
   readonly assertions: readonly Assertion[];
@@ -83,16 +94,30 @@ export type GoldenCase = {
   readonly judge: boolean;
 };
 
+/**
+ * The MCP servers a set's runs may reach: the `--mcp-config` file, as an absolute path, and the
+ * server names it declares, which are what `mcp__<server>__<tool>` tool calls are matched against.
+ */
+export type McpConfig = { readonly file: string; readonly servers: readonly string[] };
+
 export type GoldenSet = {
+  /** The skill's directory name, which is also its name inside a plugin. */
   readonly skill: string;
+  /**
+   * The plugin the skill ships in — the directory under `plugins/` — or unset for a skill under
+   * `.claude/skills/`. A plugin skill is invoked as `<plugin>:<skill>` and reaches the headless run
+   * through `--plugin-dir`, since nothing is installed in a sandbox.
+   */
+  readonly plugin?: string;
   /** Absolute path of the `evals/` directory. */
   readonly directory: string;
+  readonly mcp?: McpConfig;
   readonly cases: readonly GoldenCase[];
 };
 
 export type GoldenSetProblem = { readonly at: string; readonly message: string };
 
-const SET_KEYS = new Set(['skill_name', 'threshold', 'model', 'evals']);
+const SET_KEYS = new Set(['skill_name', 'threshold', 'model', 'mcp_config', 'evals']);
 const CASE_KEYS = new Set([
   'id',
   'prompt',
@@ -113,10 +138,13 @@ const CHECK_KEYS: Record<CheckType, ReadonlySet<string>> = {
   'workflow-revision': new Set(['type', 'glob', 'id', 'version']),
   'compiled-graph-matches': new Set(['type', 'glob', 'golden']),
   'answer-matches': new Set(['type', 'pattern', 'flags', 'expected']),
+  'mcp-tool-called': new Set(['type', 'tool', 'min']),
 };
 const CHANGE_STATUSES: readonly ChangeStatus[] = ['added', 'modified', 'deleted', 'any'];
 const INVOCATIONS: readonly Invocation[] = ['explicit', 'natural'];
 const SEVERITIES: readonly AssertionSeverity[] = ['error', 'warn'];
+const MALFORMED_PLACEHOLDER =
+  'has a malformed {{manifest:…}} placeholder; write {{manifest:<scenario-key>}} or {{manifest:<scenario-key>.explanation}}';
 const CASE_ID_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 type Problems = GoldenSetProblem[];
@@ -203,6 +231,10 @@ function readThreshold(value: unknown, fallback: number, at: string, problems: P
 
 function parseAssertion(value: unknown, at: string, problems: Problems): Assertion | undefined {
   if (isNonEmptyString(value)) {
+    if (hasMalformedPlaceholder(value)) {
+      problems.push({ at, message: MALFORMED_PLACEHOLDER });
+    }
+
     return { text: value.trim(), severity: 'error' };
   }
 
@@ -216,6 +248,10 @@ function parseAssertion(value: unknown, at: string, problems: Problems): Asserti
   if (!isNonEmptyString(value.text)) {
     problems.push({ at: `${at}.text`, message: 'must be a non-empty string' });
     return undefined;
+  }
+
+  if (hasMalformedPlaceholder(value.text)) {
+    problems.push({ at: `${at}.text`, message: MALFORMED_PLACEHOLDER });
   }
 
   const severity = value.severity ?? 'error';
@@ -408,6 +444,25 @@ function parseCheck(
       };
       break;
     }
+    case 'mcp-tool-called': {
+      // The bare tool name, as the server declares it: the harness's `mcp__<server>__` prefix is
+      // the set's `mcp_config` talking, and writing it here would pin the check to a server name.
+      if (!isNonEmptyString(value.tool) || /\s/.test(value.tool)) {
+        problems.push({ at: `${at}.tool`, message: 'must be an MCP tool name without whitespace' });
+      } else if (value.tool.startsWith('mcp__')) {
+        problems.push({
+          at: `${at}.tool`,
+          message:
+            'must be the tool name alone; the "mcp__<server>__" prefix is added when matching',
+        });
+      }
+      const min = value.min ?? 1;
+      if (typeof min !== 'number' || !Number.isInteger(min) || min < 1) {
+        problems.push({ at: `${at}.min`, message: 'must be a positive integer' });
+      }
+      check = { type, tool: String(value.tool), min: min as number };
+      break;
+    }
   }
 
   return problems.length === before ? check : undefined;
@@ -434,6 +489,8 @@ function parseCase(
 
   if (!isNonEmptyString(value.prompt)) {
     problems.push({ at: `${at}.prompt`, message: 'must be a non-empty string' });
+  } else if (hasMalformedPlaceholder(value.prompt)) {
+    problems.push({ at: `${at}.prompt`, message: MALFORMED_PLACEHOLDER });
   } else if (value.prompt.trimStart().startsWith('/')) {
     problems.push({
       at: `${at}.prompt`,
@@ -463,6 +520,10 @@ function parseCase(
     });
   } else if (value.expected_output !== undefined && typeof value.expected_output !== 'string') {
     problems.push({ at: `${at}.expected_output`, message: 'must be a string' });
+  }
+
+  if (typeof value.expected_output === 'string' && hasMalformedPlaceholder(value.expected_output)) {
+    problems.push({ at: `${at}.expected_output`, message: MALFORMED_PLACEHOLDER });
   }
 
   if (value.golden !== undefined) {
@@ -557,13 +618,83 @@ function parseCase(
   };
 }
 
+/** How a set is named in a problem: the skill alone for a repository skill, its path in a plugin. */
+function setLocation(context: { skill: string; plugin?: string }): string {
+  return context.plugin === undefined
+    ? context.skill
+    : `${PLUGINS_DIRECTORY}/${context.plugin}/skills/${context.skill}`;
+}
+
+/**
+ * Resolves and reads a set's `mcp_config`: a path relative to the set's `evals/` directory or, when
+ * nothing is there, to the repository root — a plugin's own `.mcp.json` is the common case, and it
+ * sits outside `evals/`. The file is the one `claude --mcp-config` reads, `{ "mcpServers": { ... } }`,
+ * so a document without that key is refused here rather than run with no servers at all.
+ */
+function readMcpConfig(
+  value: unknown,
+  context: { directory: string; repoRoot: string },
+  at: string,
+  problems: Problems,
+): McpConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!isNonEmptyString(value) || !isContainedRelativePath(value)) {
+    problems.push({
+      at,
+      message: 'must be a relative path inside the evals directory or the repository',
+    });
+    return undefined;
+  }
+
+  const file = [join(context.directory, value), join(context.repoRoot, value)].find(
+    (candidate) => existsSync(candidate) && statSync(candidate).isFile(),
+  );
+
+  if (file === undefined) {
+    problems.push({
+      at,
+      message: `no such file: ${value} (looked in the evals directory and the repository root)`,
+    });
+    return undefined;
+  }
+
+  let document: unknown;
+
+  try {
+    document = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    problems.push({ at, message: `${value}: unparseable JSON: ${(error as Error).message}` });
+    return undefined;
+  }
+
+  if (!isRecord(document) || !isRecord(document.mcpServers)) {
+    problems.push({
+      at,
+      message: `${value} must be { "mcpServers": { "<name>": { ... } } }, the form claude --mcp-config reads`,
+    });
+    return undefined;
+  }
+
+  const servers = Object.keys(document.mcpServers);
+
+  if (servers.length === 0) {
+    problems.push({ at, message: `${value} declares no MCP server` });
+    return undefined;
+  }
+
+  return { file, servers };
+}
+
 /** Parses one `evals.json`, already read and JSON-decoded. Problems are reported, never thrown. */
 export function parseGoldenSet(
   raw: unknown,
-  context: { skill: string; directory: string },
+  context: { skill: string; directory: string; repoRoot: string; plugin?: string },
 ): { set?: GoldenSet; problems: GoldenSetProblem[] } {
   const problems: Problems = [];
-  const at = `${context.skill}/${EVALS_DIRECTORY}/${EVALS_FILE}`;
+  const at = `${setLocation(context)}/${EVALS_DIRECTORY}/${EVALS_FILE}`;
 
   if (!isRecord(raw)) {
     return { problems: [{ at, message: 'must be a JSON object' }] };
@@ -579,6 +710,7 @@ export function parseGoldenSet(
   }
 
   const threshold = readThreshold(raw.threshold, DEFAULT_THRESHOLD, `${at}.threshold`, problems);
+  const mcp = readMcpConfig(raw.mcp_config, context, `${at}.mcp_config`, problems);
   // A set-level model is the default for its cases, the way a set-level threshold is.
   const model = readModel(raw.model, undefined, `${at}.model`, problems);
   const cases: GoldenCase[] = [];
@@ -619,38 +751,76 @@ export function parseGoldenSet(
     return { problems };
   }
 
-  return { set: { skill: context.skill, directory: context.directory, cases }, problems };
+  return {
+    set: {
+      skill: context.skill,
+      ...(context.plugin === undefined ? {} : { plugin: context.plugin }),
+      directory: context.directory,
+      ...(mcp === undefined ? {} : { mcp }),
+      cases,
+    },
+    problems,
+  };
 }
 
 export type LoadedGoldenSets = {
   readonly sets: readonly GoldenSet[];
   readonly problems: readonly GoldenSetProblem[];
-  /** Skills under `.claude/skills/` that ship no golden set — reported, not failed. */
+  /**
+   * Skills that ship no golden set — reported, not failed. A plugin skill is named
+   * `<plugin>:<skill>`, the way it is invoked.
+   */
   readonly skillsWithoutEvals: readonly string[];
 };
 
-/** Reads every skill's golden set from `.claude/skills/<skill>/evals/evals.json`. */
+/** The child directories of a directory, sorted, or none when it is absent. */
+function listDirectoryNames(directory: string): string[] {
+  if (!existsSync(directory)) {
+    return [];
+  }
+
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+}
+
+/** Every skill a repository holds: under `.claude/skills/`, then under `plugins/<plugin>/skills/`. */
+function listSkills(repoRoot: string): { skill: string; plugin?: string; directory: string }[] {
+  const repositorySkills = join(repoRoot, '.claude', 'skills');
+  const pluginsRoot = join(repoRoot, PLUGINS_DIRECTORY);
+
+  return [
+    ...listDirectoryNames(repositorySkills).map((skill) => ({
+      skill,
+      directory: join(repositorySkills, skill),
+    })),
+    ...listDirectoryNames(pluginsRoot).flatMap((plugin) =>
+      listDirectoryNames(join(pluginsRoot, plugin, 'skills')).map((skill) => ({
+        skill,
+        plugin,
+        directory: join(pluginsRoot, plugin, 'skills', skill),
+      })),
+    ),
+  ];
+}
+
+/**
+ * Reads every skill's golden set from `.claude/skills/<skill>/evals/evals.json` and from
+ * `plugins/<plugin>/skills/<skill>/evals/evals.json`.
+ */
 export function loadGoldenSets(repoRoot: string): LoadedGoldenSets {
-  const skillsRoot = join(repoRoot, '.claude', 'skills');
   const sets: GoldenSet[] = [];
   const problems: GoldenSetProblem[] = [];
   const skillsWithoutEvals: string[] = [];
 
-  if (!existsSync(skillsRoot)) {
-    return { sets, problems, skillsWithoutEvals };
-  }
-
-  const skills = readdirSync(skillsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-
-  for (const skill of skills) {
-    const directory = join(skillsRoot, skill, EVALS_DIRECTORY);
+  for (const { skill, plugin, directory: skillDirectory } of listSkills(repoRoot)) {
+    const location = setLocation({ skill, plugin });
+    const directory = join(skillDirectory, EVALS_DIRECTORY);
     const file = join(directory, EVALS_FILE);
 
     if (!existsSync(file)) {
-      skillsWithoutEvals.push(skill);
+      skillsWithoutEvals.push(plugin === undefined ? skill : `${plugin}:${skill}`);
       continue;
     }
 
@@ -660,13 +830,13 @@ export function loadGoldenSets(repoRoot: string): LoadedGoldenSets {
       raw = JSON.parse(readFileSync(file, 'utf8'));
     } catch (error) {
       problems.push({
-        at: `${skill}/${EVALS_DIRECTORY}/${EVALS_FILE}`,
+        at: `${location}/${EVALS_DIRECTORY}/${EVALS_FILE}`,
         message: `unparseable JSON: ${(error as Error).message}`,
       });
       continue;
     }
 
-    const parsed = parseGoldenSet(raw, { skill, directory });
+    const parsed = parseGoldenSet(raw, { skill, directory, repoRoot, plugin });
 
     problems.push(...parsed.problems);
 

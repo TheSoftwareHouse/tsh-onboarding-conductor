@@ -31,11 +31,12 @@
     "changelog:check": "node scripts/check-changelog.cjs",
     "workflow:validate": "node scripts/validate-workflows.cjs",
     "workflow:compile": "pnpm --filter @tsh/ddl-schema build && node scripts/compile-workflow.cjs",
-    "openapi:generate": "pnpm --filter @tsh/ddl-schema build && pnpm --filter @tsh/engine openapi:generate",
+    "openapi:generate": "pnpm --filter @tsh/ddl-schema build && pnpm --filter @tsh/engine openapi:generate && pnpm --filter @tsh/openapi generate:types",
     "docs:dev": "pnpm --filter @tsh/ddl-schema build && pnpm --filter @tsh/docs start",
     "docs:build": "pnpm --filter @tsh/ddl-schema build && pnpm --filter @tsh/docs build",
     "stack:integration:up": "node scripts/compose.cjs stop engine-worker || true && node scripts/compose.cjs up -d --build --wait engine",
     "stack:up": "node scripts/compose.cjs up -d --build",
+    "stack:mcp:up": "node scripts/compose.cjs --profile mcp up -d --build --wait",
     "stack:panel-dev:up": "pnpm --filter @tsh/admin-panel build && node scripts/compose.cjs -f docker-compose.yml -f docker-compose.panel-dev.yml up -d engine engine-worker",
     "panel:watch": "pnpm --filter @tsh/admin-panel build:watch",
     "stack:down": "node scripts/compose.cjs --profile \"*\" down --remove-orphans",
@@ -43,6 +44,8 @@
     "stack:prune": "node scripts/stack-prune.cjs --all",
     "stack:ps": "node scripts/compose.cjs ps",
     "stack:logs": "node scripts/compose.cjs logs -f --tail=100",
+    "onboardings:seed": "pnpm --filter @tsh/onboarding-seeder exec node --env-file-if-exists=../../.env -r ts-node/register/transpile-only src/cli.ts",
+    "mcp:inspect": "pnpm --filter @tsh/mcp exec mcp-inspector --web --transport http --server-url http://localhost:${MCP_PORT:-3100}/mcp",
     "stack:config": "node scripts/compose.cjs config"
   },
   "devDependencies": {

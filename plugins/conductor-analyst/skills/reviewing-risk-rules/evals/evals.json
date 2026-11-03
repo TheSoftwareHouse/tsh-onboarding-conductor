@@ -1,0 +1,149 @@
+{
+  "skill_name": "reviewing-risk-rules",
+  "threshold": 70,
+  "model": "sonnet",
+  "mcp_config": "plugins/conductor-analyst/.mcp.json",
+  "evals": [
+    {
+      "id": "explain-scoring",
+      "prompt": "Explain how risk scoring works in the analyst-investigation workflow: which rules add points and what happens at which score?",
+      "expected_output": "Reads version 1 with get_workflow_version and explains the single score `risk` (0 to 100): +40 for country RU, IR, TR or AE, +30 for a self-declared PEP, +20 for source of funds sale_of_asset or other; summed once and clamped. The threshold is on the success transition of collect_profile: risk of 60 or more goes to rejected, otherwise to send_email_code. Shows the combinations by arithmetic (country + PEP 70, country + funds 60, all three 90 reject; PEP + funds 50 and single rules continue). States that later provider and reviewer decisions are separate.",
+      "golden": "golden/explain-scoring.md",
+      "checks": [
+        {
+          "type": "mcp-tool-called",
+          "tool": "get_workflow_version"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "\\b60\\b"
+        },
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        }
+      ],
+      "assertions": [
+        "The answer lists the three rules with their points: country in RU, IR, TR or AE adds 40, a self-declared PEP adds 30, source of funds sale_of_asset or other adds 20",
+        "The answer states that a risk score of 60 or more rejects the onboarding at the profile step (collect_profile) and that a lower score continues to the e-mail code step",
+        "The answer shows which combinations reach 60, for example country plus PEP (70) or country plus source of funds (60), and that PEP plus source of funds (50) or a single rule does not",
+        {
+          "text": "The answer says the score is used only for that routing decision and that provider verdicts and manual review are decided by other steps",
+          "severity": "warn"
+        },
+        {
+          "text": "The answer names the tool or tools its statements come from",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "version-diff-signoff",
+      "prompt": "Write me a sign-off summary of what version 2 of eu-b2c-individual-kyc-eea changes compared with version 1, with a view to risk.",
+      "expected_output": "Calls diff_workflow_versions for eu-b2c-individual-kyc-eea from 1 to 2 and states first that no score rule, score bound or threshold changed. Then lists what did change: the added send_phone_code step, the collect_contact transition and connector changes (twilio_sms_otp removed from that step), the new kycAttemptCount field on submit_kyc and the renamed workflow. Does not invent risk-rule changes.",
+      "golden": "golden/version-diff-signoff.md",
+      "checks": [
+        {
+          "type": "mcp-tool-called",
+          "tool": "diff_workflow_versions"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "send_phone_code"
+        },
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        }
+      ],
+      "assertions": [
+        "The answer states that the diff shows no change to score rules, score bounds or thresholds (this is not a scoring change)",
+        "The answer lists the added step send_phone_code and the change to the transitions of collect_contact",
+        {
+          "text": "The answer mentions that the connector twilio_sms_otp is removed from collect_contact and that submit_kyc gains the field kycAttemptCount",
+          "severity": "warn"
+        },
+        "The answer does not claim any risk rule or threshold changed that the diff does not report",
+        {
+          "text": "The answer is organised as a sign-off summary: what changed, why it matters for risk, what did not change",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "threshold-what-if",
+      "prompt": "What would happen if we raised the reject threshold in analyst-investigation from 60 to 70? How many of our existing onboardings would have gone differently?",
+      "expected_output": "Reads version 1 for the current threshold (risk >= 60 routes to rejected), uses onboarding_stats to see the rejected population and find_onboardings for the scores, and answers with numbers from tools: of 46 onboardings 4 were rejected by the score (risk 60, 70, 70, 90); exactly 1, the one at 60, would have continued to send_email_code instead; the three at 70 and 90 stay rejected. States that the figures are historical and that a new rule applies only to onboardings started after it is published. Does not save anything.",
+      "golden": "golden/threshold-what-if.md",
+      "checks": [
+        {
+          "type": "mcp-tool-called",
+          "tool": "get_workflow_version"
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "onboarding_stats"
+        },
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        }
+      ],
+      "assertions": [
+        "The answer says that exactly one existing onboarding, the one with a risk score of 60, would have been routed differently (continuing instead of being rejected)",
+        "The answer says the onboardings with risk 70 or higher stay rejected under a threshold of 70",
+        "The answer states that the figures are historical and that a changed rule would apply only to onboardings started after it is published, not to ones already decided or in flight",
+        {
+          "text": "The answer reports that 4 of the 46 onboardings were rejected by the score rule",
+          "severity": "warn"
+        },
+        "The answer does not say that anything was saved, changed or is live"
+      ]
+    },
+    {
+      "id": "propose-threshold-draft",
+      "prompt": "Raise the reject threshold in analyst-investigation to 70 and save it as a draft.",
+      "expected_output": "Reads the authored document of analyst-investigation version 1 with get_workflow_document (no redactions), changes only the threshold on the collect_profile success transition (risk gte 60 to 70) and sets a new family id and name, because analyst-investigation is a fixtures family and drafts only go into users-scope families. Calls compile_workflow (ok) and create_workflow_draft without a token, then shows the analyst the change, the compile result, the target family, that it would create a new family in the users scope and that there are no blockers, with the impact on existing onboardings from tools, and asks for an explicit yes before saving. Says a draft starts no onboarding and that publishing is done by an authorised person in the admin panel. Does not say a draft was created or that anything is live. Calling create_workflow_draft with a token is not expected, because no yes was given.",
+      "golden": "golden/propose-threshold-draft.md",
+      "checks": [
+        {
+          "type": "mcp-tool-called",
+          "tool": "get_workflow_document"
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "compile_workflow"
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "create_workflow_draft"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "\\b(confirm|yes|go ahead|proceed|approve)\\b",
+          "flags": "i"
+        },
+        {
+          "type": "files-changed",
+          "glob": "workflows/**",
+          "max": 0
+        }
+      ],
+      "assertions": [
+        "The answer shows a preview of the proposed change before saving anything: the threshold goes from 60 to 70 on the profile step's success route to rejected, and nothing else is changed",
+        "The answer says the draft targets a new family with a new id, not analyst-investigation, because analyst-investigation is a fixtures family that cannot take drafts, and that saving would create a family in the users scope",
+        "The answer reports the compile result as ok and says there are no blockers",
+        "The answer asks the analyst for an explicit yes (or confirmation) to saving the draft and says nothing has been saved yet; it does not report a draft as created",
+        "The answer says a draft does not run onboardings and that publishing is a human action in the admin panel by an authorised person",
+        {
+          "text": "The answer gives the impact on existing onboardings in numbers from tools, such as one of the four score-based rejections (risk 60) being routed differently, and says this is historical",
+          "severity": "warn"
+        },
+        "The answer does not say the change is live, active or in force"
+      ]
+    }
+  ]
+}

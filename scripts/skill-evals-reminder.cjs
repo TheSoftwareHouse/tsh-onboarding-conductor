@@ -8,11 +8,13 @@
  * was changed and never evaluated. This script is what notices. It is wired as two hooks in
  * `.claude/settings.json`, so the harness runs it rather than the model remembering to:
  *
- * - `post-tool-use` — an edit to a file under `.claude/skills/` returns the command for that skill
- *   as context, while the change is still the thing being worked on.
+ * - `post-tool-use` — an edit to a file under `.claude/skills/` or `plugins/<plugin>/skills/`
+ *   returns the command for that skill as context, while the change is still the thing being
+ *   worked on.
  * - `stop` — before a turn ends, git decides. Every skill with uncommitted changes under
- *   `.claude/skills/` blocks the stop once, naming the command; a second stop at the same state
- *   stays silent, so the reminder cannot loop and cannot nag a decision already taken.
+ *   `.claude/skills/` or `plugins/<plugin>/skills/` blocks the stop once, naming the command; a
+ *   second stop at the same state stays silent, so the reminder cannot loop and cannot nag a
+ *   decision already taken.
  *
  * Git is the signal because it is the only durable one: reports are gitignored, so their absence
  * says nothing about whether a run happened, and their presence says nothing about which state of
@@ -37,7 +39,16 @@ const { join, relative, resolve } = require('node:path');
 
 const REPO_ROOT = resolve(__dirname, '..');
 const SKILLS_DIRECTORY = '.claude/skills';
-const SKILLS_PREFIX = `${SKILLS_DIRECTORY}/`;
+const PLUGINS_DIRECTORY = 'plugins';
+/**
+ * A file inside a skill: `.claude/skills/<skill>/<file…>` or `plugins/<plugin>/skills/<skill>/<file…>`.
+ * A skill is a directory, so the path needs a segment after the skill's name — a plain file
+ * directly under `skills/`, such as a `.gitkeep`, is not a skill and has no golden set.
+ */
+const SKILL_FILE_PATTERNS = [
+  /^\.claude\/skills\/([^/]+)\/.+/,
+  /^plugins\/[^/]+\/skills\/([^/]+)\/.+/,
+];
 
 /**
  * One state file per session and checkout, outside the repository so it never shows up as a change
@@ -50,20 +61,26 @@ const EXIT_OK = 0;
 const EXIT_USAGE = 2;
 const STATE_KEY_LENGTH = 32;
 
-/** The skill a repository-relative path belongs to, or `undefined` for a path outside the skills. */
+/**
+ * The skill a repository-relative path belongs to, or `undefined` for a path outside the skills —
+ * a file inside `.claude/skills/<skill>/` or `plugins/<plugin>/skills/<skill>/`. A skill is named by
+ * its directory, the name `pnpm skills:evals --skill` takes.
+ */
 function skillOf(path) {
   const normalized = path.replace(/\\/g, '/');
   const repoRelative = normalized.startsWith('/')
     ? relative(REPO_ROOT, normalized).replace(/\\/g, '/')
     : normalized.replace(/^\.\//, '');
 
-  if (!repoRelative.startsWith(SKILLS_PREFIX)) {
-    return undefined;
+  for (const pattern of SKILL_FILE_PATTERNS) {
+    const match = pattern.exec(repoRelative);
+
+    if (match !== null) {
+      return match[1];
+    }
   }
 
-  const [name] = repoRelative.slice(SKILLS_PREFIX.length).split('/');
-
-  return name === undefined || name === '' ? undefined : name;
+  return undefined;
 }
 
 /** The skills named by a list of paths, each once, in a stable order. */
@@ -125,9 +142,9 @@ function contentDigest(root, path) {
 }
 
 /**
- * What git sees under `.claude/skills/`: the skills with uncommitted changes and a fingerprint of
- * the exact content of those changes. A repository git cannot read reports nothing, which reads as
- * "no skill changed" and blocks nothing.
+ * What git sees under `.claude/skills/` and `plugins/`: the skills with uncommitted changes and a
+ * fingerprint of the exact content of those changes. A repository git cannot read reports nothing,
+ * which reads as "no skill changed" and blocks nothing.
  */
 function collectSkillChanges(root = REPO_ROOT) {
   let stdout;
@@ -135,7 +152,15 @@ function collectSkillChanges(root = REPO_ROOT) {
   try {
     stdout = execFileSync(
       'git',
-      ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', SKILLS_DIRECTORY],
+      [
+        'status',
+        '--porcelain=v1',
+        '-z',
+        '--untracked-files=all',
+        '--',
+        SKILLS_DIRECTORY,
+        PLUGINS_DIRECTORY,
+      ],
       { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     );
   } catch {
@@ -163,7 +188,7 @@ function collectSkillChanges(root = REPO_ROOT) {
 }
 
 function commandFor(skills) {
-  return skills.map((skill) => `\`pnpm skills:evals --case ${skill}\``).join(' and ');
+  return skills.map((skill) => `\`pnpm skills:evals --skill ${skill}\``).join(' and ');
 }
 
 /** The one text both hooks carry, so the reminder reads the same wherever it arrives. */

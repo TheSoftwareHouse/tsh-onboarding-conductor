@@ -5,8 +5,11 @@ configurable onboarding workflows, plus a React admin panel for operating them.
 
 Packages live under `packages/` (and `packages/shared/`). `@tsh/engine` holds the
 orchestration logic; `@tsh/admin-panel` is the React + Vite operator UI; `@tsh/docs` is the
-Docusaurus documentation site; `@tsh/openapi` holds the engine's generated OpenAPI document and no
-source. `@tsh/demo-bff`, `@tsh/demo-web` and
+Docusaurus documentation site; `@tsh/openapi` holds the engine's generated OpenAPI document and the
+TypeScript types generated from it, and no hand-written source; `@tsh/mcp` is the MCP server that
+gives analysts' AI clients masked access to the engine's admin API; `@tsh/onboarding-seeder` seeds
+synthetic onboardings to investigate. `plugins/conductor-analyst/` is the analyst plugin (skills, an
+agent, manifests), not a workspace package. `@tsh/demo-bff`, `@tsh/demo-web` and
 `@tsh/shared` are still placeholders or e2e skeletons — check for source before assuming one is
 implemented.
 
@@ -32,29 +35,32 @@ remaps the host side only; inside the Compose network the engine still reaches
 Always use the root pnpm scripts. Never invoke `docker compose`, `jest`, `tsc` or
 `playwright` directly — the scripts wrap them with required setup and teardown.
 
-| Command                                                                             | Does                                                                                                                            |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm bootstrap`                                                                    | Install from the lockfile and set up Husky hooks                                                                                |
-| `pnpm lint` / `pnpm lint:fix`                                                       | ESLint across packages                                                                                                          |
-| `pnpm typecheck`                                                                    | `tsc --noEmit` across packages; `@tsh/ddl-schema` builds first because its dependents typecheck against its `dist`              |
-| `pnpm build`                                                                        | Build all packages                                                                                                              |
-| `pnpm test` / `pnpm test:cov`                                                       | Unit tests (co-located `*.spec.ts`)                                                                                             |
-| `pnpm test:scripts`                                                                 | Tests for `scripts/` (`node --test`); part of `pnpm test` and `test:cov`                                                        |
-| `pnpm test:integration`                                                             | Integration tests                                                                                                               |
-| `pnpm test:e2e`                                                                     | Brings the stack up without the worker, runs e2e, always tears it down                                                          |
-| `pnpm format:fix`                                                                   | Canonical repo-wide Prettier write                                                                                              |
-| `pnpm workflow:validate [path]`                                                     | Validate every workflow the engine loads, or just the paths named, without the stack                                            |
-| `pnpm workflow:compile <file> [--report\|--normalized\|--from-untyped]`             | Compile a workflow the way the engine loads it; `--from-untyped` converts a document of untyped steps                           |
-| `pnpm skills:validate [path] [--strict]`                                            | Check the skills and rules in `.claude/` against the repository they cite; no model, runs in CI                                 |
-| `pnpm skills:routing`                                                               | Measure which skill fires for a table of prompts; spends money, never runs in CI                                                |
-| `pnpm skills:ablation`                                                              | Run each ablation case with and without its skill and grade the artifact; spends money, never runs in CI                        |
-| `pnpm skills:evals [--validate\|--dry-run\|--case <text>\|--runs <n>\|--model <m>]` | Run the skills' golden sets through headless Claude Code and grade them; local only, on the signed-in account, never in CI      |
-| `pnpm version:bump <patch\|minor\|major\|X.Y.Z>`                                    | Bump the product version: date `## Unreleased` in `CHANGELOG.md`, rewrite every `package.json`, regenerate OpenAPI and API docs |
-| `pnpm changelog:check [base]`                                                       | Fail unless `CHANGELOG.md` changed since `base` (default `origin/main`); CI runs it on every pull request                       |
-| `pnpm openapi:generate`                                                             | Rewrite the engine's OpenAPI document from its code                                                                             |
-| `pnpm docs:dev` / `pnpm docs:build`                                                 | The documentation site, with hot reload / built                                                                                 |
-| `pnpm stack:up` / `stack:down` / `stack:reset` / `stack:ps` / `stack:logs`          | Local Docker stack; `reset` also throws the volumes away                                                                        |
-| `pnpm stack:panel-dev:up` + `pnpm panel:watch`                                      | Stack serving the admin panel from the host's build                                                                             |
+| Command                                                                                             | Does                                                                                                                            |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm bootstrap`                                                                                    | Install from the lockfile and set up Husky hooks                                                                                |
+| `pnpm lint` / `pnpm lint:fix`                                                                       | ESLint across packages                                                                                                          |
+| `pnpm typecheck`                                                                                    | `tsc --noEmit` across packages; `@tsh/ddl-schema` builds first because its dependents typecheck against its `dist`              |
+| `pnpm build`                                                                                        | Build all packages                                                                                                              |
+| `pnpm test` / `pnpm test:cov`                                                                       | Unit tests (co-located `*.spec.ts`)                                                                                             |
+| `pnpm test:scripts`                                                                                 | Tests for `scripts/` (`node --test`); part of `pnpm test` and `test:cov`                                                        |
+| `pnpm test:integration`                                                                             | Integration tests                                                                                                               |
+| `pnpm test:e2e`                                                                                     | Brings the stack up without the worker, runs e2e, always tears it down                                                          |
+| `pnpm format:fix`                                                                                   | Canonical repo-wide Prettier write                                                                                              |
+| `pnpm workflow:validate [path]`                                                                     | Validate every workflow the engine loads, or just the paths named, without the stack                                            |
+| `pnpm workflow:compile <file> [--report\|--normalized\|--from-untyped]`                             | Compile a workflow the way the engine loads it; `--from-untyped` converts a document of untyped steps                           |
+| `pnpm skills:validate [path] [--strict]`                                                            | Check the skills, rules and plugin skills and agents against what they cite; no model, runs in CI                               |
+| `pnpm skills:routing`                                                                               | Measure which skill fires for a table of prompts; spends money, never runs in CI                                                |
+| `pnpm skills:ablation`                                                                              | Run each ablation case with and without its skill and grade the artifact; spends money, never runs in CI                        |
+| `pnpm skills:evals [--validate\|--dry-run\|--skill <name>\|--case <text>\|--runs <n>\|--model <m>]` | Run the skills' golden sets through headless Claude Code and grade them; local only, on the signed-in account, never in CI      |
+| `pnpm version:bump <patch\|minor\|major\|X.Y.Z>`                                                    | Bump the product version: date `## Unreleased` in `CHANGELOG.md`, rewrite every `package.json`, regenerate OpenAPI and API docs |
+| `pnpm changelog:check [base]`                                                                       | Fail unless `CHANGELOG.md` changed since `base` (default `origin/main`); CI runs it on every pull request                       |
+| `pnpm openapi:generate`                                                                             | Rewrite the engine's OpenAPI document from its code, then the `@tsh/openapi` types from the document                            |
+| `pnpm stack:mcp:up`                                                                                 | The stack plus the MCP server on `http://localhost:3100/mcp` (profile `mcp`, sign-in off); needs Docker                         |
+| `pnpm onboardings:seed [--spread-days <n>]`                                                         | Seed synthetic onboardings on the running stack and write `packages/onboarding-seeder/out/manifest.json`                        |
+| `pnpm mcp:inspect`                                                                                  | Open the MCP Inspector against the local MCP server                                                                             |
+| `pnpm docs:dev` / `pnpm docs:build`                                                                 | The documentation site, with hot reload / built                                                                                 |
+| `pnpm stack:up` / `stack:down` / `stack:reset` / `stack:ps` / `stack:logs`                          | Local Docker stack; `reset` also throws the volumes away                                                                        |
+| `pnpm stack:panel-dev:up` + `pnpm panel:watch`                                                      | Stack serving the admin panel from the host's build                                                                             |
 
 `pnpm test:e2e`, `test:mailhog:integration` and every `stack:*` command need Docker
 running. `pnpm format` is check-only and covers just two packages — it is not a
@@ -80,9 +86,10 @@ would route a run elsewhere — a key, an auth token, a base-URL override, the B
 Vertex switches — is dropped before the child starts, and `skills:evals` refuses to start
 when `CI` or `GITHUB_ACTIONS` is set. Never add a workflow, step or secret that runs them.
 
-Run `skills:evals --case <skill>` after changing a skill under `.claude/skills/` — its
-`SKILL.md`, a reference document or its `evals/` — and the whole suite before opening a
-pull request. `scripts/skill-evals-reminder.cjs`, wired as the `PostToolUse` and `Stop`
+Run `skills:evals --skill <skill>` after changing a skill under `.claude/skills/` or
+`plugins/*/skills/` — its `SKILL.md`, a reference document or its `evals/` — and the whole suite
+before opening a pull request. A plugin skill's golden set reads the seed manifest, so it needs
+`pnpm stack:mcp:up` and `pnpm onboardings:seed` first. `scripts/skill-evals-reminder.cjs`, wired as the `PostToolUse` and `Stop`
 hooks in `.claude/settings.json`, asks for that run from git's own view of the tree, so a
 changed skill cannot be forgotten (`.claude/rules/skill-evals.md`). Run `skills:ablation`
 when a skill is written, when its rules change substantially, or when `docs/` grows a
@@ -116,7 +123,10 @@ Per-area conventions live in `.claude/rules/` and load when a matching file is r
 Skills in `.claude/skills/` cover work a rule cannot reach, because a rule fires on
 reading a file and a skill on being asked: `creating-workflows` owns authoring the JSON
 definitions under `workflows/`, and `creating-engine-bffs` owns building a service
-against the engine's public onboarding API. A skill's frontmatter follows the Agent Skills
+against the engine's public onboarding API. `plugins/conductor-analyst/` (listed by `.claude-plugin/marketplace.json` for Claude Code and
+`.agents/plugins/marketplace.json` for Codex) ships the analyst skills for an assistant that has the
+MCP tools and nothing of this repository, so those skills cite no path or shell command; see
+`docs/EXTENDING.md` to add a skill or an MCP tool. A skill's frontmatter follows the Agent Skills
 specification (agentskills.io) — `name`, `description` and the spec's optional keys only — and
 its trigger phrases live in `description`, because no other agent reads Claude Code's
 `when_to_use`; `pnpm skills:validate` enforces both. A skill's golden set sits beside it

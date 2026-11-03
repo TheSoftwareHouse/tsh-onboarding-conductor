@@ -13,7 +13,7 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 import { type CheckContext, type CheckResult, type Ddl, changeStatusOf, runChecks } from './checks';
-import { EVALS_DIRECTORY, type GoldenCase, type GoldenSet } from './golden-set';
+import { EVALS_DIRECTORY, type GoldenCase, type GoldenSet, PLUGINS_DIRECTORY } from './golden-set';
 import { type Artifact, type Judgement, judgeRun } from './judge';
 import {
   type ChangedFile,
@@ -103,8 +103,21 @@ async function git(sandbox: string, ...args: string[]): Promise<string> {
   return stdout;
 }
 
+/** The directories whose children are skills: the repository's own and each plugin's. */
+function skillRoots(sandbox: string): string[] {
+  const pluginsRoot = join(sandbox, PLUGINS_DIRECTORY);
+  const plugins = existsSync(pluginsRoot)
+    ? readdirSync(pluginsRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(pluginsRoot, entry.name, 'skills'))
+    : [];
+
+  return [join(sandbox, '.claude', 'skills'), ...plugins];
+}
+
 /**
- * Removes every skill's `evals/` directory from the sandbox and copies the case's input files in,
+ * Removes every skill's `evals/` directory — a repository skill's and a plugin skill's alike — from
+ * the sandbox and copies the case's input files in,
  * then commits, so the agent starts from a clean tree that holds the inputs and none of the
  * answers. A golden set left in place would be readable by the agent under test, and an
  * uncommitted input would be graded as something the agent added. Returns that commit, the
@@ -115,9 +128,11 @@ export async function prepareSandbox(
   set: GoldenSet,
   testCase: GoldenCase,
 ): Promise<string> {
-  const skillsRoot = join(sandbox, '.claude', 'skills');
+  for (const skillsRoot of skillRoots(sandbox)) {
+    if (!existsSync(skillsRoot)) {
+      continue;
+    }
 
-  if (existsSync(skillsRoot)) {
     for (const entry of readdirSync(skillsRoot, { withFileTypes: true })) {
       if (entry.isDirectory()) {
         rmSync(join(skillsRoot, entry.name, EVALS_DIRECTORY), { force: true, recursive: true });
@@ -197,9 +212,19 @@ export function resolveAgentModel(
   return options.overrideModel ?? testCase.model ?? options.agentModel;
 }
 
+/**
+ * The name the harness knows a set's skill by: `<plugin>:<skill>` for a plugin's, the bare name
+ * for a repository skill.
+ */
+export function invocationName(set: GoldenSet): string {
+  return set.plugin === undefined ? set.skill : `${set.plugin}:${set.skill}`;
+}
+
 /** The prompt as the agent receives it: prefixed with the skill for an explicit invocation. */
 export function buildAgentPrompt(set: GoldenSet, testCase: GoldenCase): string {
-  return testCase.invocation === 'explicit' ? `/${set.skill} ${testCase.prompt}` : testCase.prompt;
+  return testCase.invocation === 'explicit'
+    ? `/${invocationName(set)} ${testCase.prompt}`
+    : testCase.prompt;
 }
 
 /**
@@ -212,8 +237,10 @@ export function resolveSkillsUsed(
   testCase: GoldenCase,
   run: { readonly skillsUsed: readonly string[]; readonly availableSkills: readonly string[] },
 ): readonly string[] {
-  if (testCase.invocation === 'explicit' && run.availableSkills.includes(set.skill)) {
-    return [set.skill, ...run.skillsUsed.filter((skill) => skill !== set.skill)];
+  const name = invocationName(set);
+
+  if (testCase.invocation === 'explicit' && run.availableSkills.includes(name)) {
+    return [name, ...run.skillsUsed.filter((skill) => skill !== name)];
   }
 
   return run.skillsUsed;
@@ -373,7 +400,7 @@ export async function evaluateCase(
   const startedAt = Date.now();
   const agentModel = resolveAgentModel(testCase, options);
   const created = await createSandbox(
-    sanitizeLabel(`${set.skill}-${testCase.id}-${runIndex}`),
+    sanitizeLabel(`${set.plugin ?? 'repository'}-${set.skill}-${testCase.id}-${runIndex}`),
   ).then(
     (root) => ({ root }),
     (error: Error) => ({ error }),
@@ -401,8 +428,13 @@ export async function evaluateCase(
       maxBudgetUsd: options.maxBudgetUsd,
       timeoutMs: options.timeoutMs,
       // The connectors a developer has attached to their own Claude Code are not part of any skill
-      // under test, cost tens of thousands of tokens per turn, and could act on real systems.
+      // under test, cost tens of thousands of tokens per turn, and could act on real systems. The
+      // servers the golden set names are the only ones the run reaches.
       strictMcpConfig: true,
+      mcpConfig: set.mcp?.file,
+      // Nothing is installed in a sandbox, so a plugin's skill reaches the run from the sandbox's
+      // own copy of the plugin — the one `prepareSandbox` stripped of its golden sets.
+      pluginDirs: set.plugin === undefined ? [] : [join(sandbox, PLUGINS_DIRECTORY, set.plugin)],
     });
     const durationMs = Date.now() - startedAt;
     const observed = {
@@ -426,11 +458,11 @@ export async function evaluateCase(
       });
     }
 
-    if (testCase.invocation === 'explicit' && !run.availableSkills.includes(set.skill)) {
+    if (testCase.invocation === 'explicit' && !run.availableSkills.includes(invocationName(set))) {
       keep = true;
       return erroredResult(
         runIndex,
-        `the harness did not discover the skill "${set.skill}" in the sandbox, so the explicit invocation reached the model as plain text`,
+        `the harness did not discover the skill "${invocationName(set)}" in the sandbox, so the explicit invocation reached the model as plain text`,
         {
           agentModel,
           costUsd: run.costUsd,
@@ -450,6 +482,8 @@ export async function evaluateCase(
       sandbox,
       changedFiles,
       skillsUsed,
+      toolNames: run.toolUses.map((toolUse) => toolUse.name),
+      mcpServers: set.mcp?.servers ?? [],
       resultText: observed.answer,
       evalsDirectory: set.directory,
       ddl: options.ddl,
@@ -481,9 +515,10 @@ export async function evaluateCase(
     }
 
     const goldenContent =
-      testCase.golden === undefined
+      testCase.goldenContent ??
+      (testCase.golden === undefined
         ? undefined
-        : readFileSync(join(set.directory, testCase.golden), 'utf8');
+        : readFileSync(join(set.directory, testCase.golden), 'utf8'));
     const judged = await judgeRun(
       {
         prompt: testCase.prompt,

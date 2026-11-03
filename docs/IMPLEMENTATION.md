@@ -5,7 +5,9 @@
 ([0038](decisions/0038-runtime-connector-selection.md)) have landed, plus `feat/workfow-cleanup` on
 top of it: each fixture ships once as `custom` steps (§2 `fixtures/`) and the fixtures site gives
 every workflow file one page (§13). Bump this when that work lands. Typed steps as the only authored
-form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
+form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed. `feat/ai-compliance-toolkit`
+adds the analyst toolkit on top of `main` at `3c7b75b`: the MCP server (§14), the onboarding seeder
+(§15), the generated OpenAPI types (§11) and the analyst plugin (§13); bump this when it lands.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -37,6 +39,8 @@ What to update, by the kind of change you made:
 | New engine error class                                             | the code/status table in §11                                 |
 | New admin-panel error code or detail reader                        | the failure paragraph in §12                                 |
 | New package, script, CI step, or compose service                   | §1 package table, §13                                        |
+| New, changed or removed MCP tool, masking rule or MCP setting      | §14                                                          |
+| New seeder scenario family                                         | §15                                                          |
 
 Rules for what goes in:
 
@@ -89,21 +93,27 @@ Three design commitments run through the whole codebase and explain most of the 
 
 ### Packages
 
-| Package                                          | State                  | Role                                                                                                                                                                                               |
-| ------------------------------------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/engine` (`@tsh/engine`)                | **Substantive**        | The orchestrator. All business logic.                                                                                                                                                              |
-| `packages/shared/ddl-schema` (`@tsh/ddl-schema`) | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine.                                                              |
-| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors section that writes settings. Talks to the engine directly.                                                              |
-| `packages/demo-bff`                              | **Empty placeholder**  | Name/version only. No source.                                                                                                                                                                      |
-| `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                                                                              |
-| `packages/docs` (`@tsh/docs`)                    | **Substantive**        | The documentation site: Docusaurus 3 with the TSH theme; hand-written guides, an API reference generated from the OpenAPI document and a fixtures gallery generated from the workflow files (§13). |
-| `packages/shared/openapi` (`@tsh/openapi`)       | **Generated artefact** | `engine.openapi.json`, the engine's OpenAPI 3.1 document, written by `pnpm openapi:generate` and held equal to the code by a unit test (§11). No source of its own.                                |
-| `packages/skill-evals` (`@tsh/skill-evals`)      | **Substantive**        | Golden-set evaluation of the skills under `.claude/skills/`: runs each case through headless Claude Code, grades the sandbox with the DDL oracles and a Claude judge, writes a report (§13).       |
-| `packages/shared`                                | **Empty placeholder**  | Placeholder exports.                                                                                                                                                                               |
+| Package                                                 | State                  | Role                                                                                                                                                                                                                                              |
+| ------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/engine` (`@tsh/engine`)                       | **Substantive**        | The orchestrator. All business logic.                                                                                                                                                                                                             |
+| `packages/shared/ddl-schema` (`@tsh/ddl-schema`)        | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine.                                                                                                             |
+| `packages/admin-panel` (`@tsh/admin-panel`)             | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors section that writes settings. Talks to the engine directly.                                                                                                             |
+| `packages/demo-bff`                                     | **Empty placeholder**  | Name/version only. No source.                                                                                                                                                                                                                     |
+| `packages/demo-web`                                     | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                                                                                                                             |
+| `packages/docs` (`@tsh/docs`)                           | **Substantive**        | The documentation site: Docusaurus 3 with the TSH theme; hand-written guides, an API reference generated from the OpenAPI document and a fixtures gallery generated from the workflow files (§13).                                                |
+| `packages/shared/openapi` (`@tsh/openapi`)              | **Generated artefact** | `engine.openapi.json`, the engine's OpenAPI 3.1 document, and `src/engine-api.d.ts`, the TypeScript types generated from it; both written by `pnpm openapi:generate` and held equal to their sources by unit tests (§11). No hand-written source. |
+| `packages/mcp` (`@tsh/mcp`)                             | **Substantive**        | The MCP server: a NestJS app that gives an analyst's AI client masked read access to the engine's admin API, plus two confirmed write tools. Reaches the engine only over HTTP (§14).                                                             |
+| `packages/onboarding-seeder` (`@tsh/onboarding-seeder`) | **Substantive**        | A CLI that drives the engine's public API to build a deterministic, manifest-described population of synthetic onboardings (§15).                                                                                                                 |
+| `packages/skill-evals` (`@tsh/skill-evals`)             | **Substantive**        | Golden-set evaluation of the skills under `.claude/skills/`: runs each case through headless Claude Code, grades the sandbox with the DDL oracles and a Claude judge, writes a report (§13).                                                      |
+| `packages/shared`                                       | **Empty placeholder**  | Placeholder exports.                                                                                                                                                                                                                              |
 
 The split between `engine` and `ddl-schema` matters: the DDL package has no Nest dependency and no
 HTTP concerns, so the workflow contract can be consumed by a future BFF, admin UI, or a workflow
 authoring tool without dragging the engine in.
+
+`plugins/conductor-analyst/` is not a workspace package: it is the Claude Code and Codex plugin that
+carries the analyst skills and points them at the MCP server (§13, §14). The `analyst-investigation`
+fixture workflow (§2) and the seeder (§15) exist so those skills have a population to investigate.
 
 ---
 
@@ -1074,9 +1084,11 @@ A fixture family cannot be extended from `users/` either. On production, where f
 a users file reusing a fixture id would create a `users` family of that name and then fail on every
 development database that stored the fixture — author such flows under an id of their own.
 
-Each fixture is a flow an e2e suite starts onboardings on, written once. The ones below predate the
-specialized step types and are written as `custom` steps, one per compiled step, which is the shape
-any untyped document converts to; a new fixture is written in specialized step types. Nothing else
+Each fixture is a flow an e2e suite starts onboardings on, written once. The ones below, apart from
+`analyst-investigation`, predate the specialized step types and are written as `custom` steps, one
+per compiled step, which is the shape any untyped document converts to; a new fixture is written in
+specialized step types. `analyst-investigation` is the exception twice over: it is written in
+specialized types, and no e2e suite starts onboardings on it — the seeder does (§15). Nothing else
 lives here: a suite that needs a one-off flow writes it into a temporary `WORKFLOWS_USERS_DIR`
 instead.
 `packages/engine/src/workflows/checked-in-workflows.spec.ts` runs the adapters' load-time config
@@ -1093,6 +1105,7 @@ scopes, and holds each fixture's file name to its `id`, which the fixtures site 
 | `file-upload`                        | `kyc`                                       | `file` field plus the document reservation flow                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `manual-review`                      | none                                        | All three manual triggers and a recursive `success` transition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `scoring`                            | `otp_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_sms_otp` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting |
+| `analyst-investigation`              | `otp_verification`, `kyc`, `custom`         | The population the seeder builds for analyst investigations (§15), authored as eight typed steps that compile to ten. `collect_profile` (`identity-profile`) collects one field of every personal-data class the MCP masks (§14) and scores `risk`: country `RU`/`IR`/`TR`/`AE` +40, self-declared PEP +30, source of funds `sale_of_asset` or `other` +20, with 60 or more routing to `rejected`. `send_email_code` is an `otp-verify` on `smtp_email_otp`, `upload_identity_document` a `mock_sumsub_file_upload` call, and `check_identity` a `mock_async_callback_2` call that parks until the provider calls back: `providerVerdict` `approve` goes to `approved`, `review` to the `review_identity` manual review (approve, reject, invalid), and a rejected callback to `rejected`. Only fixture adapters and MailHog, so it runs on the default development stack                                                                                                                                                      |
 
 ---
 
@@ -2803,6 +2816,10 @@ the README documents each override and its blast radius. The admin panel has no 
 `VITE_*` keys — because the panel is served by the engine. The engine never acts on the `VITE_*`
 values; it renders them into the panel's `/config.js` (§12).
 
+The MCP server and the seeder have settings of their own: `McpConfig` validates the `MCP_*`
+variables at the server's bootstrap, and the engine reads none of them (§14); the seeder takes
+flags with environment fallbacks (§15).
+
 ---
 
 ## 11. HTTP surface and error contract
@@ -3124,6 +3141,18 @@ cannot see is a response property that was never decorated; that rests on review
 `test/openapi.e2e-spec.ts` checks that the served JSON equals the committed file and that no UI is
 served. `.prettierignore` excludes the generated file and the archived copies: the generator's
 rendering is the only one, and the drift test compares the parsed documents.
+
+**Generated types.** `pnpm openapi:generate` ends by running `pnpm --filter @tsh/openapi
+generate:types`, which turns `engine.openapi.json` into `packages/shared/openapi/src/engine-api.d.ts`
+with `openapi-typescript` (`paths`, `operations`, `components`); `src/index.d.ts` re-exports those
+three, and `tsconfig.base.json` points the `@tsh/openapi` alias at it. They are the first generated
+client types in the repository and `@tsh/mcp` and `@tsh/onboarding-seeder` build their HTTP clients
+on them, so a route or DTO change that is not regenerated fails their `typecheck`. The files are
+declarations only and every consumer uses `import type`, so nothing of `@tsh/openapi` exists at
+runtime. `src/engine-api.spec.ts` runs the `openapi-typescript` CLI into a
+temporary directory and fails unless the committed file equals the fresh output byte for byte, so
+`.prettierignore` also lists `engine-api.d.ts`: a Prettier pass would reformat it and break that
+comparison.
 
 ---
 
@@ -3908,9 +3937,10 @@ the layout, the `orchestrator-files` bucket and its access key itself on boot an
 they already exist, so there is no bootstrap sidecar),
 `mailhog` (HTTP UI published; SMTP network-internal only), `engine` (`MODE=api-only`),
 `engine-worker` (`MODE=worker-only`, reuses the same image, no separate build),
-and `engine-mailhog-test` (a short-lived SMTP integration runner, in the `mailhog-test`
+`engine-mailhog-test` (a short-lived SMTP integration runner, in the `mailhog-test`
 profile so only `pnpm test:mailhog:integration` starts it — see **Keeping the test runner out of
-`up`** below). There is no `admin-panel`
+`up`** below) and `mcp` (the MCP server of §14, in the `mcp` profile so only `pnpm stack:mcp:up`
+builds and starts it). There is no `admin-panel`
 service: the panel ships inside the engine's image and is served by the engine itself.
 `workflows/users` is bind-mounted read-only at `/app/workflows/users`; `built-in/` and `fixtures/`
 ship inside the image. `WORKFLOWS_USERS_DIR` relocates the user scope when it is not that path.
@@ -3986,17 +4016,47 @@ step a developer whose full stack is already up fails a dozen outbox, audit and 
 assertions on rows already sent, and the run means something different from the same run on a
 cold machine. `pnpm openapi:generate` builds `@tsh/ddl-schema` and then rewrites
 `packages/shared/openapi/engine.openapi.json` from the engine's decorators (§11) with no Docker
-involved, archiving the previous document first when the engine's minor version has moved; the
-engine's unit suite fails while that file is stale.
-cold machine. `pnpm workflow:validate` (`scripts/validate-workflows.cjs`) needs no stack at all —
+involved, archiving the previous document first when the engine's minor version has moved, and
+finishes by regenerating `@tsh/openapi`'s TypeScript types from it; the engine's unit suite fails
+while the document is stale and `@tsh/openapi`'s while the types are. `pnpm workflow:validate`
+(`scripts/validate-workflows.cjs`) needs no stack at all —
 it requires only that `@tsh/ddl-schema` is built, says so when it is not, and warns when that
 build is older than its sources, because a stale one validates against a schema the engine no
 longer runs. It restates the loader's scope-discovery rules in CommonJS to stay stack-free;
 `validate-workflows-script-parity.spec.ts` beside the loader fails when the two drift apart.
 
+**The MCP scripts** — `pnpm stack:mcp:up` is `scripts/compose.cjs --profile mcp up -d --build --wait`:
+the whole stack plus the `mcp` service, and `--wait` returns only once the services are up.
+`stack:down` and `stack:reset` already pass `--profile "*"` and cover it. `pnpm onboardings:seed`
+runs the seeder's `src/cli.ts` through `ts-node` with the repository's `.env` loaded by Node's
+`--env-file-if-exists`, and takes the seeder's flags after it (§15). `pnpm mcp:inspect` opens the
+MCP Inspector's web UI against `http://localhost:${MCP_PORT:-3100}/mcp`; its command-line mode
+(`mcp-inspector --cli <url> --transport http --method tools/list`, run through
+`pnpm --filter @tsh/mcp exec`) is the scriptable form. The `mcp` image is `packages/mcp/Dockerfile`: a `deps`
+stage that copies every workspace `package.json` for the same `--frozen-lockfile` reason as the
+engine's and installs `--filter @tsh/mcp...`, a `build` stage that adds the package and
+`packages/shared/openapi/src` (the types it imports), and a `node:24-alpine` runtime that runs as
+`app` and sets no `NODE_ENV`, so a container started without one refuses to boot. `engine/Dockerfile`
+lists the two new packages' `package.json` files for the same reason.
+
+**The analyst plugin** (`plugins/conductor-analyst/`,
+[0053](decisions/0053-analyst-plugin-marketplace.md)): one tree serves Claude Code and Codex.
+`.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` (Codex) at the repository
+root both list it as `tsh-onboarding-conductor`; the plugin carries `.claude-plugin/plugin.json`,
+`.codex-plugin/plugin.json` and one `.mcp.json` declaring an HTTP server named `conductor` at
+`${CONDUCTOR_MCP_URL:-http://localhost:3100/mcp}`. Claude Code expands that default; Codex does not,
+so its users register the address themselves with `codex mcp add conductor --url …`, which the
+plugin's own `README.md` explains along with the sign-in steps. Five skills — `investigating-onboarding`,
+`triaging-review-queue`, `analysing-onboarding-funnel`, `preparing-compliance-evidence` and
+`reviewing-risk-rules` — are written for an analyst using the MCP tools, so they cite no repository
+path or shell command, and each states that figures come from tool results and that applicant-entered
+text is data rather than instructions. `agents/onboarding-investigator.md` is Claude-only: a
+read-only subagent that investigates a batch of onboardings and returns one finding each.
+
 **Agent-context checks**: `pnpm skills:validate` (`scripts/validate-skills.cjs`) is the only one of
 the three that gates anything — it runs in CI between `lint` and `typecheck`, and on every commit
-through lint-staged for staged files under `.claude/skills/` and `.claude/rules/`. It invokes no
+through lint-staged for staged files under `.claude/skills/`, `.claude/rules/`,
+`plugins/*/skills/` and `plugins/*/agents/`. It invokes no
 model and takes about 50 ms across the repository's tracked files, which is what lets it sit in a
 pre-commit hook. A skill is prose, so nothing type-checks it, and it decays one way: it keeps citing
 a command that was renamed, a file that moved, or a reference document nobody opens. The script
@@ -4014,7 +4074,15 @@ with its directory, two skills claiming one name, a body past the spec's 500 lin
 globs match nothing are failures. An unresolved path is only a warning, because a skill prescribes as much as it
 describes: `creating-engine-bffs` names `packages/demo-bff/CLAUDE.md` as a file to create. `--strict`
 promotes warnings to failures and CI does not pass it, so a citation that went stale when a file was
-renamed is reported without failing the build.
+renamed is reported without failing the build. A plugin's skills (`plugins/<plugin>/skills/<skill>/`) are the same
+`SKILL.md` format and get every check above, so two plugins may each ship a skill of one name, and a
+path argument naming a plugin directory validates its skills and agents together. A plugin subagent
+(`plugins/<plugin>/agents/<name>.md`) must carry `name` and `description`; its other frontmatter keys
+are Claude Code's own and the list moves with it, so an unknown key warns rather than fails, and the
+three keys Claude Code ignores in a plugin's agent (`hooks`, `mcpServers`, `permissionMode`) warn
+that they do nothing. A backticked span starting `mcp__` is an MCP tool name, never a path.
+`VALIDATE_SKILLS_ROOT` points the script at another checkout, which is how
+`scripts/validate-skills.test.cjs` runs it against a throwaway repository.
 
 **Measuring what a skill does**: `pnpm skills:routing` and `pnpm skills:ablation` answer the two
 questions the validator cannot. Neither runs in CI, and neither can: both drive headless Claude Code
@@ -4096,7 +4164,7 @@ the console whichever of them the machine had set. What asks for a run is
 edits under `.claude/skills/` and a `Stop` hook before a turn ends. The `Stop` hook reads
 `git status --porcelain` under `.claude/skills/` — reports are gitignored and say nothing about
 which state of which skill was graded — hashes the content of what changed, and blocks the stop
-once per state with the command for each changed skill (`pnpm skills:evals --case <skill>`), so a
+once per state with the command for each changed skill (`pnpm skills:evals --skill <skill>`), so a
 further edit earns another reminder and a rerun of the suite does not. Its state lives per session
 under `$TMPDIR/tsh-skill-evals-reminder/`, outside the repository. Inside an eval sandbox both
 hooks are off: `createSandbox` deletes the `hooks` key from the copied settings and `runClaude`
@@ -4105,10 +4173,30 @@ test would be reminded to evaluate the skill it is being measured on, and a `Sto
 it from finishing. `--validate` checks every golden set and
 compiles every golden workflow without a model, runs in lint-staged for staged files under
 `evals/`, and is also a unit test of the package, so `pnpm test` fails on a golden set the runner
-would refuse. Seven cases ship: four for `creating-workflows` (a new fixture graded against a
+would refuse. Seven cases ship for the repository's own two skills: four for `creating-workflows` (a new fixture graded against a
 golden graph, a new built-in revision, a users-scope document with an unwired port to fix, and a
 question neither skill should fire on) and three for `creating-engine-bffs` (the double-upload
 `409`, the submit timeout, the error-code mapping), each judged against a golden answer.
+
+**Golden sets for plugin skills and MCP tools**: the five analyst skills keep theirs in
+`plugins/conductor-analyst/skills/<skill>/evals/` and are graded like any other, with four
+differences. The set carries its plugin, so the sandbox run gets `--plugin-dir` pointing at the
+sandbox's own copy (already stripped of `evals/`) and an explicit prompt reads
+`/<plugin>:<skill> …`. A set may declare `mcp_config`, a `{ "mcpServers": … }` file passed as
+`--mcp-config` beside `--strict-mcp-config`: it is the only way a run reaches an MCP server, and
+the usual value is the plugin's own `.mcp.json`. A `mcp-tool-called` check (`tool`, `min` defaulting
+to 1) counts the run's calls to that tool, by the name the server declares and not the harness's
+`mcp__<server>__<tool>` form; it proves the tool was called, not what it returned, so a case pairs it
+with an `answer-matches` for the figure the answer must carry. A harness cannot forbid a call, so
+"no write without the analyst's yes" is judged from the final answer. And onboarding ids are random on
+every seed run, so a prompt, an expectation, an assertion or a golden answer writes
+`{{manifest:<scenario-key>}}` for an id and `{{manifest:<scenario-key>.explanation}}` for the
+seeder's recorded answer, resolved from `packages/onboarding-seeder/out/manifest.json` (or
+`SKILL_EVALS_MANIFEST`) before anything runs; `--validate` checks only the syntax, so it needs no
+stack, while a real run or `--dry-run` fails with exit 2 and the commands to run — `pnpm stack:mcp:up`
+and `pnpm onboardings:seed` — when the manifest or a key is missing. The sets are
+therefore only gradeable with the stack up and seeded (`packages/skill-evals/CLAUDE.md` has the
+details), and they run on a developer's machine like the rest.
 
 **What the skill checks do not cover**: the ablation cases target `creating-workflows` only —
 `creating-engine-bffs` has none, and `.claude/rules/` has no behavioural test. `validate-skills.cjs`
@@ -4145,6 +4233,9 @@ There are also 21 DDL spec files, 60
 admin-panel unit spec files under Vitest plus 3 Playwright specs, and one demo-web placeholder spec.
 Last observed green: 1623 engine and 484 DDL unit tests, 584 admin-panel unit tests, 297 engine e2e
 tests, 15 admin-panel browser tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
+`@tsh/mcp` has 31 co-located spec files (293 tests, green), `@tsh/onboarding-seeder` 7 (42) and
+`@tsh/openapi` its one drift spec; none of them needs the stack. The MCP's `tools-masking.spec.ts`
+is the one that matters most (§14).
 
 **Documentation site** (`packages/docs`, `@tsh/docs`; `docs/decisions/0016-docusaurus-documentation-site.md`):
 Docusaurus 3, classic preset, skinned with the TSH design system (`src/css/custom.css`, Inter Tight
@@ -4192,15 +4283,536 @@ URL comes from `DOCS_SITE_URL` or Vercel's production hostname.
 **Governance**: `CLAUDE.md` carries the repository orientation, verified commands and pitfalls
 (architecture, naming, KISS, Strategy-only-where-warranted, transaction discipline), with scoped
 rules in `.claude/rules/` for code design, domain constants and testing, task-scoped skills in
-`.claude/skills/` (`creating-workflows`, `creating-engine-bffs`), and per-workspace `CLAUDE.md`
-files for the rest. Both are maintained deliberately: when the project changes in a
+`.claude/skills/` (`creating-workflows`, `creating-engine-bffs`), the analyst skills in
+`plugins/conductor-analyst/skills/`, and per-workspace `CLAUDE.md` files for the rest (`packages/mcp`
+and `packages/onboarding-seeder` have theirs). Both are maintained deliberately: when the project changes in a
 way they should reflect, they are updated in the same change rather than left to drift. Husky + lint-staged gate commits on ESLint
-(`--max-warnings=0`), Prettier, and — for staged files under `.claude/skills/` and `.claude/rules/` —
-`validate-skills.cjs`.
+(`--max-warnings=0`), Prettier, and — for staged files under `.claude/skills/`, `.claude/rules/`,
+`plugins/*/skills/` and `plugins/*/agents/` — `validate-skills.cjs`, plus `skills:evals --validate`
+for staged golden sets.
 
 ---
 
-## 14. Reading order
+## 14. MCP server
+
+`packages/mcp` (`@tsh/mcp`) is a NestJS server that lets an analyst's AI client — Claude Code or
+Codex — investigate onboardings, analyse the population and prepare compliance evidence through the
+engine's admin API, with every value masked on the way out, and two write tools that act only after
+a confirmation. It is a separate layer: it calls the engine over HTTP exactly as the admin panel
+does, holds no database connection and changes nothing in the engine
+([0050](decisions/0050-mcp-server-is-a-separate-layer.md)); it acts as the signed-in analyst
+([0051](decisions/0051-mcp-acts-on-behalf-of-the-analyst.md)); and it classifies every value before
+it leaves ([0052](decisions/0052-mcp-masks-personal-data-by-default.md)). With sign-in on, it also
+relays its clients' sign-in to Entra ([0054](decisions/0054-mcp-relays-sign-in-to-entra.md)). Whatever the admin API
+lacks — a timeline, a date range, aggregates — the MCP computes itself.
+
+### Shape
+
+`POST /mcp` is the one MCP route, in the SDK's Streamable HTTP transport, stateless:
+`McpController` builds a `Server` and a `StreamableHTTPServerTransport` per request, answers with a
+JSON body and closes both when the response does, so no analyst's session outlives their request.
+`GET /mcp` and `DELETE /mcp` answer 405 with `Allow: POST`, because stateless mode has no stream to
+open and no session to end. `GET /health` answers `{"status":"ok"}`. The server uses the SDK's
+low-level `Server` with a hand-written JSON Schema per tool, because zod is only a peer of the SDK
+here; each handler therefore validates its own arguments.
+
+`POST /mcp` and the sign-in relay's routes (see Authentication) have DNS-rebinding protection: the
+request's `Host` and, when present, `Origin` headers must match the host of `MCP_PUBLIC_URL` or
+`localhost`, and any other request is refused. A browser navigation to `/oauth/authorize` carries no
+`Origin` and passes.
+
+```
+packages/mcp/src/
+├── transport/       POST /mcp: a Server + transport per request
+├── auth/            token verification, on-behalf-of exchange, RFC 9728 metadata, the middleware,
+│                    authorization-server/ (the sign-in relay)
+├── engine/          EngineClient: the admin API over HTTP, typed from @tsh/openapi
+├── masking/         FieldClassifier, Masker, audit allowlists, CSV column classes
+├── classification/  FieldClassLookup: field classes of a workflow version
+├── confirmation/    ConfirmationService: the write tools' single-use tokens
+├── limits/          per-identity call and export ceilings
+├── audit/           the per-call log line
+├── request-context/ who is calling, and the engine token to call as them
+├── config/          McpConfig
+└── tools/           ToolRegistry, plus workflows/ onboardings/ analytics/ compliance/
+```
+
+A tool is a provider class marked `@McpTool()` and implementing `ToolRegistration` (`kind`, `name`,
+`description`, `inputSchema`, `handler(args, context)`). `ToolRegistry` finds every such provider
+through Nest's `DiscoveryService`, so adding a tool touches only its area module — never the
+registry or `ToolsModule`. Two tools under one name fail the first `tools/list`. A handler returns
+the object the model reads and throws a `ToolError` for a refusal the model can act on: the registry
+answers it as a result with `isError: true` and the message as text. Anything else is logged with its
+stack and answered `The tool failed unexpectedly. Try again later.`, so an internal message never
+reaches the model. `MCP_WRITE_TOOLS_ENABLED=false` leaves every `kind: 'write'` tool out of
+`tools/list` and of the registry; with it on, those tools carry `destructiveHint: true` and
+`idempotentHint: false`, so a client prompts for permission too.
+
+### Authentication
+
+Two modes, chosen by `MCP_AUTH_ENABLED`.
+
+**Off** (the local default) makes `AuthMiddleware` a pass-through: every request is the identity
+`local`, nothing is checked and no token goes to the engine, so the engine's admin guard must be off too
+(`ADMIN_AUTH_ENABLED=false`, the sample's default) for calls to succeed. `validateConfig` refuses to start with auth off when
+`NODE_ENV=production`, so a production `.env` copied from the sample cannot serve onboarding data
+with no credential. The metadata and relay routes answer 404, because there is no authorization
+server to name.
+
+**On** puts `AuthMiddleware` in front of `POST /mcp` only. A request must carry a bearer token, and
+`TokenVerifier` accepts it when it is an RS256 Entra v2.0 access token issued by
+`https://login.microsoftonline.com/<MCP_AZURE_TENANT_ID>/v2.0`, for the audience
+`MCP_AZURE_CLIENT_ID`, unexpired within a 60-second clock tolerance, and with `MCP_REQUIRED_SCOPE`
+in its space-delimited `scp` claim. `OnBehalfOfExchanger` then trades it with MSAL's
+`acquireTokenOnBehalfOf` for a token for `MCP_ENGINE_SCOPE`, cached under the SHA-256 of the incoming
+token until one minute before the engine token expires — two analysts never share an entry and the
+raw token is never a key. The request leaves the middleware carrying a `RequestContext`: the identity
+(Entra's `oid`, or `sub` when it is absent, and the user principal name) and the engine token. A tool
+never reads a header; `EngineClient` sends the engine token as `Authorization: Bearer`, so the
+engine's admin guard sees the analyst's own roles and audits every call under their name.
+
+_Reasoning:_ a service account would make the MCP the actor of record and flatten every analyst's
+rights into its own. On-behalf-of keeps the engine as the one place roles and audit are decided, at
+the price of an Entra app registration with a secret and a hop per new token.
+
+| Situation                                                                            | Answer                                                                                                             |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| No bearer token, or the token fails any check above                                  | `401` and `WWW-Authenticate: Bearer resource_metadata="<MCP_PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"` |
+| Entra, or its signing keys, cannot be reached or answer unusably                     | `503` — never a `401`, because nothing is known about the token and signing in again cannot help                   |
+| Entra asks for consent or a conditional-access step (`InteractionRequiredAuthError`) | `401`, so the client signs in again                                                                                |
+| A request that reaches the controller with no identity while auth is on              | `401` (the controller fails closed rather than serving it as `local`)                                              |
+
+An unknown signing key id is a rejection, not an outage: it is the ordinary shape of a forged token,
+and treating it as `503` would let any caller provoke one.
+
+The two metadata routes, `GET /.well-known/oauth-protected-resource` and
+`/.well-known/oauth-protected-resource/mcp` (clients try either), publish the RFC 9728 document a
+client needs to start sign-in. Its `authorization_servers` is `[MCP_PUBLIC_URL]` — the MCP itself, not
+the tenant — and `scopes_supported` is `api://<MCP_AZURE_CLIENT_ID>/<MCP_REQUIRED_SCOPE>`. From a
+server started with auth on and placeholder Entra ids, an unauthenticated request is answered:
+
+```
+POST /mcp  (no Authorization header)
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="http://localhost:3199/.well-known/oauth-protected-resource/mcp"
+
+{"message":"Missing or invalid access token","error":"Unauthorized","statusCode":401}
+```
+
+#### The sign-in relay
+
+Pointing a client straight at Entra failed against a real tenant (2026-11-01 and 2026-11-02): the MCP
+client sends the RFC 8707 `resource` parameter (the MCP URL) next to the scope
+`api://<client>/Mcp.Access`, which Entra v2 rejects with `AADSTS9010010`; and a client with no client
+id of its own needs a `registration_endpoint`, which Entra does not offer ("Incompatible auth server:
+does not support dynamic client registration"). So the MCP is the authorization server its metadata
+names, and relays to Entra ([0054](decisions/0054-mcp-relays-sign-in-to-entra.md)). With auth on it
+serves these routes; with auth off every one answers 404.
+
+| Route                                                                                 | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /.well-known/oauth-authorization-server` and `/.well-known/openid-configuration` | RFC 8414 metadata: `issuer` is `MCP_PUBLIC_URL`; the authorization, token and registration endpoints are its `/oauth/authorize`, `/oauth/token` and `/oauth/register`; `code` responses, the `authorization_code` and `refresh_token` grants, `S256` and no client authentication (`none`); the scopes are the required scope and `offline_access`                                                                                                                                                                   |
+| `GET /oauth/authorize`                                                                | `302` to `https://login.microsoftonline.com/<MCP_AZURE_TENANT_ID>/oauth2/v2.0/authorize` carrying only `client_id`, `response_type`, `redirect_uri`, `scope`, `state`, `code_challenge`, `code_challenge_method`, `prompt`, `login_hint` and `nonce`; `resource` and anything else is dropped, `offline_access` is appended to `scope` when absent, and a request with no `scope` asks for the server's own `api://<MCP_AZURE_CLIENT_ID>/<MCP_REQUIRED_SCOPE>`. The host is fixed; nothing in the request chooses it |
+| `POST /oauth/token`                                                                   | A declared `Content-Length` over 16 KiB is refused (the global 100 kB body parser bounds a chunked body); forwards only the grant fields (`grant_type`, `code`, `redirect_uri`, `code_verifier`, `refresh_token`, `client_id`, `scope`) to the tenant's `oauth2/v2.0/token`, without `resource`, and returns Entra's status, JSON body and `Cache-Control: no-store` unchanged. A refresh gets the configured scope plus `offline_access`                                                                            |
+| `POST /oauth/register`                                                                | RFC 7591 shim: for `redirect_uris` that are all `http://localhost[:port]/…` or `http://127.0.0.1[:port]/…` it answers `201` with `MCP_PUBLIC_CLIENT_ID` and `token_endpoint_auth_method: "none"`; it stores nothing                                                                                                                                                                                                                                                                                                  |
+
+| Situation                                                                                                                     | Answer                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `/oauth/authorize` with a `client_id` other than `MCP_PUBLIC_CLIENT_ID`, a non-`code` response type or a non-`S256` challenge | `400`, with no redirect                                                  |
+| `/oauth/token` with any other grant type, or another `client_id`                                                              | `400` `unsupported_grant_type` / `invalid_client`, with no outbound call |
+| `/oauth/register` with a redirect URI that is not loopback, or malformed metadata                                             | `400` `invalid_redirect_uri` / `invalid_client_metadata`                 |
+| Entra's token endpoint cannot be reached                                                                                      | `502` `{"error":"temporarily_unavailable"}`                              |
+
+Entra still authenticates the user and validates the redirect URI, PKCE and consent. The access token
+is Entra's, `TokenVerifier` checks it as above and the on-behalf-of exchange is unchanged. The server
+stores no registration, code or token, and the token route never logs a body, a code, a verifier or a
+token. The issuer is `MCP_PUBLIC_URL`, so outside localhost it must be HTTPS; with auth on and `NODE_ENV=production` the server refuses to start on an `http` one. `MCP_PUBLIC_CLIENT_ID`
+defaults to `MCP_AZURE_CLIENT_ID`; production should set a separate public-client app registration
+for it, with a _Mobile and desktop applications_ redirect URIs `http://localhost/callback` and `http://127.0.0.1/callback` (`offline_access`
+grantable, which is the default).
+
+An analyst installs the plugin, sets `CONDUCTOR_MCP_URL` for a deployed server, runs `/mcp` and signs
+in: no client id and no callback port. In Codex, `codex mcp login conductor` follows `codex mcp add
+conductor --url …`; Codex still does not expand `${CONDUCTOR_MCP_URL}`, so it takes the address itself.
+
+_Not yet exercised:_ a Claude Code sign-in through the relay, whether Entra ignores the port of the
+loopback redirect URI as expected, and any Codex sign-in. Token verification, the challenge, the
+exchange and the relay are covered by specs with locally generated keys, a mocked MSAL client and a
+stubbed `fetch` (`token-verifier.spec.ts`, `protected-resource.spec.ts`, `on-behalf-of.spec.ts`,
+`auth/authorization-server/`).
+
+### The engine client
+
+`EngineClient` is the only code that speaks to the engine. Its `request(method, path, context,
+{ path, query, body })` is typed from `paths` in `@tsh/openapi`: a path the engine does not serve, a
+parameter it does not declare or a body of the wrong shape fails `typecheck`, which is also how an
+unregenerated OpenAPI change is caught here (§11). `openStream` returns the body of a `GET` as it
+arrives, for the CSV export. Requests time out after 30 seconds and streams after five minutes.
+Failures become an `EngineError` (a `ToolError`) whose text the model can read: `401` says the
+session may have expired, `403` that the signed-in account lacks the role the action needs, `404` and
+`503` name themselves, an unreachable engine says to try again, and any other status carries the
+engine's `code` and message.
+
+### Masking
+
+Every object a tool returns passes `Masker`, and what the classes do not name is dropped. A field is
+classified into one of four classes, in `masking.constants.ts`:
+
+| Class          | Applies to                                                                                                                                                                 | Output                                                                                                                                                                                                                                                 |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pass`         | System columns, scores, booleans, enumerated values (`oneOf`/`manyOf`), the names in `MCP_MASKING_PASS_FIELDS` and the engine's own `kycReasonCodes` and `kycAttemptCount` | The value, when it is a scalar (or an array of scalars)                                                                                                                                                                                                |
+| `pseudonymise` | Text whose validation format is `email` or `phone`                                                                                                                         | `email:<12 hex>` or `phone:<12 hex>`: HMAC-SHA256 of the normalised value (email trimmed and lower-cased; phone reduced to digits, a leading `00` removed) under `MCP_MASKING_KEY`, so one value is one token everywhere and duplicates stay countable |
+| `generalise`   | A date with an age bound (`minAgeYears`/`maxAgeYears`) or named like `birth` or `dob`                                                                                      | A ten-year age band such as `40-49`, from today's date; an impossible date or an age above 150 is dropped                                                                                                                                              |
+| `drop`         | Names, addresses, free text, `file` and `object` fields, and every field no rule classifies                                                                                | Nothing: the key is absent                                                                                                                                                                                                                             |
+
+`FieldClassifier` reads a field's declaration in the compiled workflow document; it never looks at
+the applicant's value, which is why the classes hold for data it has not seen. A `file` or `object`
+field drops even when its name is listed in `MCP_MASKING_PASS_FIELDS`; an array passes only when its
+items would. Two declarations of one name resolve to the stricter class, and two different pseudonym
+formats cannot both hold, so they drop. _Reasoning:_ default deny. A field is `pass` only when its
+declaration proves it carries no applicant text, so a new free-text question added to a workflow is
+withheld until someone decides otherwise rather than leaking until someone notices.
+
+Three data shapes need their own rule:
+
+- **Collected data and CSV rows.** The engine's export is the only place collected data is listed, so
+  `get_onboarding` and `onboarding_stats` read it. A column's header (`First name`) is the only link
+  to its field, so `humanizeKey` in `masking/csv-columns.ts` repeats the derivation the engine uses
+  in `onboardings-csv.ts` and **must follow it**. The system columns pass, a collected-field column
+  takes its field's class, an undeclared `<Name> score` column passes when numeric, `Other data` and
+  every header nothing explains drop.
+- **Audit entries.** The audit API returns `metadata` as written, and outbound webhook rows carry
+  whole payloads, so `masking/audit-allowlists.ts` names the keys each action family keeps (keys
+  follow `packages/engine/src/audit/audit.types.ts`); an action no list names keeps none, and
+  `payload` and `headers` of `webhook.*` rows never pass. `submittedData` inside a callback or
+  reconcile row is masked by the field classes of the onboarding's workflow version, and the
+  `before` and `after` snapshots are cut to `id`, workflow, version, status, step and scores.
+- **Workflow documents.** They hold no applicant data but may hold credentials, so
+  `get_workflow_document` blanks every literal header value and every literal query value under an
+  `http_request` connector except placeholders alone (`{{secrets.*}}`, optionally after one
+  auth-scheme word), and lists the paths it blanked.
+
+Masking decides what reaches the model; it is not access control. The analyst's account can still
+read every field in the admin panel and download the export, and the MCP does not narrow which
+onboardings, workflows or audit entries the engine role allows them to query.
+
+### Field classes come from the compiled workflow
+
+The stored document of a workflow version is its authored form, which declares no fields, so
+`FieldClassLookup` classifies the compiled form: for `(workflowId, version)` it fetches
+`GET /v1/admin/workflows/{id}/versions/{v}/document`, posts that document to
+`POST /v1/admin/workflows/compile` and runs `FieldClassifier` over the compiled `definition`. A
+published or retired version is immutable, so its classes are cached for the life of the process; a
+draft is read anew each time, and concurrent calls for an uncached version share one fetch. A version
+the engine will not compile (a `400`) classifies nothing, so every field of it drops, and the failure
+is reported in the tool's `warnings` rather than thrown. `mergeFieldClassMaps` combines the versions
+an export spans, and `buildCsvColumnClasses` maps an export's header row onto the result. The cache
+holds classes of workflow definitions, never applicant data, so it is shared across callers while
+every fetch is made as the caller.
+
+### Tools
+
+Sixteen tools, 14 read and 2 write, in four area modules. Each tool's description is the model's
+only documentation of it, so it states the tool's limits and what to use instead.
+
+| Area        | Tool                                  | Does                                                                                                                                                                 |
+| ----------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| workflows   | `list_workflows`                      | Every workflow: id, label, scope, serving version, in-progress count and each version with its status                                                                |
+| workflows   | `get_workflow_version`                | One version as the engine runs it: steps, fields with their `maskingClass`, transitions (score thresholds live in their `when`), score rules and connector selection |
+| workflows   | `get_workflow_document`               | The authored document a draft is built from, with literal `http_request` header and query values blanked                                                             |
+| workflows   | `diff_workflow_versions`              | Steps, fields, transitions, score rules and thresholds added, removed or changed between two versions, from their compiled forms                                     |
+| workflows   | `compile_workflow`                    | The engine's dry-run compile of a document: `ok`, or a reason code with the path into the document; stores nothing                                                   |
+| workflows   | `create_workflow_draft` (write)       | Stores a document as a new draft after confirmation; never publishes, and only into the `users` scope                                                                |
+| onboardings | `find_onboardings`                    | Masked summary rows, newest first, by the engine's filters plus `createdFrom`/`createdTo`; `truncated` says when more match                                          |
+| onboardings | `get_onboarding`                      | One onboarding: summary, scores, agreements, pending connector, masked collected data and the labels of the fields withheld                                          |
+| onboardings | `get_onboarding_timeline`             | The history of one onboarding in time order, merging transitions with its audit rows, masked                                                                         |
+| onboardings | `reconcile_pending_connector` (write) | Asks the provider for a parked onboarding's verdict and applies it, after confirmation                                                                               |
+| analytics   | `onboarding_stats`                    | Counts by `status`, `currentStep`, `workflowVersion`, `rejectionReason`, `day` or an enumerated collected field, with min/median/max of each score                   |
+| analytics   | `onboarding_funnel`                   | Per step of one workflow in a window: reached, moved on to each next step, ended, abandoned, median seconds in the step                                              |
+| analytics   | `connector_health`                    | Per connector in a window: failures by what the error handler did, rejected, invalid, callbacks applied, reconciles, and how many are parked on it now               |
+| analytics   | `review_queue`                        | Onboardings awaiting manual review or parked on a connector, oldest first, with age and pending connector                                                            |
+| compliance  | `search_audit`                        | Masked audit entries by the engine's filters plus `actionPrefix` and `onboardingId`                                                                                  |
+| compliance  | `access_report`                       | For a window: `auth.*` outcomes per actor, each export with its filters, and configuration changes per actor and family                                              |
+
+Every tool refuses an argument its schema does not declare, with an error, rather than ignoring it.
+`onboarding_stats` refuses a `groupBy` that would reveal personal data: a field outside the `pass`
+class (an email, a name) gets an error naming the groupings that are allowed. A timeline event has a
+`kind` (`started`, `transition`, `review_decision`, `connector_outcome`, `connector_failure`,
+`rejected_attempt`, `callback_applied`, `callback_rejected`, `reconcile`, `other`) and, for the moves
+that change status or step, a `move` with the status, step and scores before and after.
+`access_report` reads the audit one exact action at a time, because the engine's audit filter is an
+exact match and onboarding rows would otherwise dominate the pages.
+
+A real result: `get_onboarding` for a seeded `score-reject` onboarding, called through the MCP with
+auth off (§15 for the seed). The status, scores and enumerated answers pass; email and phone are
+pseudonyms; the date of birth is an age band; names, address and free text appear only as labels
+under `withheldFields`.
+
+```json
+{
+  "onboarding": {
+    "workflowId": "analyst-investigation",
+    "workflowVersion": 1,
+    "status": "rejected",
+    "currentStep": null,
+    "rejectionReason": null,
+    "scores": { "risk": 70 },
+    "agreementStatus": "not_accepted",
+    "pendingConnector": null
+  },
+  "agreements": [],
+  "collectedData": {
+    "Date of birth": "40-49",
+    "Nationality": "NL",
+    "Country": "TR",
+    "Source of funds": "pension",
+    "Pep self declared": "true",
+    "Email": "email:c111dd88540a",
+    "Phone number": "phone:b0c2ca5b6658",
+    "Provider verdict": null
+  },
+  "withheldFields": [
+    "First name",
+    "Last name",
+    "Street",
+    "Town",
+    "Post code",
+    "Occupation title",
+    "Identity document",
+    "Other data"
+  ]
+}
+```
+
+(Timestamps, the id and the remaining enumerated answers are omitted here for length.)
+
+### Write tools and the confirmation token
+
+`reconcile_pending_connector` and `create_workflow_draft` are the only tools that change engine
+state, and neither can do so in one call. Called without `confirmationToken`, a write tool changes
+nothing and returns a preview and a token: for a reconcile, the onboarding, its pending connector and
+the time it was parked (it refuses, and issues no token, for an onboarding that is not parked); for a
+draft, the engine's dry-run compile result, the target family, whether the call would create it, any
+existing draft and every reason the engine would refuse — with no token when something blocks. The
+analyst is shown the preview, and only a call repeating the same arguments with the token acts.
+
+`ConfirmationService` issues `<expiresAt>.<MAC>`, where the MAC is an HMAC-SHA256 over the caller's
+identity, the tool name, the canonicalised arguments (object keys sorted recursively, so key order
+never matters; `confirmationToken` itself excluded) and the expiry, under a key derived from
+`MCP_MASKING_KEY` with the fixed label `confirmation` — a separate key from the one pseudonyms use.
+A token lives five minutes and is single use: redeemed tokens are remembered in memory until they
+would have expired. A token for another analyst, another tool or changed arguments, a malformed one,
+an expired one and a reused one are each refused with a message telling the model to start again from
+a preview. A reconcile binds only `{ onboardingId }`; a draft binds the document and name.
+
+Two properties are worth knowing. The token is consumed before the engine call, so a write the
+engine then refuses needs a new preview. And used tokens live in the process: a second replica of
+the server would not know a token had been redeemed on the first.
+
+What is deliberately not exposed: recording a manual-review decision, publishing or deleting a
+workflow version, changing connector settings and anything touching encryption. The engine's review
+route does not authenticate or attribute its caller, so a tool in front of it would act without a
+name on the record.
+
+### Limits and caches
+
+All of it is per process and in memory; nothing is written to disk.
+
+| What                                    | Bound                                                                                                                                                                                           |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool calls                              | 60 per minute per identity (`TOOL_CALLS_PER_MINUTE`), a sliding window; the next call is refused with a message to wait                                                                         |
+| CSV export                              | One at a time per identity: `get_onboarding`, and an `onboarding_stats` that has to read the export, hold the slot while they stream                                                            |
+| Masked export rows (`onboarding_stats`) | Reused five minutes per identity and filter set; 20 sets across callers, the oldest dropped first; at most 100,000 rows, past which the result says `truncated`. Only masked rows are ever held |
+| On-behalf-of tokens                     | Until one minute before they expire, per incoming-token hash                                                                                                                                    |
+| Field classes                           | Published and retired versions, for the life of the process                                                                                                                                     |
+| `find_onboardings`                      | Default 50 rows, at most 500; reads at most 50 engine pages of 100, newest first, and stops at the first row older than `createdFrom`                                                           |
+| `get_onboarding_timeline`               | At most 20 audit pages of 100, past which it says `truncated`                                                                                                                                   |
+| `search_audit`                          | 200 entries; audit pages of 100, at most 50                                                                                                                                                     |
+| `access_report`                         | 1,000 entries per action, 50 exports listed (the count covers all of them), a 30-day window when none is given                                                                                  |
+| `review_queue`                          | 200 entries, with `total` and `truncated`                                                                                                                                                       |
+
+_Reasoning:_ an aggregate is a full export, because the admin API has no aggregates; the limits keep
+one analyst's question from becoming a standing load on the engine, and the engine records every
+export as `onboardings.exported` under the analyst, which is why `access_report` lists them.
+
+### The per-call audit line
+
+Every tool call, refused or not, writes one JSON line to stdout. It names the caller, the tool and the
+argument **keys**, never a value or a token — the analyst's questions are not for a log:
+
+```json
+{
+  "event": "tool_call",
+  "at": "2026-11-01T05:05:11.105Z",
+  "user": "local",
+  "tool": "get_onboarding",
+  "argumentKeys": ["onboardingId"],
+  "resultBytes": 896,
+  "durationMs": 157,
+  "outcome": "success"
+}
+```
+
+`user` is the Entra object id, or `local` with auth off. `outcome` is `success`, `error` (a
+`ToolError` or an unexpected failure), `rate_limited` or `unknown_tool`. `tool-call-audit.spec.ts`
+asserts that no argument value is logged. This line is the MCP's own trail; the engine keeps its own
+under the analyst's identity.
+
+### Configuration
+
+`McpConfig` (`config/mcp.config.ts`) is validated by `validateConfig` at bootstrap, like the engine's
+`AppConfig`, from `.env` in the working directory or the repository root and never from `.env.dist`.
+`NODE_ENV` is required. Compose gives every variable below a default, so none is required for a local
+start; `.env.dist` documents them.
+
+| Variable                                                                                    | Meaning                                                                                                                                                                                     | Default                                                                                              |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `MCP_PORT`                                                                                  | Port the server listens on; in Compose it remaps only the host side, the container always listens on 3100                                                                                   | `3100`                                                                                               |
+| `MCP_PUBLIC_URL`                                                                            | The URL clients use; published as the resource in the metadata and, with auth on, the issuer of the sign-in relay (HTTPS outside localhost)                                                 | Compose: `http://localhost:${MCP_PORT}`; required otherwise                                          |
+| `MCP_ENGINE_BASE_URL`                                                                       | Engine base URL; Compose pins it to `http://engine:3000`                                                                                                                                    | `.env.dist`: `http://localhost:3000`; required otherwise                                             |
+| `MCP_AUTH_ENABLED`                                                                          | `false` means no token checks and no token to the engine; refused when `NODE_ENV=production`                                                                                                | server `true`; Compose and `.env.dist` `false`                                                       |
+| `MCP_AZURE_TENANT_ID`, `MCP_AZURE_CLIENT_ID`, `MCP_AZURE_CLIENT_SECRET`, `MCP_ENGINE_SCOPE` | Entra tenant, the MCP app registration (audience and on-behalf-of client), its secret, and the scope requested for the engine (`api://<engine-app>/.default`); all required when auth is on | empty                                                                                                |
+| `MCP_PUBLIC_CLIENT_ID`                                                                      | Client id the sign-in relay hands every MCP client; a public-client app registration in the same tenant (§ The sign-in relay)                                                               | empty, which means `MCP_AZURE_CLIENT_ID`                                                             |
+| `MCP_REQUIRED_SCOPE`                                                                        | Delegated scope an incoming token must carry                                                                                                                                                | `Mcp.Access`                                                                                         |
+| `MCP_MASKING_KEY`                                                                           | HMAC key for pseudonyms and confirmation tokens; required, at least 32 bytes; changing it changes every pseudonym                                                                           | Compose and `.env.dist`: a development-only key published in this repository, which protects nothing |
+| `MCP_MASKING_PASS_FIELDS`                                                                   | Comma-separated field names that pass in clear                                                                                                                                              | `country,nationality`                                                                                |
+| `MCP_WRITE_TOOLS_ENABLED`                                                                   | Whether the two write tools exist                                                                                                                                                           | server `false`; Compose and `.env.dist` `true`                                                       |
+
+### Running and building it
+
+`pnpm stack:mcp:up` starts the stack and the `mcp` service (§13); `pnpm mcp:inspect` opens the
+Inspector against it. The `mcp` container waits for a healthy engine and answers
+`GET /health` for its own healthcheck.
+
+- **`nest build` runs without `incremental`.** `tsconfig.build.json` sets `incremental: false`: Nest's
+  `deleteOutDir` removes `dist/` while a stale `tsbuildinfo` makes `tsc` believe nothing changed, so
+  the build was seen emitting an incomplete `dist/` and still exiting 0. The engine's own build has
+  the same two settings and is unchanged.
+- **`jose` and `@faker-js/faker` ship ES modules only.** Jest leaves `node_modules` untransformed, so
+  `packages/mcp/jest.config.cjs` lets ts-jest transpile `jose` (a `[tj]s` transform and a
+  `transformIgnorePatterns` exception for that one package), and `tsconfig.spec.json` sets
+  `allowJs`. The seeder does the same for faker.
+- **`tools-masking.spec.ts` is the guard.** It boots the whole app with a stubbed engine, calls every
+  tool the endpoint lists and fails when a seeded-style name, email, phone, date of birth, street or
+  free-text value appears in any output — in the clear, JSON-escaped or as a fragment. It also fails
+  when a registered tool has no row in its call table, so a new tool cannot ship without being
+  checked.
+
+### Known rough edges
+
+- Each aggregate streams the whole export, and each `get_onboarding` streams one onboarding's, so the
+  engine's audit trail fills with `onboardings.exported` rows under the analyst (0050).
+- The action lists in `connector_health` and `access_report` mirror `audit.types.ts` and the metadata
+  allowlists follow its keys; the engine does not export them, so a new audit action needs an entry
+  here by hand. `humanizeKey` is likewise a copy.
+- The four areas each carry their own small argument validators; they are near-duplicates and have not
+  been consolidated.
+- The engine's `POST /v1/onboardings/:id/review/:action` route is unauthenticated, and its admin
+  access audit does not record which OAuth client made a call, so traffic from an agent is not
+  distinguishable from the analyst's own.
+- The plugin subagent's `tools` list names the MCP tools under both the plugin-server prefix
+  (`mcp__plugin_conductor-analyst_conductor__*`, inferred) and the hand-registered one
+  (`mcp__conductor__*`).
+
+---
+
+## 15. Onboarding seeder
+
+`packages/onboarding-seeder` (`@tsh/onboarding-seeder`) builds a deterministic population of
+synthetic onboardings on a running stack and writes a manifest saying what each one demonstrates, so
+the MCP and the analyst skills have something to investigate and their answers have something to be
+checked against. It drives the engine's **public** API — start, submit, document upload, provider
+callback, review — so every transition, audit row and score is produced by the engine itself and stays
+valid across migrations.
+The workflow it runs is `analyst-investigation` (§2). `pnpm onboardings:seed` runs it.
+
+**One exception to "public API only."** The mock identity provider correlates its callback by a
+`providerReference` that no engine API exposes, and a reconcile of that fixture always answers
+`still_pending`. `ProviderReferenceReader` therefore runs one read-only query,
+`select pending_connector->>'providerReference' from onboardings where id = $1`, over `DATABASE_URL`
+for each onboarding it answers as the provider, and then posts the callback to
+`POST /v1/webhooks/mock_async_callback_2/callback`. The seeder makes no other read or write in the
+database, except the optional timestamp spread below, and both refuse any host other than
+`localhost`, `127.0.0.1` and `postgres` before connecting (`assertLocalDatabaseHost`; the message
+names the host, never the credentials).
+
+**Scenarios.** The default run (`--seed 42 --count 8`) creates 46 onboardings, each a scenario with a
+key `<family>-<nn>`:
+
+| Family                                                 | Count         | Ends                                                                                                                                                                      |
+| ------------------------------------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `approved` (`--count` sets this one)                   | 8             | `approved`: the provider called back accepted with `providerVerdict` `approve`                                                                                            |
+| `score-reject`                                         | 4             | `rejected` at `collect_profile`: `risk` at or above 60 from country, PEP and source of funds                                                                              |
+| `verdict-reject`                                       | 3             | `rejected` at `check_identity`: the provider called back rejected, `CONNECTOR_REJECTED`                                                                                   |
+| `review-waiting`                                       | 4             | `awaiting_manual_review` at `review_identity`: `providerVerdict` `review`, no decision yet                                                                                |
+| `review-approved`, `review-rejected`, `review-invalid` | 2 each        | The reviewer's `approve`, `reject` or `invalid` after a `review` verdict                                                                                                  |
+| `parked-awaiting`                                      | 4             | Parked at `check_identity` on `mock_async_callback_2`, no callback                                                                                                        |
+| `parked-completed`                                     | 2             | Parked, then completed by a callback sent in a later pass of the run (one approved, one rejected)                                                                         |
+| `otp-exhausted`                                        | 2             | `rejected` at `verify_email_code`: five wrong codes, `ATTEMPTS_EXHAUSTED`                                                                                                 |
+| `abandoned-<step>`                                     | 3, 2, 2, 2, 2 | Left waiting at `collect_profile`, `send_email_code`, `verify_email_code`, `upload_identity_document` and `check_identity` (document submitted, identity check never run) |
+| `duplicate-applicant`                                  | 2             | Two onboardings submitted with one email address                                                                                                                          |
+
+Applicants come from `@faker-js/faker` seeded by `--seed`: one seed is one population, down to the
+names and the birth dates, which are drawn against a fixed reference date rather than the day of the
+run. Emails are `<first>.<last>.<ordinal>@example.com`, and phone numbers are in UK Ofcom's drama
+range (`+447700900xxx`), which is never assigned to a subscriber. Risk archetypes (a country in
+`RU`/`IR`/`TR`/`AE`, a PEP declaration, a risky source of funds) are chosen per family so scores run
+from 0 to 90. The email code is read from MailHog's HTTP API; the document is a one-pixel PNG posted
+to the presigned form with its host rewritten to the object store address the host can reach
+(`--storage-url`, `STORAGE_URL` or `STORAGE_S3_PORT`, since the engine signs the Compose-internal
+name).
+
+**A run** drives scenarios with bounded concurrency (four at a time) in two passes, so a `parked`
+onboarding completes at a later moment of the run than it parked, then reads every onboarding back
+through `GET /v1/onboardings/{id}/state` and compares it with the plan. It throws, naming each failing
+scenario, and writes **no manifest** when any differs: the manifest never describes a population the
+run did not build. A rerun adds a new population; nothing is deleted (`pnpm stack:reset` starts clean).
+
+**The manifest** is `packages/onboarding-seeder/out/manifest.json`, gitignored and rewritten on every
+run:
+
+```ts
+type SeedManifest = {
+  generatedAt: string;
+  seed: number;
+  workflow: { id: string; version: number };
+  spreadDays?: number; // present only after `--spread-days`
+  scenarios: Array<{
+    key: string; // `score-reject-03`
+    onboardingId: string;
+    expectedStatus:
+      'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected' | 'invalid';
+    expectedStep: string | null;
+    parked: boolean;
+    explanation: string; // the step, the deciding signal and its value
+  }>;
+};
+```
+
+For `score-reject-01` of the seeded stack: `"rejected at collect_profile: risk 70 ≥ 60 (country TR
++40, PEP +30)"`. The `explanation` is the answer an analyst skill must reach, and the golden sets
+reference it as `{{manifest:<key>.explanation}}` (§13).
+
+**Timestamp spread.** `--spread-days <n>` makes date and funnel questions meaningful: the engine
+stamps everything with the moment it happened and offers no way to say otherwise, so after seeding the
+seeder rewrites timestamps in Postgres. Each onboarding moves back by a whole number of days in
+`[0, n - 1]` taken from an FNV-1a hash of the seed and its key (so one seed always spreads one
+population the same way), except `review-waiting`, which are given evenly falling offsets, oldest
+first, so the review queue has ageing. One transaction per onboarding shifts its `created_at`,
+`updated_at` and `completed_at`, the `parkedAt` inside `pending_connector` and the `occurred_at` of
+every `audit_log` row whose `resource_id` is the onboarding, by the same offset, so ordering and gaps
+inside it survive. Nothing else is moved. The manifest records `spreadDays`.
+
+**Options.** `pnpm onboardings:seed -- --help` prints them. `--seed` (42), `--count` (8), `--engine`
+(`ENGINE_URL`, `http://localhost:3000`), `--mailhog` (`MAILHOG_URL`, `http://localhost:8025`),
+`--storage-url`, `--database-url` (`DATABASE_URL`, always required, because parked scenarios read the
+reference) and `--spread-days`. The script loads the repository's `.env`, which already holds
+`DATABASE_URL` and `STORAGE_S3_PORT`; `.env.dist` documents `ENGINE_URL` and `MAILHOG_URL` for a
+remapped port.
+
+---
+
+## 16. Reading order
 
 The code that defines the system, in the order it makes sense to read it:
 
@@ -4228,3 +4840,8 @@ Five in-repo documents carry reasoning this file only summarizes, and are accura
 Conventions the codebase is held to live in the root and per-workspace `CLAUDE.md` files and the
 scoped rules under `.claude/rules/` (code design, domain constants, testing), with the task-scoped
 procedures in `.claude/skills/` (`creating-workflows`, `creating-engine-bffs`).
+
+To follow an analyst question through the system, read `packages/mcp/src/tools/tool-registry.ts`
+(how a tool is found, limited, audited and answered), then `packages/mcp/src/masking/masker.ts` and
+`field-classifier.ts` (what may leave), and
+`packages/mcp/src/tools/onboardings/get-onboarding-timeline.tool.ts` for a complete tool (§14).

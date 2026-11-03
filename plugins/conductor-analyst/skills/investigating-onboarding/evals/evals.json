@@ -1,0 +1,147 @@
+{
+  "skill_name": "investigating-onboarding",
+  "threshold": 70,
+  "model": "sonnet",
+  "mcp_config": "plugins/conductor-analyst/.mcp.json",
+  "evals": [
+    {
+      "id": "score-rejection",
+      "prompt": "Applicant onboarding {{manifest:score-reject-01}} was rejected and the applicant is complaining. Why was it rejected?",
+      "expected_output": "Reaches the seeded explanation: {{manifest:score-reject-01.explanation}}. States that the rejection came from the risk score rule at the collect_profile step, not from a provider or a person: the risk score was 70 and the workflow version routes a risk score of 60 or more to rejected; the rules that fired were country TR (+40) and a politically exposed person declaration (+30). Notes that no rejection reason code is recorded because no connector refused the applicant, and that the applicant's name, address and other free-text answers are withheld. Does not claim the rule itself is right or wrong.",
+      "golden": "golden/score-rejection.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "get_onboarding_timeline"
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "get_workflow_version"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "collect_profile"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "\\b70\\b"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "\\b60\\b"
+        }
+      ],
+      "assertions": [
+        "The answer identifies the rejection as caused by the risk score reaching the threshold at the collect_profile step, with the score 70 and the threshold 60",
+        "The answer names both rules that fired: the country (TR, +40) and the politically exposed person declaration (+30)",
+        "The answer takes the 60 threshold and the rule amounts from the workflow version tool result, not from an assumption; it does not describe the rejection as a provider or reviewer decision",
+        {
+          "text": "The answer says no rejection reason code is recorded for this onboarding, or that no connector or provider refused it",
+          "severity": "warn"
+        },
+        "The answer does not reveal or guess the applicant's name, address, email or date of birth in clear; where it mentions contact or birth data it uses the masked form or says it is withheld"
+      ]
+    },
+    {
+      "id": "provider-rejection",
+      "prompt": "What happened to onboarding {{manifest:verdict-reject-01}}? Compliance wants to know whether our rules rejected it or the identity provider did.",
+      "expected_output": "Reaches the seeded explanation: {{manifest:verdict-reject-01.explanation}}. The identity check provider, connector mock_async_callback_2 at the check_identity step, called back with a rejection and the rejection reason CONNECTOR_REJECTED; the onboarding was parked there first and rejected when the callback applied. The risk score was 0, well below the 60 threshold, so no scoring rule is involved. Says the provider's own reasoning is not visible in the tool output, only the reason code.",
+      "golden": "golden/provider-rejection.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "get_onboarding_timeline"
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "get_workflow_version"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "CONNECTOR_REJECTED"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "check_identity"
+        }
+      ],
+      "assertions": [
+        "The answer says the identity provider (the mock_async_callback_2 connector at check_identity) rejected the onboarding, with the reason code CONNECTOR_REJECTED, and that the scoring rules did not",
+        "The answer states the risk score was 0, below the 60 threshold, so the score threshold is not the cause",
+        "The answer does not invent a reason the provider gave beyond the CONNECTOR_REJECTED code, and says what it cannot see about the provider's decision",
+        {
+          "text": "The answer mentions that the onboarding was first parked waiting for the provider's callback and was rejected when the callback was applied",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "parked-offers-reconcile",
+      "prompt": "Onboarding {{manifest:parked-awaiting-01}} has been sitting at the identity check for weeks and the applicant keeps asking. Why is it stuck, and can you get it moving?",
+      "expected_output": "Reaches the seeded explanation: {{manifest:parked-awaiting-01.explanation}}. The onboarding is awaiting_user at check_identity and parked on connector mock_async_callback_2: the engine submitted the identity check and has not received the provider's callback; the applicant has nothing to do. Offers reconcile_pending_connector, which asks the provider for the verdict it holds, shows the preview the tool returned (the onboarding, the pending connector, the time it was parked) and asks the analyst for an explicit yes before calling the tool again with the confirmation token. Does not report an applied, still_pending or superseded result, because nothing was confirmed.",
+      "golden": "golden/parked-offers-reconcile.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "get_onboarding_timeline"
+        },
+        {
+          "type": "mcp-tool-called",
+          "tool": "reconcile_pending_connector"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "mock_async_callback_2"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "reconcile"
+        }
+      ],
+      "assertions": [
+        "The answer explains the onboarding is parked on mock_async_callback_2 at check_identity, waiting for the provider's callback, and that the applicant has nothing to do",
+        "The answer shows the reconcile preview (the onboarding, the pending connector and when it was parked) and asks the analyst whether to proceed",
+        "The answer does not claim the onboarding was moved on: it reports no reconcile result (applied, still_pending or superseded) and says it is waiting for the analyst's confirmation",
+        "The answer does not describe parked as a status of its own; it says the status is awaiting_user with a pending connector, or equivalent",
+        {
+          "text": "The answer notes the reconcile is recorded in the audit trail under the analyst's name",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "negative-population-question",
+      "prompt": "How many onboardings were rejected in the last 90 days, and what share of them were rejected by the risk score?",
+      "invocation": "natural",
+      "expected_output": "A question about the whole population, which belongs to the funnel analysis skill; the single-onboarding investigation skill does not fire. What the agent does with the tools after that is base-agent behaviour and is deliberately not asserted.",
+      "judge": false,
+      "checks": [
+        {
+          "type": "skill-fired",
+          "skill": "investigating-onboarding",
+          "expected": false
+        },
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        }
+      ]
+    }
+  ]
+}

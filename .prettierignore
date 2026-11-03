@@ -3,6 +3,10 @@
 packages/shared/openapi/engine.openapi.json
 packages/shared/openapi/versions/**/engine.openapi.json
 
+# Generated from engine.openapi.json by `pnpm openapi:generate` (openapi-typescript); the drift spec
+# compares it byte for byte with a fresh generation, so Prettier must not reformat it.
+packages/shared/openapi/src/engine-api.d.ts
+
 # pnpm owns this file's layout and rewrites it on every install; Prettier would turn its flow
 # mappings into block style and the two would fight forever.
 pnpm-lock.yaml

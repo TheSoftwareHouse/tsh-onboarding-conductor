@@ -77,9 +77,9 @@ describe('releaseUnreleased', () => {
 });
 
 describe('packageFiles', () => {
-  it('finds the root package.json and the nine workspaces', () => {
+  it('finds the root package.json and the eleven workspaces', () => {
     const files = packageFiles();
-    assert.equal(files.length, 10);
+    assert.equal(files.length, 12);
     assert.equal(files[0], 'package.json');
     assert.ok(files.includes(join('packages', 'engine', 'package.json')));
   });

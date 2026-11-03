@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Validates the agent context checked into `.claude/` — the skills under `.claude/skills/` and the
- * path-scoped rules under `.claude/rules/` — without invoking a model.
+ * Validates the agent context checked into the repository — the skills under `.claude/skills/`, the
+ * path-scoped rules under `.claude/rules/`, and the skills and subagents a plugin ships under
+ * `plugins/<plugin>/skills/` and `plugins/<plugin>/agents/` — without invoking a model.
  *
  * A skill is prose, so nothing type-checks it and nothing fails when it goes stale. The decay is
  * always the same shape: the skill keeps citing a command that was renamed, a file that moved or a
@@ -22,16 +23,45 @@
  *   pnpm skills:validate --strict                             # warnings fail too
  *   pnpm skills:validate .claude/skills/creating-workflows    # one skill
  *   pnpm skills:validate .claude/rules/testing.md             # one rule
+ *   pnpm skills:validate plugins/conductor-analyst            # every skill and agent of a plugin
+ *   pnpm skills:validate plugins/conductor-analyst/agents/x.md  # one plugin subagent
  */
 
 const { execFileSync } = require('node:child_process');
 const { existsSync, readdirSync, readFileSync } = require('node:fs');
-const { join, relative, resolve, sep } = require('node:path');
+const { basename, join, relative, resolve, sep } = require('node:path');
 
-const REPO_ROOT = resolve(__dirname, '..');
+// The checkout this validates. `VALIDATE_SKILLS_ROOT` points it at another one, which is how
+// `validate-skills.test.cjs` runs the command against a throwaway repository instead of this one.
+const REPO_ROOT = process.env.VALIDATE_SKILLS_ROOT ?? resolve(__dirname, '..');
 
 const SKILLS_DIR = join(REPO_ROOT, '.claude/skills');
 const RULES_DIR = join(REPO_ROOT, '.claude/rules');
+const PLUGINS_DIR = join(REPO_ROOT, 'plugins');
+
+/**
+ * Frontmatter keys of a Claude Code subagent (`plugins/<plugin>/agents/<name>.md`). Only `name` and
+ * `description` are required; the rest is Claude Code's own, and the list moves with it, so an
+ * unknown key warns rather than fails — unlike a skill, no cross-harness spec closes this set.
+ * Claude Code ignores the three plugin-restricted keys in a plugin's agent for security reasons, so
+ * declaring one is a warning that it does nothing.
+ */
+const REQUIRED_AGENT_KEYS = ['name', 'description'];
+const AGENT_KEYS = [
+  ...REQUIRED_AGENT_KEYS,
+  'tools',
+  'disallowedTools',
+  'model',
+  'skills',
+  'maxTurns',
+  'memory',
+  'background',
+  'effort',
+  'isolation',
+  'color',
+  'initialPrompt',
+];
+const PLUGIN_RESTRICTED_AGENT_KEYS = ['hooks', 'mcpServers', 'permissionMode'];
 
 /**
  * Frontmatter keys, in three tiers, after the Agent Skills specification that Claude Code, Cursor,
@@ -346,7 +376,9 @@ function findCommandProblem(span, context) {
  * the documents that are teaching a pattern — which is most of them.
  */
 function looksLikePath(span) {
-  if (!span.includes('/') || /[<>*?$|\s]/.test(span)) {
+  // A plugin skill cites MCP tools by name (`mcp__conductor__get_onboarding`), never by path; the
+  // prefix is the harness's own, so nothing starting with it is a file whatever else it contains.
+  if (!span.includes('/') || span.startsWith('mcp__') || /[<>*?$|\s]/.test(span)) {
     return false;
   }
 
@@ -398,15 +430,61 @@ function findPathProblem(span, tracked) {
   return { severity: WARN, message: `path does not exist: ${span}` };
 }
 
-function collectSkillDirectories() {
-  if (!existsSync(SKILLS_DIR)) {
+/** Child directories of `directory`, sorted, or none when it does not exist. */
+function listDirectories(directory) {
+  if (!existsSync(directory)) {
     return [];
   }
 
-  return readdirSync(SKILLS_DIR, { withFileTypes: true })
+  return readdirSync(directory, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => join(SKILLS_DIR, entry.name))
+    .map((entry) => join(directory, entry.name))
     .sort();
+}
+
+/** The plugins under `plugins/`: every child directory, whether or not it ships a skill yet. */
+function collectPluginDirectories() {
+  return listDirectories(PLUGINS_DIR);
+}
+
+/**
+ * The skills of one plugin, or of every plugin: `plugins/<plugin>/skills/<skill>/`. Plugin skills
+ * are validated exactly like repository skills — they are the same SKILL.md format — but they are
+ * namespaced by their plugin, so two plugins may each ship a skill of the same name.
+ */
+function collectPluginSkillDirectories(pluginDirectory) {
+  const plugins = pluginDirectory === undefined ? collectPluginDirectories() : [pluginDirectory];
+
+  return plugins.flatMap((plugin) => listDirectories(join(plugin, 'skills')));
+}
+
+/** The subagent files of one plugin, or of every plugin: `plugins/<plugin>/agents/<name>.md`. */
+function collectPluginAgentFiles(pluginDirectory) {
+  const plugins = pluginDirectory === undefined ? collectPluginDirectories() : [pluginDirectory];
+
+  return plugins.flatMap((plugin) => {
+    const agentsDirectory = join(plugin, 'agents');
+
+    if (!existsSync(agentsDirectory)) {
+      return [];
+    }
+
+    return readdirSync(agentsDirectory)
+      .filter((name) => name.endsWith('.md'))
+      .sort()
+      .map((name) => join(agentsDirectory, name));
+  });
+}
+
+function collectSkillDirectories() {
+  return [...listDirectories(SKILLS_DIR), ...collectPluginSkillDirectories()];
+}
+
+/** The plugin a path inside `plugins/` belongs to, or `undefined` for a repository skill. */
+function pluginOf(path) {
+  const inside = relative(PLUGINS_DIR, path);
+
+  return inside.startsWith('..') ? undefined : inside.split(sep)[0];
 }
 
 function collectReferenceFiles(skillDirectory) {
@@ -422,9 +500,38 @@ function collectReferenceFiles(skillDirectory) {
     .map((name) => join(referencesDirectory, name));
 }
 
+/**
+ * Checks the backticked claims on one line: a `pnpm` command against the scripts that exist and a
+ * path against the tracked tree. `resolveReference` lets a skill claim the spans that are relative
+ * to its own directory before the repository-wide lookup sees them; it returns whether it did.
+ */
+function checkCodeSpans(line, at, { context, findings, resolveReference }) {
+  for (const span of collectCodeSpans(line)) {
+    if (span.startsWith('pnpm ')) {
+      const problem = findCommandProblem(span, context);
+
+      if (problem !== undefined) {
+        findings.push({ severity: FAIL, message: `${at}: ${problem} (\`${span}\`)` });
+      }
+
+      continue;
+    }
+
+    if (!looksLikePath(span) || resolveReference?.(span, at) === true) {
+      continue;
+    }
+
+    const problem = findPathProblem(span, context.tracked);
+
+    if (problem !== undefined) {
+      findings.push({ severity: problem.severity, message: `${at}: ${problem.message}` });
+    }
+  }
+}
+
 function validateSkill(skillDirectory, context) {
   const findings = [];
-  const skillName = relative(SKILLS_DIR, skillDirectory);
+  const skillName = basename(skillDirectory);
   const skillFile = join(skillDirectory, 'SKILL.md');
 
   if (!existsSync(skillFile)) {
@@ -592,26 +699,16 @@ function validateSkill(skillDirectory, context) {
         return;
       }
 
-      const at = `${documentLabel}:${index + 1}`;
-
-      for (const span of collectCodeSpans(line)) {
-        if (span.startsWith('pnpm ')) {
-          const problem = findCommandProblem(span, context);
-
-          if (problem !== undefined) {
-            findings.push({ severity: FAIL, message: `${at}: ${problem} (\`${span}\`)` });
-          }
-
-          continue;
-        }
-
-        if (!looksLikePath(span)) {
-          continue;
-        }
-
+      checkCodeSpans(line, `${documentLabel}:${index + 1}`, {
+        context,
+        findings,
         // A reference is cited relative to the skill directory, so it resolves against that rather
         // than against the repository root, and it either exists or the instruction is broken.
-        if (span.startsWith('references/')) {
+        resolveReference: (span, at) => {
+          if (!span.startsWith('references/')) {
+            return false;
+          }
+
           const referencePath = join(skillDirectory, span);
 
           citedReferences.add(referencePath);
@@ -624,15 +721,9 @@ function validateSkill(skillDirectory, context) {
             findings.push({ severity: FAIL, message: `${at}: no such reference: ${span}` });
           }
 
-          continue;
-        }
-
-        const problem = findPathProblem(span, context.tracked);
-
-        if (problem !== undefined) {
-          findings.push({ severity: problem.severity, message: `${at}: ${problem.message}` });
-        }
-      }
+          return true;
+        },
+      });
     });
   }
 
@@ -654,7 +745,118 @@ function validateSkill(skillDirectory, context) {
     findings: dedupe(findings),
     name: skillName,
     declaredName: values.name,
+    namespace: pluginOf(skillDirectory),
     detail: `${bodyLines} lines, ${referenceFiles.length} references`,
+  };
+}
+
+/**
+ * A plugin's subagent: a Markdown file whose frontmatter names it and says when to delegate to it,
+ * and whose body is its system prompt. Proportionate on purpose — Claude Code owns the format and
+ * the harness reports a malformed one itself, so this checks what a typo silently breaks (no
+ * description means it is never chosen, a missing body means it has no instructions) and applies
+ * the same cited-command and cited-path checks as a skill.
+ */
+function validateAgent(agentFile, context) {
+  const findings = [];
+  const fileName = basename(agentFile, '.md');
+  const contents = readFileSync(agentFile, 'utf8');
+  const frontmatter = parseFrontmatter(contents);
+
+  if (!frontmatter.ok) {
+    return {
+      findings: [{ severity: FAIL, message: `frontmatter: ${frontmatter.detail}` }],
+      name: fileName,
+    };
+  }
+
+  const { values } = frontmatter;
+
+  for (const key of REQUIRED_AGENT_KEYS) {
+    if (typeof values[key] !== 'string' || values[key].length === 0) {
+      findings.push({ severity: FAIL, message: `frontmatter is missing "${key}"` });
+    }
+  }
+
+  for (const key of Object.keys(values)) {
+    if (AGENT_KEYS.includes(key)) {
+      continue;
+    }
+
+    findings.push({
+      severity: WARN,
+      message: PLUGIN_RESTRICTED_AGENT_KEYS.includes(key)
+        ? `frontmatter key "${key}" is ignored in an agent a plugin ships; Claude Code restricts it for security`
+        : `frontmatter key "${key}" is not a Claude Code subagent key (${AGENT_KEYS.join(', ')})`,
+    });
+  }
+
+  if (typeof values.name === 'string' && values.name.length > 0) {
+    if (!SKILL_NAME_PATTERN.test(values.name)) {
+      findings.push({
+        severity: FAIL,
+        message: `name "${values.name}" must be lowercase letters, digits and single hyphens`,
+      });
+    }
+
+    if (values.name !== fileName) {
+      findings.push({
+        severity: WARN,
+        message: `frontmatter name "${values.name}" does not match the file name "${fileName}"`,
+      });
+    }
+  }
+
+  for (const key of ['tools', 'disallowedTools']) {
+    const value = values[key];
+
+    if (
+      value !== undefined &&
+      !(typeof value === 'string' && value.length > 0) &&
+      !(Array.isArray(value) && value.length > 0 && value.every((entry) => entry.length > 0))
+    ) {
+      findings.push({
+        severity: FAIL,
+        message: `${key} must be a comma-separated string or a list of tool names`,
+      });
+    }
+  }
+
+  if (values.model !== undefined && (typeof values.model !== 'string' || values.model === '')) {
+    findings.push({ severity: FAIL, message: 'model must be an alias or a model id' });
+  }
+
+  const body = contents.replace(/^---\r?\n[\s\S]*?\r?\n---/, '');
+  // Body index 0 is the rest of the line that closes the frontmatter, so that line's number is the
+  // file line of every index.
+  const closingLine = contents.slice(0, contents.length - body.length).split('\n').length;
+
+  if (body.trim().length === 0) {
+    findings.push({
+      severity: FAIL,
+      message: 'the file has no body, so the subagent has no system prompt',
+    });
+  }
+
+  let insideFence = false;
+
+  body.split('\n').forEach((line, index) => {
+    if (line.trimStart().startsWith('```')) {
+      insideFence = !insideFence;
+      return;
+    }
+
+    if (!insideFence) {
+      checkCodeSpans(line, `${fileName}.md:${closingLine + index}`, { context, findings });
+    }
+  });
+
+  return {
+    findings: dedupe(findings),
+    name: fileName,
+    declaredName: values.name,
+    namespace: pluginOf(agentFile),
+    detail: `${body.split('\n').length} lines`,
   };
 }
 
@@ -783,16 +985,73 @@ function collectRuleFiles() {
 }
 
 /**
- * Maps whatever the caller named — a skill directory, a file inside one, a rule — onto the units
- * this script validates. lint-staged hands over staged file paths, so a change to one reference
- * document must still validate the whole skill it belongs to.
+ * The skills and subagents a path inside `plugins/` names: the whole tree, one plugin, a plugin's
+ * `skills/` or `agents/`, one skill (or any file inside it), or one subagent file.
+ */
+function resolvePluginTarget(absolute, target) {
+  const [plugin, area, unit] = relative(PLUGINS_DIR, absolute).split(sep).filter(Boolean);
+  const pluginDirectory = plugin === undefined ? undefined : join(PLUGINS_DIR, plugin);
+
+  if (area === undefined) {
+    return {
+      skills: collectPluginSkillDirectories(pluginDirectory),
+      agents: collectPluginAgentFiles(pluginDirectory),
+    };
+  }
+
+  if (area === 'skills') {
+    const skillDirectory = unit === undefined ? undefined : join(pluginDirectory, 'skills', unit);
+
+    if (
+      skillDirectory !== undefined &&
+      !listDirectories(join(pluginDirectory, 'skills')).includes(skillDirectory)
+    ) {
+      throw new Error(`Not a skill or a rule: ${target}`);
+    }
+
+    return {
+      skills:
+        skillDirectory === undefined
+          ? collectPluginSkillDirectories(pluginDirectory)
+          : [skillDirectory],
+      agents: [],
+    };
+  }
+
+  if (area === 'agents') {
+    const agentFile = unit === undefined ? undefined : join(pluginDirectory, 'agents', unit);
+
+    if (agentFile !== undefined && !collectPluginAgentFiles(pluginDirectory).includes(agentFile)) {
+      throw new Error(`Not a skill, a subagent or a rule: ${target}`);
+    }
+
+    return {
+      skills: [],
+      agents: agentFile === undefined ? collectPluginAgentFiles(pluginDirectory) : [agentFile],
+    };
+  }
+
+  // A plugin's manifest, `.mcp.json` or README was staged alongside its skills. Saying so beats
+  // silently reporting a pass over a file this script never read.
+  throw new Error(`Not a skill, a subagent or a rule: ${target}`);
+}
+
+/**
+ * Maps whatever the caller named — a skill directory, a file inside one, a rule, a plugin or one
+ * of its subagents — onto the units this script validates. lint-staged hands over staged file
+ * paths, so a change to one reference document must still validate the whole skill it belongs to.
  */
 function resolveTargets(targets) {
   if (targets.length === 0) {
-    return { skills: collectSkillDirectories(), rules: collectRuleFiles() };
+    return {
+      skills: collectSkillDirectories(),
+      agents: collectPluginAgentFiles(),
+      rules: collectRuleFiles(),
+    };
   }
 
   const skills = new Set();
+  const agents = new Set();
   const rules = new Set();
 
   for (const target of targets) {
@@ -807,17 +1066,22 @@ function resolveTargets(targets) {
     } else if (absolute.startsWith(RULES_DIR + sep)) {
       rules.add(absolute);
     } else if (absolute === SKILLS_DIR) {
-      collectSkillDirectories().forEach((directory) => skills.add(directory));
+      listDirectories(SKILLS_DIR).forEach((directory) => skills.add(directory));
     } else if (absolute.startsWith(SKILLS_DIR + sep)) {
       skills.add(join(SKILLS_DIR, relative(SKILLS_DIR, absolute).split(sep)[0]));
+    } else if (absolute === PLUGINS_DIR || absolute.startsWith(PLUGINS_DIR + sep)) {
+      const resolved = resolvePluginTarget(absolute, target);
+
+      resolved.skills.forEach((directory) => skills.add(directory));
+      resolved.agents.forEach((file) => agents.add(file));
     } else {
-      // A path outside `.claude/` was staged alongside one inside it. Saying so beats silently
-      // reporting a pass over a file this script never read.
-      throw new Error(`Not a skill or a rule: ${target}`);
+      // A path outside `.claude/` and `plugins/` was staged alongside one inside it. Saying so
+      // beats silently reporting a pass over a file this script never read.
+      throw new Error(`Not a skill, a subagent or a rule: ${target}`);
     }
   }
 
-  return { skills: [...skills].sort(), rules: [...rules].sort() };
+  return { skills: [...skills].sort(), agents: [...agents].sort(), rules: [...rules].sort() };
 }
 
 function reportUnit(displayPath, result, strict) {
@@ -840,10 +1104,10 @@ function reportUnit(displayPath, result, strict) {
 function main() {
   const args = process.argv.slice(2);
   const strict = args.includes('--strict');
-  const { skills, rules } = resolveTargets(args.filter((arg) => !arg.startsWith('--')));
+  const { skills, agents, rules } = resolveTargets(args.filter((arg) => !arg.startsWith('--')));
 
-  if (skills.length === 0 && rules.length === 0) {
-    console.log('No skills or rules found.');
+  if (skills.length === 0 && agents.length === 0 && rules.length === 0) {
+    console.log('No skills, subagents or rules found.');
     return 0;
   }
 
@@ -855,25 +1119,40 @@ function main() {
   const declaredNames = new Map();
   let failed = 0;
 
+  // Two skills answering to one name is unresolvable from inside a session: the harness picks one
+  // and the other is simply never reachable. A plugin's skills and agents answer under the
+  // plugin's own namespace (`conductor-analyst:<name>`), so only names within one namespace clash.
+  const claim = (result, displayPath, kind) => {
+    if (result.declaredName === undefined) {
+      return;
+    }
+
+    const key = `${kind}:${result.namespace ?? ''}:${result.declaredName}`;
+    const claimedBy = declaredNames.get(key);
+
+    if (claimedBy !== undefined) {
+      result.findings.push({
+        severity: FAIL,
+        message: `name "${result.declaredName}" is also declared by ${claimedBy}`,
+      });
+    }
+
+    declaredNames.set(key, displayPath);
+  };
+
   for (const skillDirectory of skills) {
     const result = validateSkill(skillDirectory, context);
     const displayPath = relative(REPO_ROOT, skillDirectory);
 
-    // Two skills answering to one name is unresolvable from inside a session: the harness picks one
-    // and the other is simply never reachable.
-    if (result.declaredName !== undefined) {
-      const claimedBy = declaredNames.get(result.declaredName);
+    claim(result, displayPath, 'skill');
+    failed += reportUnit(displayPath, result, strict);
+  }
 
-      if (claimedBy !== undefined) {
-        result.findings.push({
-          severity: FAIL,
-          message: `name "${result.declaredName}" is also declared by ${claimedBy}`,
-        });
-      }
+  for (const agentFile of agents) {
+    const result = validateAgent(agentFile, context);
+    const displayPath = relative(REPO_ROOT, agentFile);
 
-      declaredNames.set(result.declaredName, displayPath);
-    }
-
+    claim(result, displayPath, 'agent');
     failed += reportUnit(displayPath, result, strict);
   }
 
@@ -885,7 +1164,7 @@ function main() {
     );
   }
 
-  const total = skills.length + rules.length;
+  const total = skills.length + agents.length + rules.length;
 
   console.log(`\n${total - failed}/${total} valid.`);
 
@@ -904,12 +1183,15 @@ module.exports = {
   SKILL_NAME_PATTERN,
   SPEC_SKILL_KEYS,
   collectCodeSpans,
+  collectPluginAgentFiles,
+  collectPluginSkillDirectories,
   collectSkillDirectories,
   expandBraces,
   globToRegExp,
   main,
   parseFrontmatter,
   resolveTargets,
+  validateAgent,
   validateRule,
   validateSkill,
 };

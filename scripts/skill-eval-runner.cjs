@@ -377,38 +377,25 @@ function collectToolUses(message) {
 }
 
 /**
- * Runs one headless `claude` and returns what it did.
+ * The command line of one headless `claude`. Separate from `runClaude` so what a golden set asks
+ * for — an MCP configuration, a plugin to load — can be checked without starting a model.
  *
- * The stream is read rather than the final text because what is being measured is behaviour — which
- * skill fired, which files were touched — and the final text is a summary the model wrote about
- * itself. `onToolUse` may return `'stop'` to end the run as soon as the answer is known, which is
- * the whole cost control for routing: the verdict lands on the first tool call and paying for the
- * work that would follow buys nothing.
- *
- * Cost is reported two ways because the accurate one is not always there. `total_cost_usd` on the
- * harness's `result` message is authoritative, but a run `onToolUse` stopped never produces one, so
- * usage is also accumulated off the assistant messages and priced locally. `costEstimated` says
- * which number this is.
- *
- * The same command doubles as a plain model call. `systemPrompt` replaces the harness's own system
- * prompt, `jsonSchema` makes the harness validate the answer and return it parsed as
- * `structuredOutput`, `strictMcpConfig` drops every MCP server the machine has configured — the
- * connectors a developer has attached cost tens of thousands of tokens per call and are never what
- * a skill is about — and `disableSkills` keeps the run from loading skill descriptions. Together
- * with `tools: []` that is a judge call: one turn, a few thousand tokens, no tools.
+ * `strictMcpConfig` makes `mcpConfig` the only MCP configuration in play: with it, a run reaches
+ * the servers its golden set names and none the developer attached to their own Claude Code, and
+ * without a `mcpConfig` it reaches none. `pluginDirs` loads a plugin from a directory for this run
+ * only, which is how a plugin's skill is reached from a sandbox where nothing is installed.
  */
-function runClaude({
-  cwd,
+function buildClaudeArgs({
   prompt,
   model,
   tools,
   permissionMode = 'bypassPermissions',
   maxBudgetUsd,
-  timeoutMs = 15 * 60 * 1000,
-  onToolUse,
   systemPrompt,
   jsonSchema,
   strictMcpConfig = false,
+  mcpConfig,
+  pluginDirs = [],
   disableSkills = false,
 }) {
   const args = [
@@ -446,9 +433,71 @@ function runClaude({
     args.push('--strict-mcp-config');
   }
 
+  if (mcpConfig !== undefined) {
+    args.push('--mcp-config', mcpConfig);
+  }
+
+  for (const pluginDir of pluginDirs) {
+    args.push('--plugin-dir', pluginDir);
+  }
+
   if (disableSkills) {
     args.push('--disable-slash-commands');
   }
+
+  return args;
+}
+
+/**
+ * Runs one headless `claude` and returns what it did.
+ *
+ * The stream is read rather than the final text because what is being measured is behaviour — which
+ * skill fired, which files were touched — and the final text is a summary the model wrote about
+ * itself. `onToolUse` may return `'stop'` to end the run as soon as the answer is known, which is
+ * the whole cost control for routing: the verdict lands on the first tool call and paying for the
+ * work that would follow buys nothing.
+ *
+ * Cost is reported two ways because the accurate one is not always there. `total_cost_usd` on the
+ * harness's `result` message is authoritative, but a run `onToolUse` stopped never produces one, so
+ * usage is also accumulated off the assistant messages and priced locally. `costEstimated` says
+ * which number this is.
+ *
+ * The same command doubles as a plain model call. `systemPrompt` replaces the harness's own system
+ * prompt, `jsonSchema` makes the harness validate the answer and return it parsed as
+ * `structuredOutput`, `strictMcpConfig` drops every MCP server the machine has configured — the
+ * connectors a developer has attached cost tens of thousands of tokens per call and are never what
+ * a skill is about — and `disableSkills` keeps the run from loading skill descriptions. Together
+ * with `tools: []` that is a judge call: one turn, a few thousand tokens, no tools.
+ */
+function runClaude({
+  cwd,
+  prompt,
+  model,
+  tools,
+  permissionMode = 'bypassPermissions',
+  maxBudgetUsd,
+  timeoutMs = 15 * 60 * 1000,
+  onToolUse,
+  systemPrompt,
+  jsonSchema,
+  strictMcpConfig = false,
+  mcpConfig,
+  pluginDirs,
+  disableSkills = false,
+}) {
+  const args = buildClaudeArgs({
+    prompt,
+    model,
+    tools,
+    permissionMode,
+    maxBudgetUsd,
+    systemPrompt,
+    jsonSchema,
+    strictMcpConfig,
+    mcpConfig,
+    pluginDirs,
+    disableSkills,
+  });
 
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn('claude', args, {
@@ -812,6 +861,7 @@ module.exports = {
   MODEL_PRICES_PER_MTOK,
   REPO_ROOT,
   abortActiveRuns,
+  buildClaudeArgs,
   collectChangedFiles,
   createSandbox,
   describeEnvironment,

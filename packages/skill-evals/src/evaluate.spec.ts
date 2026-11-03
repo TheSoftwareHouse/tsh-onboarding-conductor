@@ -8,6 +8,7 @@ import {
   TOOL_TARGET_LIMIT_CHARS,
   buildAgentPrompt,
   collectArtifacts,
+  invocationName,
   prepareSandbox,
   resolveAgentModel,
   resolveSkillsUsed,
@@ -32,6 +33,38 @@ describe('buildAgentPrompt', () => {
   it('prefixes the skill for an explicit invocation and sends a natural prompt bare', () => {
     expect(buildAgentPrompt(set, baseCase)).toBe('/alpha Do the thing.');
     expect(buildAgentPrompt(set, { ...baseCase, invocation: 'natural' })).toBe('Do the thing.');
+  });
+});
+
+describe('a plugin skill', () => {
+  const pluginSet: GoldenSet = { ...set, plugin: 'analyst' };
+
+  it('is invoked under its plugin namespace', () => {
+    expect(invocationName(set)).toBe('alpha');
+    expect(invocationName(pluginSet)).toBe('analyst:alpha');
+    expect(buildAgentPrompt(pluginSet, baseCase)).toBe('/analyst:alpha Do the thing.');
+    expect(buildAgentPrompt(pluginSet, { ...baseCase, invocation: 'natural' })).toBe(
+      'Do the thing.',
+    );
+  });
+
+  it('counts an explicit invocation as fired only when the namespaced skill was discovered', () => {
+    expect(
+      resolveSkillsUsed(pluginSet, baseCase, {
+        skillsUsed: [],
+        availableSkills: ['analyst:alpha', 'beta'],
+      }),
+    ).toEqual(['analyst:alpha']);
+    expect(
+      resolveSkillsUsed(pluginSet, baseCase, {
+        skillsUsed: ['analyst:alpha', 'beta'],
+        availableSkills: ['analyst:alpha'],
+      }),
+    ).toEqual(['analyst:alpha', 'beta']);
+    // The repository skill of the same bare name is not the plugin's.
+    expect(
+      resolveSkillsUsed(pluginSet, baseCase, { skillsUsed: [], availableSkills: ['alpha'] }),
+    ).toEqual([]);
   });
 });
 
@@ -130,6 +163,40 @@ describe('prepareSandbox', () => {
     expect(readFileSync(join(sandbox, 'workflows', 'users', 'input.json'), 'utf8')).toBe(
       '{"broken":true}',
     );
+    expect(git(sandbox, 'status', '--porcelain')).toBe('');
+  });
+
+  it('strips the golden sets of plugin skills too and keeps the rest of the plugin', async () => {
+    const skill = join(sandbox, 'plugins', 'analyst', 'skills', 'investigating');
+
+    mkdirSync(join(skill, 'evals', 'golden'), { recursive: true });
+    writeFileSync(join(skill, 'evals', 'evals.json'), '{}');
+    writeFileSync(join(skill, 'evals', 'golden', 'answer.md'), 'the answer');
+    writeFileSync(join(skill, 'SKILL.md'), '# investigating');
+    writeFileSync(join(sandbox, 'plugins', 'analyst', '.mcp.json'), '{}');
+    git(sandbox, 'add', '-A');
+    git(sandbox, 'commit', '-q', '--no-verify', '-m', 'plugin');
+
+    await prepareSandbox(
+      sandbox,
+      { skill: 'investigating', plugin: 'analyst', directory: evals, cases: [] },
+      {
+        id: 'c',
+        prompt: 'p',
+        invocation: 'explicit',
+        expectedOutput: 'e',
+        files: [],
+        checks: [{ type: 'skill-fired', skill: 'investigating', expected: true }],
+        assertions: [],
+        threshold: 70,
+        judge: true,
+      },
+    );
+
+    expect(() => readFileSync(join(skill, 'evals', 'evals.json'))).toThrow();
+    expect(() => readFileSync(join(skill, 'evals', 'golden', 'answer.md'))).toThrow();
+    expect(readFileSync(join(skill, 'SKILL.md'), 'utf8')).toBe('# investigating');
+    expect(readFileSync(join(sandbox, 'plugins', 'analyst', '.mcp.json'), 'utf8')).toBe('{}');
     expect(git(sandbox, 'status', '--porcelain')).toBe('');
   });
 });

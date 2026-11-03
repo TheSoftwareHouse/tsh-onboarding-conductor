@@ -33,6 +33,14 @@ import {
   loadGoldenSets,
 } from './golden-set';
 import {
+  type SeedManifest,
+  loadManifest,
+  manifestPath,
+  readGoldenText,
+  referencesManifest,
+  resolveCase,
+} from './manifest';
+import {
   type CaseResult,
   type EvalReport,
   type InFlightRun,
@@ -76,7 +84,7 @@ const HEARTBEAT_MS = MILLISECONDS_PER_MINUTE;
 /** Ctrl+C in a terminal, and what CI sends a step it cancels. */
 const STOP_SIGNALS: readonly NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
 
-type Selected = { readonly set: GoldenSet; readonly testCase: GoldenCase };
+export type Selected = { readonly set: GoldenSet; readonly testCase: GoldenCase };
 
 function selectCases(sets: readonly GoldenSet[], options: CliOptions): Selected[] | string {
   const known = new Set(sets.map((set) => set.skill));
@@ -104,6 +112,51 @@ function selectCases(sets: readonly GoldenSet[], options: CliOptions): Selected[
     );
 
   return selected.length === 0 ? 'no case matches the filters' : selected;
+}
+
+/**
+ * Replaces the `{{manifest:…}}` placeholders of the selected cases with what the seeder wrote, or
+ * says why it cannot. Runs before a plan is printed or a model is called, so a run that could not
+ * name its onboardings spends nothing. A selection without placeholders needs no manifest, and so
+ * does `--validate`, which never gets here.
+ */
+export function resolveManifestReferences(
+  selected: readonly Selected[],
+  load: () => SeedManifest = () => loadManifest(manifestPath()),
+): Selected[] | string {
+  const needsManifest = selected.some(({ set, testCase }) =>
+    referencesManifest(testCase, readGoldenText(set.directory, testCase)),
+  );
+
+  if (!needsManifest) {
+    return [...selected];
+  }
+
+  let manifest: SeedManifest;
+
+  try {
+    manifest = load();
+  } catch (error) {
+    return (error as Error).message;
+  }
+
+  const problems: string[] = [];
+  const resolved = selected.map(({ set, testCase }) => {
+    const result = resolveCase(testCase, manifest, readGoldenText(set.directory, testCase));
+
+    if ('missing' in result) {
+      problems.push(
+        `${set.skill}/${testCase.id} references scenario key(s) the seed manifest does not have: ${result.missing.join(', ')}`,
+      );
+      return { set, testCase };
+    }
+
+    return { set, testCase: result.testCase };
+  });
+
+  return problems.length === 0
+    ? resolved
+    : `${problems.join('\n')}\nThe manifest ${manifestPath()} has: ${[...manifest.keys()].join(', ') || 'no scenarios'}. Run \`pnpm stack:mcp:up\` and \`pnpm onboardings:seed\` to regenerate it.`;
 }
 
 /**
@@ -251,7 +304,14 @@ async function main(): Promise<number> {
     return problems.length === 0 ? EXIT_OK : EXIT_USAGE;
   }
 
-  const selected = selectCases(loaded.sets, options);
+  const chosen = selectCases(loaded.sets, options);
+
+  if (typeof chosen === 'string') {
+    console.error(chosen);
+    return EXIT_USAGE;
+  }
+
+  const selected = resolveManifestReferences(chosen);
 
   if (typeof selected === 'string') {
     console.error(selected);

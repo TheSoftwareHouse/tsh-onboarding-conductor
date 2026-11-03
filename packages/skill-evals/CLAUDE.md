@@ -1,6 +1,7 @@
 # @tsh/skill-evals
 
-Golden-set evaluation of the skills under `.claude/skills/`. Each case is a prompt a person would
+Golden-set evaluation of the skills under `.claude/skills/` and of the skills a plugin ships under
+`plugins/<plugin>/skills/`. Each case is a prompt a person would
 type, what a human expects to come out, deterministic checks on the repository copy the agent worked
 in, and assertions a judge grades with evidence. The agent is headless Claude Code with the skill
 installed — the thing that actually consumes a `SKILL.md` — and the judge is one tool-less Claude
@@ -14,6 +15,7 @@ within the package.
   before adding a case or a check type.
 - `src/checks.ts` — the deterministic checks; `src/graph.ts` the name-free compile signature the
   `compiled-graph-matches` check compares.
+- `src/manifest.ts` — the `{{manifest:…}}` placeholders and the seed manifest they read.
 - `src/judge.ts` — the rubric, the JSON schema the harness validates the verdict against, and the
   parsing of what comes back.
 - `src/evaluate.ts` — one run: sandbox, agent, checks, judge, and the record of what the agent did.
@@ -23,14 +25,16 @@ within the package.
   `scripts/skill-eval-runner.cjs`, `scripts/validate-skills.cjs` and
   `scripts/skill-evals-reminder.cjs`, which stay CommonJS under `scripts/` because
   `skills:routing`, `skills:ablation` and Claude Code's hooks use them without this package.
-- Golden sets live with their skill: `.claude/skills/<skill>/evals/evals.json`, with `golden/` for
-  reference artifacts and answers and `files/` for inputs a case places into the sandbox.
+- Golden sets live with their skill: `.claude/skills/<skill>/evals/evals.json` or
+  `plugins/<plugin>/skills/<skill>/evals/evals.json`, with `golden/` for reference artifacts and
+  answers and `files/` for inputs a case places into the sandbox.
 
 ## Pitfalls
 
 - **Anything under `evals/` is deleted from the sandbox before the agent starts.** The golden answers
-  would otherwise be readable by the model under test. `prepareSandbox` strips every skill's `evals/`
-  and commits, so those deletions never show up as the agent's changes either.
+  would otherwise be readable by the model under test. `prepareSandbox` strips every skill's
+  `evals/` — the repository's and every plugin's — and commits, so those deletions never show up as
+  the agent's changes either.
 - **Changes are measured against the sandbox's baseline commit, not `git status`.** `prepareSandbox`
   returns the commit it made and `collectChangedFiles` diffs the working tree against it, adding
   the untracked files, so an agent that commits its work — the workflow skill talks about
@@ -53,6 +57,45 @@ within the package.
 - **The DDL is loaded lazily from its `dist`.** `main.ts` builds `@tsh/ddl-schema` before any check
   runs; the specs map the package to its source instead (`jest.config.cjs`), so `pnpm test` needs no
   build.
+- **A plugin skill is a set of its own kind, not a path variant.** `loadGoldenSets` finds it under
+  `plugins/<plugin>/skills/<skill>/evals/`, and the set carries `plugin`. Nothing is installed in a
+  sandbox, so the run gets `--plugin-dir <sandbox>/plugins/<plugin>` — the sandbox's copy, already
+  stripped of `evals/` — and the explicit prompt is `/<plugin>:<skill> …`, the name the harness
+  discovers it under. `--skill` still takes the bare directory name. The plugin directory's name
+  must equal the `name` in its manifest, or the harness lists the skill under another namespace and
+  the case errors with "did not discover the skill".
+- **`skill-fired` takes a plugin skill either way.** The harness reports a plugin skill as
+  `conductor-analyst:<skill>`; a check naming the bare `<skill>` matches that and the bare form, one
+  naming `<plugin>:<skill>` matches only it. A bare name is a whole-name match, never a substring.
+- **`mcp_config` is the only way a run reaches an MCP server.** A set may declare `"mcp_config"`, a
+  path relative to its `evals/` directory (looked up first) or the repository root — a plugin's own
+  `plugins/<plugin>/.mcp.json` is the usual one — to a file of the form `{ "mcpServers": { … } }`,
+  which is what `claude --mcp-config` reads (a bare map of servers is refused here, because the
+  harness would load none). The run passes it as `--mcp-config <absolute path>` beside
+  `--strict-mcp-config`, so it reaches those servers and none a developer attached to their own
+  Claude Code; without `mcp_config` it reaches no MCP server at all. The file is read from where it
+  sits in the repository, not from the sandbox, so a config kept under `evals/` still works. Its
+  server names are what `mcp-tool-called` is matched against.
+- **`mcp-tool-called` is `{ "type": "mcp-tool-called", "tool": "<name>", "min": 1 }`.** `tool` is the
+  bare tool name as the server declares it (`get_onboarding`), never the harness's
+  `mcp__<server>__<tool>`; `min` defaults to 1 and must be a positive integer. It counts the
+  `tool_use` events named `mcp__<server>__<tool>` for a server in the set's `mcp_config` — the
+  server name rewritten the way the harness does, every character outside letters, digits, `_` and
+  `-` becoming `_` — and for any server when the set declares no config. It checks that the tool was
+  called, not what it returned: pair it with an `answer-matches` for the figure the answer must
+  carry.
+- **A prompt names a seeded onboarding by scenario key, never by id.** The engine generates random
+  ids on every seed run, so a case writes `{{manifest:<scenario-key>}}` where the id goes and
+  `{{manifest:<scenario-key>.explanation}}` where the seeder's `explanation` for that scenario is
+  the answer (a judge assertion, usually). Both are replaced in the prompt, `expected_output`, every
+  assertion and a golden answer before the run. The manifest is
+  `packages/onboarding-seeder/out/manifest.json`, or the path in `SKILL_EVALS_MANIFEST` (relative to
+  the repository root). `--validate` checks the placeholder syntax only and never needs the manifest
+  — a `{{manifest:` that is not one of the two forms fails the set. A real run and `--dry-run`
+  resolve first, before a plan is printed or a model is called: a missing manifest or a key it does
+  not have stops the command with exit 2 and says to run `pnpm stack:mcp:up` and
+  `pnpm onboardings:seed`. A selection with no placeholders reads no manifest. The report shows the
+  resolved prompt, so it carries the ids of the run it measured.
 - **`skill_name` must equal the directory the file sits in**, and a case with `judge: false` may
   carry no assertions — the judge is what grades them.
 - **A set or a case may declare `"model"`.** It names the agent model the case needs, and beats the

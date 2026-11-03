@@ -9,8 +9,44 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ## Unreleased
 
+### Added
+
+- MCP server — `pnpm stack:mcp:up` starts `@tsh/mcp` beside the engine on
+  `http://localhost:3100/mcp`. It gives an analyst's AI client 16 tools over the engine's admin API
+  — find and explain onboardings, funnel, connector health, review queue, audit search, access
+  report, workflow diff — and acts as the signed-in Entra user. Every value is masked before it
+  leaves: email and phone become keyed pseudonyms, dates of birth become age bands, and names,
+  addresses and free text are withheld.
+- MCP write tools — `reconcile_pending_connector` and `create_workflow_draft` change nothing until
+  the analyst confirms a preview and the assistant repeats the call with its single-use token. A
+  draft is never published. `MCP_WRITE_TOOLS_ENABLED=false` removes both.
+- MCP settings — The `MCP_*` variables in `.env.dist`. `MCP_AUTH_ENABLED=false` is refused when
+  `NODE_ENV=production`, and the sample `MCP_MASKING_KEY` is a development key published in this
+  repository: set a private one (`openssl rand -hex 32`) anywhere else.
+- MCP sign-in relay — with sign-in on, the MCP server is its own authorization server and relays to
+  Entra (`/oauth/authorize`, `/oauth/token`, `/oauth/register`), dropping the RFC 8707 `resource`
+  parameter that made Entra reject Claude Code's sign-in with `AADSTS9010010`. Analysts sign in with no
+  client id and no callback port. New `MCP_PUBLIC_CLIENT_ID` (defaults to `MCP_AZURE_CLIENT_ID`);
+  `MCP_PUBLIC_URL` must be HTTPS outside localhost. See decision 0054.
+- Analyst plugin — `conductor-analyst` installs from this repository's Claude Code and Codex
+  marketplaces and adds five skills (`investigating-onboarding`, `triaging-review-queue`,
+  `analysing-onboarding-funnel`, `preparing-compliance-evidence`, `reviewing-risk-rules`) and, in
+  Claude Code, an `onboarding-investigator` agent.
+- Onboarding seeder — `pnpm onboardings:seed` drives the engine's public API to create 46 synthetic
+  onboardings (approved, rejected by score or provider, in review, parked, abandoned, duplicate
+  applicants) and writes `packages/onboarding-seeder/out/manifest.json`, which says what each one
+  demonstrates. `--spread-days <n>` spreads them over the last `n` days.
+- Fixture workflow — `analyst-investigation` collects every class of personal data, scores risk,
+  verifies an email code and a document, and parks on an identity check until the provider calls
+  back. The seeder runs it.
+- Skill tooling — `skills:validate` and `skills:evals` cover plugin skills. A golden set can attach
+  an MCP server (`mcp_config`), require a tool call (`mcp-tool-called`) and name seeded onboardings
+  as `{{manifest:<scenario-key>}}`.
+
 ### Changed
 
+- OpenAPI — `pnpm openapi:generate` also regenerates the TypeScript types of the engine API in
+  `@tsh/openapi`, and `pnpm test` fails while they are stale.
 - Fonts — The commercial TWK Everett files are no longer in the repository and the typeface is no
   longer referenced. The documentation site and the admin panel ship Inter Tight and JetBrains Mono
   (SIL Open Font License) as their only type.

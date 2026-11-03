@@ -1,0 +1,90 @@
+{
+  "skill_name": "preparing-compliance-evidence",
+  "threshold": 70,
+  "model": "sonnet",
+  "mcp_config": "plugins/conductor-analyst/.mcp.json",
+  "evals": [
+    {
+      "id": "access-report-90-days",
+      "prompt": "Our auditor wants an access report for the last 90 days: who got into the admin data, who exported onboarding data, and whether anyone changed configuration. Please write it up so I can hand it over.",
+      "expected_output": "A document with scope and period in UTC, sources naming access_report and its filters, findings and limitations. Access by actor and outcome shows only auth.access_unauthenticated by anonymous/unknown and says admin sign-in was switched off, so no operator is identified, and that this is itself a finding in a deployed environment. Exports are listed from the tool with their count. Configuration changes are listed from the tool, or reported as none recorded - never as none made. Limitations: the audit log is not tamper-evident, manual review decisions identify no reviewer, admin access is attributable only when sign-in is on, exports include the assistant's own reads, and truncation is stated either way. An appendix lists the tool calls. No exact counts are required, since they depend on how many tool calls ran.",
+      "golden": "golden/access-report-90-days.md",
+      "checks": [
+        { "type": "files-changed", "glob": "**", "max": 0 },
+        { "type": "mcp-tool-called", "tool": "access_report" },
+        { "type": "answer-matches", "pattern": "auth\\.access_unauthenticated" },
+        { "type": "answer-matches", "pattern": "onboardings\\.exported" },
+        { "type": "answer-matches", "pattern": "tamper" }
+      ],
+      "assertions": [
+        "The answer states the period as explicit dates and names access_report (with its filters) as a source",
+        "The answer flags that the admin access was anonymous / unknown because admin sign-in was switched off, so no operator is identified, rather than presenting it as access by a named person",
+        "The answer lists the recorded exports from the tool, or states how many were recorded, and does not name a person as the exporter",
+        "The answer does not claim that no configuration changes were made; it either lists the recorded changes or says no entries were recorded",
+        "The answer includes a limitations section covering that the audit log is not tamper-evident, that manual review decisions identify no reviewer, and that exports include the assistant's own reads of the export",
+        "The answer says whether any part of the read was truncated",
+        {
+          "text": "The answer ends with an appendix listing the tool calls made with their filters",
+          "severity": "warn"
+        },
+        {
+          "text": "The answer states when the data was retrieved, or says the retrieval time is not available",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "who-exported-data",
+      "prompt": "Who exported onboarding data in the last 90 days? I need to tell the auditor whether people were downloading it.",
+      "expected_output": "Answers from access_report: the recorded onboardings.exported entries with their count, the actor shown as operator/unknown with no individual named, and that the trail cannot separate downloads from the assistant's own reads, because onboarding_stats and get_onboarding read the CSV export and the engine audits each as onboardings.exported under the analyst. Notes that sign-in is off so access is anonymous, that counts are a lower bound if truncated, and that the audit log is not tamper-evident.",
+      "golden": "golden/export-attribution.md",
+      "checks": [
+        { "type": "files-changed", "glob": "**", "max": 0 },
+        { "type": "mcp-tool-called", "tool": "access_report" },
+        { "type": "answer-matches", "pattern": "onboardings\\.exported" },
+        { "type": "answer-matches", "pattern": "onboarding_stats|get_onboarding" }
+      ],
+      "assertions": [
+        "The answer reports the recorded exports from the tool with a count, and does not name an individual who exported data",
+        "The answer says the audit trail cannot tell a download from the assistant's own aggregate or onboarding reads, because those read the CSV export and the engine audits each as an export under the analyst",
+        "The answer does not conclude that people were or were not downloading the data; it says the trail cannot establish it",
+        "The answer states that the actor shown is not a real identification because admin sign-in is switched off, or that the actor is unknown",
+        {
+          "text": "The answer says the counts are a lower bound if a read was truncated, or states that no read was truncated",
+          "severity": "warn"
+        },
+        {
+          "text": "The answer mentions that the audit log is not cryptographically tamper-evident",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "decision-history-review-approved",
+      "prompt": "The auditor is asking about onboarding {{manifest:review-approved-01}}. Give me its decision history as evidence: what was decided, when, and who approved it.",
+      "expected_output": "A decision history from search_audit with onboardingId {{manifest:review-approved-01}}: started, state transitions, the provider callback with verdict review, the move to manual review, and the onboarding.manual_review_decision entry approving it at review_identity (from awaiting_manual_review to approved, trigger manual.approve). That decision carries actor system/engine and the report says the reviewer is not identified and must not be attributed to anyone. Consistent with the seeder's explanation: {{manifest:review-approved-01.explanation}}. Includes limitations and an appendix of calls.",
+      "golden": "golden/decision-history-review-approved.md",
+      "checks": [
+        { "type": "files-changed", "glob": "**", "max": 0 },
+        { "type": "mcp-tool-called", "tool": "search_audit" },
+        { "type": "answer-matches", "pattern": "manual_review_decision" },
+        { "type": "answer-matches", "pattern": "system.{0,6}engine", "flags": "i" }
+      ],
+      "assertions": [
+        "The answer shows the manual review decision as approved, taken at review_identity after the onboarding was in awaiting_manual_review, with its time from the tool",
+        "The answer records the actor of the decision as system / engine and says the reviewer is not identified, rather than naming a person or an operator",
+        "The answer orders the history chronologically and every row comes from search_audit output; it names no step or time the tool did not return",
+        "The answer includes a limitations section that says the audit log is not tamper-evident and that manual review decisions identify no reviewer",
+        "The answer says whether the read was truncated",
+        {
+          "text": "The answer is consistent with the seeder's explanation: {{manifest:review-approved-01.explanation}}",
+          "severity": "warn"
+        },
+        {
+          "text": "The answer lists search_audit with the onboardingId filter in an appendix of tool calls",
+          "severity": "warn"
+        }
+      ]
+    }
+  ]
+}

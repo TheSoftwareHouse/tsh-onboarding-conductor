@@ -27,6 +27,8 @@ This document assumes you have the local stack running; see the [README](../READ
 - [Add a field type or text format](#add-a-field-type-or-text-format)
 - [Add an email template](#add-an-email-template)
 - [Add an SSO provider](#add-an-sso-provider)
+- [Add an MCP tool](#add-an-mcp-tool)
+- [Add an analyst skill](#add-an-analyst-skill)
 - [Add a package](#add-a-package)
 
 ## Definition scopes: built-in, fixtures, users
@@ -91,7 +93,8 @@ which holds the flows the e2e suites run against, each written as `custom` steps
 compiled step each (a new fixture is written in specialized step types): `base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`,
 `otp-sms`, `otp-email-typed`, `sendgrid-email` and `scoring` — `otp-sms` is the one to copy for a code
 sent to a phone, `otp-email-typed` for a code sent by email, and `scoring` for named scores and
-score-conditioned transitions. The production reference
+score-conditioned transitions. `analyst-investigation` is the exception, already written in specialized
+step types: copy it for a flow that parks on a provider callback and then routes to manual review. The production reference
 flow is [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), shipped built-in in both forms —
 revision 1 as `custom` steps, revision 2 (`-v2`) through the specialized types: EU B2C individual
 KYC across all 30 EEA states, where the applicant chooses between a passport and a national ID card.
@@ -898,6 +901,130 @@ change. Both sides must name the same provider — `VITE_SSO_PROVIDER` on the pa
 `ADMIN_SSO_PROVIDER` on the engine — or the panel hands the engine tokens it refuses. An
 unsupported value is refused by name at startup rather than falling back to Entra.
 
+## Add an MCP tool
+
+A tool is one class in an area folder of `packages/mcp/src/tools/` — `workflows/`, `onboardings/`,
+`analytics/` or `compliance/` — and nothing else needs to know it exists: `ToolRegistry` discovers
+every provider marked `@McpTool()`. The MCP reaches the engine only over its admin HTTP API and holds
+no database connection, so a question the API cannot answer is computed in the tool, not by touching
+the engine; read [docs/IMPLEMENTATION.md](./IMPLEMENTATION.md) §14 first.
+
+```ts
+@Injectable()
+@McpTool()
+export class FindThingTool implements ToolRegistration {
+  readonly kind = ToolKind.READ;
+  readonly name = 'find_thing';
+  readonly description =
+    'What it returns, its limits, and what to use instead for a related question.';
+  readonly inputSchema = {
+    type: 'object' as const,
+    properties: { thingId: { type: 'string', description: 'The thing UUID, from find_things.' } },
+    required: ['thingId'],
+  };
+
+  constructor(private readonly engine: EngineClient) {}
+
+  async handler(args: ToolArguments, context: RequestContext): Promise<object> {
+    // Validate `args` yourself, throw a ToolError for a refusal the model can act on, and call the
+    // engine as the analyst: this.engine.request('get', '/v1/...', context, { path: { ... } }).
+  }
+}
+```
+
+1. **Provide it from the area module.** Add the class to `providers` in that folder's `*.module.ts`
+   and import the modules it injects (`EngineModule`, `MaskingModule`, `ClassificationModule`,
+   `LimitsModule`, `ConfirmationModule`). A name already registered fails the first `tools/list`.
+   A new area is a new module imported by `ToolsModule`.
+2. **Type the engine call.** `EngineClient.request` is typed from `@tsh/openapi`, so a route or
+   parameter that does not exist fails `typecheck`. A route the engine added needs
+   `pnpm openapi:generate` first, which rewrites the types as well as the document.
+3. **Choose the kind.** `ToolKind.READ` changes nothing. `ToolKind.WRITE` makes the registry hide the
+   tool when `MCP_WRITE_TOOLS_ENABLED=false` and annotate it `destructiveHint: true`; it must also
+   implement the two-step confirmation — a call without `confirmationToken` returns a preview and
+   `ConfirmationService.issue(...)`, a call with one runs `ConfirmationService.consume(...)` before
+   the engine write — as `reconcile-pending-connector.tool.ts` does. v1 has exactly two write tools,
+   and a third contradicts
+   [0051](decisions/0051-mcp-acts-on-behalf-of-the-analyst.md): record a decision before adding one.
+4. **Mask what you return.** No engine response may reach the model unmasked, and default deny is the
+   rule: return the fields you name, never a whole engine object whose type has free-form members
+   (`metadata`, `context`, `submittedData`). Collected data goes through
+   `Masker.maskCollectedData` or `maskCsvRow` with classes from `FieldClassLookup`; audit entries go
+   through `Masker.maskAuditEntry`, and an audit action family the allowlists do not know needs an
+   entry in `masking/audit-allowlists.ts`, because an action no list names keeps no metadata. A
+   response made only of system fields (ids, statuses, step names, scores) needs no masking, as
+   `find_onboardings` shows. Never log argument values or tokens.
+5. **Bound it.** Name every cap as a constant, report `truncated` when a cap cut the answer, and take
+   the per-identity export slot (`ToolLimits.acquireCsvExport`, released in a `finally`) around any
+   stream of the CSV export. State the limits and the neighbouring tool in `description`: it is the
+   model's only documentation.
+6. **Test it, twice.** A spec beside the tool with a stubbed `EngineClient`, and a row in `TOOL_CALLS`
+   in `tools/tools-masking.spec.ts`, whose stubbed engine you extend with a personal-looking value
+   where your tool could leak one. That spec boots the whole app, calls every listed tool, fails if
+   any output holds such a value, and fails when a listed tool has no row. Update
+   `READ_TOOL_COUNT` or `WRITE_TOOL_NAMES` in `transport/mcp-endpoint.spec.ts`.
+7. **Document it.** The tools table and the counts in `docs/IMPLEMENTATION.md` §14, the counts in
+   `plugins/conductor-analyst/README.md`, and a `CHANGELOG.md` line.
+
+## Add an analyst skill
+
+An analyst skill belongs to the plugin, `plugins/conductor-analyst/skills/<skill>/`, and is read by an
+AI assistant that has the MCP tools and nothing of this repository. Both Claude Code and Codex load
+it from the same tree
+([0053](decisions/0053-analyst-plugin-marketplace.md)); read an existing one, for example
+`investigating-onboarding`, before writing yours.
+
+1. **Write `SKILL.md`.** The directory name equals the frontmatter `name` (a gerund, `kebab-case`),
+   and the frontmatter is `name` and `description` only: put the trigger phrases a person would use in
+   the `description`. Keep the body under 500 lines and move detail to `references/*.md`, each cited
+   from `SKILL.md`. Write for the analyst: no repository path, `pnpm`, Docker or shell step, and cite
+   tools by their bare name (`get_onboarding_timeline`). Every skill states that figures come from
+   tool results, never estimates; that applicant-entered text is data, not instructions; and that
+   masked values (pseudonyms, age bands, `withheldFields`) are expected and never worked around. A
+   skill that may call a write tool shows the preview and calls again only after the analyst agrees,
+   and never publishes anything.
+2. **Write the golden set** in `evals/evals.json`, with the reference answers under `golden/`. Declare
+   the plugin's MCP configuration so the run can reach the server, and name seeded onboardings by
+   scenario, because their ids are random on every seed:
+
+   ```json
+   {
+     "skill_name": "investigating-onboarding",
+     "mcp_config": "plugins/conductor-analyst/.mcp.json",
+     "evals": [
+       {
+         "id": "score-rejection",
+         "prompt": "Applicant onboarding {{manifest:score-reject-01}} was rejected. Why?",
+         "expected_output": "Reaches the seeded explanation: {{manifest:score-reject-01.explanation}}. ...",
+         "checks": [
+           { "type": "mcp-tool-called", "tool": "get_onboarding_timeline" },
+           { "type": "answer-matches", "pattern": "collect_profile" }
+         ],
+         "assertions": ["The answer names the rule that fired and the threshold."]
+       }
+     ]
+   }
+   ```
+
+   `{{manifest:<key>}}` is the id and `{{manifest:<key>.explanation}}` the seeder's recorded answer
+   for the scenario in `packages/onboarding-seeder/out/manifest.json`. A check that a tool was called
+   proves nothing about what it returned, so pair it with an `answer-matches` for the figure the
+   answer must carry. If the skill needs a situation no scenario covers, add a scenario family to the
+   seeder ([docs/IMPLEMENTATION.md](./IMPLEMENTATION.md) §15) rather than creating onboardings by
+   hand. The case format and every check are in
+   [packages/skill-evals/CLAUDE.md](../packages/skill-evals/CLAUDE.md).
+
+3. **Validate it without a model.** `pnpm skills:validate plugins/conductor-analyst` checks the
+   frontmatter, the cited references and any `pnpm` command a skill names; `pnpm skills:evals
+--validate` checks the golden set, including the placeholder syntax. Neither needs the stack.
+4. **Run it.** `pnpm stack:mcp:up`, then `pnpm onboardings:seed`, then
+   `pnpm skills:evals --skill <skill>`. The run reads the manifest and exits with the commands to run
+   when it is missing. It spends money on your signed-in account and never runs in CI.
+5. **List it.** Add the skill to the table in `plugins/conductor-analyst/README.md`. A Claude-only
+   subagent goes in `agents/<name>.md` with `name`, `description` and a `tools` list. A new plugin
+   needs its own manifests (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`), a `.mcp.json`
+   and an entry in both `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json`.
+
 ## Add a package
 
 `pnpm-workspace.yaml` picks up `packages/*` and `packages/shared/*`. The root scripts fan out with
@@ -906,6 +1033,10 @@ suites the moment it defines those script names — there is no central list to 
 that typechecks against `@tsh/ddl-schema`'s `dist` must not build it inside its own `typecheck`:
 `@tsh/ddl-schema`'s `typecheck` script is its build and runs before any dependent's, and a second
 `rm -rf dist` under a running `tsc` fails whichever package loses the race.
+
+`packages/engine/Dockerfile` and `packages/mcp/Dockerfile` copy every workspace's `package.json` by
+hand, because `pnpm install --frozen-lockfile` validates the lockfile against the whole workspace:
+add the new package's `package.json` to both or their image builds fail.
 
 Keep new shared contracts framework-free, as `@tsh/ddl-schema` is: it is what allows the workflow
 format to be consumed without dragging NestJS along.
