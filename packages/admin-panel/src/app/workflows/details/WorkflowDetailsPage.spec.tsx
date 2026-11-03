@@ -594,8 +594,10 @@ describe('WorkflowDetailsPage', () => {
     );
     renderPage();
 
-    expect(await screen.findByText('Workflow kyc not found.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Back to workflows/ })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Workflow not found' })).toBeInTheDocument();
+    expect(screen.getByText('No workflow has the ID kyc.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to workflows' })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Version' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /View onboardings/ })).not.toBeInTheDocument();
   });
 
@@ -605,7 +607,10 @@ describe('WorkflowDetailsPage', () => {
     );
     renderPage();
 
-    expect(await screen.findByText(/Unable to load workflow: Request failed/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Unable to load workflow' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Request failed with status 500.')).toBeInTheDocument();
 
     mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));

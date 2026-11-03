@@ -2,7 +2,10 @@ import { useEffect, useEffectEvent, type ReactElement } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { readDraftError } from '@/api/workflows/workflow-drafts';
 import { Button } from '@/components/ui/Button/Button';
-import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
+import { ErrorState } from '@/components/ui/ErrorState/ErrorState';
+import { Loader } from '@/components/ui/Loader/Loader';
+import { CANVAS_ERROR_TITLE } from '../../constants/canvas-error';
+import { describeCanvasError } from '../../utils/describe-canvas-error';
 import { VersionGraph } from '../VersionGraph';
 import type { ValidationOutcome } from './ValidationResult';
 
@@ -36,29 +39,35 @@ export function DraftGraph({
   }, [outcome]);
 
   if (outcome === null) {
-    return <StatusRegion className="px-8 py-6">Compiling…</StatusRegion>;
+    return <Loader label="Compiling…" />;
   }
 
   // Auth, network or 5xx: the request failed, not the document.
   if (outcome.kind === 'invalid' && readDraftError(outcome.error) === null) {
     return (
-      <div className="flex flex-col items-start gap-4 p-8">
-        <StatusRegion>{`Unable to compile this draft: ${outcome.error.message}`}</StatusRegion>
-        <Button variant="secondary" size="md" onClick={onRetry}>
-          Retry
-        </Button>
-      </div>
+      <ErrorState
+        title="Unable to compile this draft"
+        body={outcome.error.message}
+        actions={
+          <Button variant="primary" size="lg" onClick={onRetry}>
+            Retry
+          </Button>
+        }
+      />
     );
   }
 
   if (outcome.kind !== 'valid') {
     return (
-      <div className="flex flex-col items-start gap-4 p-8">
-        <StatusRegion>This draft does not compile. Fix it on the JSON tab.</StatusRegion>
-        <Button variant="secondary" size="md" onClick={onShowJson}>
-          Show JSON
-        </Button>
-      </div>
+      <ErrorState
+        title={CANVAS_ERROR_TITLE}
+        body={describeCanvasError('This draft does not compile.')}
+        actions={
+          <Button variant="primary" size="lg" onClick={onShowJson}>
+            Open JSON tab
+          </Button>
+        }
+      />
     );
   }
 

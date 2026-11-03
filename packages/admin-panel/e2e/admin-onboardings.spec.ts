@@ -115,6 +115,10 @@ class AdminOnboardingsPage {
     return this.page.getByRole('status');
   }
 
+  get errorRegion() {
+    return this.page.getByRole('alert');
+  }
+
   get table() {
     return this.page.getByRole('table', { name: 'Onboardings matching the current filters' });
   }
@@ -161,7 +165,9 @@ class AdminOnboardingsPage {
   }
 
   get resetButton() {
-    return this.page.getByRole('button', { name: 'Reset filters' });
+    return this.page
+      .getByLabel('Filter onboardings')
+      .getByRole('button', { name: 'Reset filters' });
   }
 
   get pager() {
@@ -547,8 +553,8 @@ test.describe.serial('admin onboardings', () => {
     await app.fillFilters({ workflowId: 'does-not-match' });
     await app.applyFilters();
     await waitForTraffic(traffic, 19);
-    await expect(app.statusRegion).toHaveText('No onboardings match the current filters.');
-    await expect(app.table).toContainText('No onboardings match the current filters.');
+    await expect(app.statusRegion).toContainText('No onboardings match the current filters');
+    await expect(app.tableRegion).toContainText('No onboardings match the current filters');
     expectDirectRequest(traffic.requests[18], NO_MATCH_SEARCH);
 
     await app.resetFilters();
@@ -637,9 +643,8 @@ test.describe.serial('admin onboardings', () => {
     recovery.releaseInitial();
     await waitForTraffic(traffic, 2);
 
-    await expect(app.statusRegion).toHaveText(
-      'Unable to load onboardings: Request failed with status 500.',
-    );
+    await expect(app.errorRegion).toContainText('Unable to load onboardings');
+    await expect(app.errorRegion).toContainText('Request failed with status 500.');
     expectDirectRequest(traffic.requests[1], RELOAD_QUERY_SEARCH);
     expect(traffic.responses[1]).toEqual(
       expect.objectContaining({
@@ -671,9 +676,10 @@ test.describe.serial('admin onboardings', () => {
     const requestsBeforeInvalidVersion = traffic.requests.length;
     await app.fillFilters({ workflowVersion: 'abc' });
     await app.applyFilters();
-    await expect(app.statusRegion).toHaveText('Enter a whole number greater than zero.');
+    await expect(app.statusRegion).toContainText('Correct the refused filter to see results');
+    await expect(app.statusRegion).toContainText('Enter a whole number greater than zero.');
     expect(traffic.requests).toHaveLength(requestsBeforeInvalidVersion);
-    await expect(app.table).toContainText('kyc-reloaded');
+    await expect(app.table).not.toContainText('kyc-reloaded');
 
     expect(traffic.unexpectedRequests).toEqual([]);
   });
