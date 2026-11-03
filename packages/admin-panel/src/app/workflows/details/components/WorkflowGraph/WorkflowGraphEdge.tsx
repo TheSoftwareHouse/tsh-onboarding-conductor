@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactElement } from 'react';
 import { BaseEdge, EdgeLabelRenderer, useViewport, type EdgeProps } from '@xyflow/react';
 import { cn } from '@/lib/cn';
-import { buildEdgePath, findEdgeMidpoint } from '../../utils/workflow-edge-path';
+import { buildEdgePath } from '../../utils/workflow-edge-path';
 import type { WorkflowGraphEdge as WorkflowGraphEdgeModel } from '../../utils/workflow-graph-layout';
 
 /** React Flow's documented classes for a label that takes pointer input without dragging or panning. */
@@ -10,7 +10,7 @@ const REACT_FLOW_INTERACTIVE = 'nodrag nopan';
 /** Space kept between an expanded label and the canvas edge. */
 const CANVAS_MARGIN = 8;
 
-/** One edge, drawn along the polyline dagre routed it down so it stays off the boxes it passes. */
+/** One edge, drawn along its route with rounded corners, its label on its own line. */
 export function WorkflowGraphEdge({
   markerStart,
   markerEnd,
@@ -27,7 +27,7 @@ export function WorkflowGraphEdge({
   const expanded = hovered || focused;
   // Horizontal nudge, in flow units, that keeps an expanded label inside the canvas.
   const [shift, setShift] = useState(0);
-  const anchor = data?.labelPosition ?? (points.length > 0 ? findEdgeMidpoint(points) : null);
+  const anchor = data?.labelPosition ?? null;
 
   // Measured after the expanded styles commit, with no nudge applied, so hover and focus agree.
   useLayoutEffect(() => {
@@ -63,7 +63,7 @@ export function WorkflowGraphEdge({
             tabIndex={0}
             className={cn(
               REACT_FLOW_INTERACTIVE,
-              'absolute bg-bg-subtle px-1 font-mono text-body-2xs/natural',
+              'absolute border border-border-rule bg-bg-page px-1 font-mono text-body-2xs/natural',
               expanded
                 ? 'z-10 max-w-[32ch] overflow-visible whitespace-normal'
                 : 'z-0 max-w-[22ch] truncate whitespace-nowrap',

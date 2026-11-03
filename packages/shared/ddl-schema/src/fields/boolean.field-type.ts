@@ -1,3 +1,4 @@
+import { FIELD_TYPE } from './field-type-names';
 import type { BooleanValidation } from '../workflow-contract';
 import type {
   AnyNormalizedField,
@@ -23,7 +24,7 @@ const isNormalizedBooleanField = (field: AnyNormalizedField): field is Normalize
 const isBooleanValue = (value: unknown): value is boolean => typeof value === 'boolean';
 
 export const booleanFieldTypeDefinition = {
-  type: 'boolean',
+  type: FIELD_TYPE.boolean,
   aliases: [],
   levels: ['root', 'nested', 'arrayItem'],
   // Deliberately no `manyOf`: a boolean multi-selection carries no meaning.

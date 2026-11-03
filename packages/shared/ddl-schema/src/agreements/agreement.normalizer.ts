@@ -1,13 +1,11 @@
 import { isPlainObject } from '../value-guards';
+import { AGREEMENT_KEY_PATTERN } from './agreement-key';
 import type {
   CompiledWorkflowDefinition,
   NormalizedWorkflowAgreementDeclaration,
   NormalizedWorkflowStep,
 } from '../workflow-contract';
 import { failWorkflow } from '../workflow-invalid.error';
-
-/** Lowercase letters, digits and dashes, opening on an alphanumeric — the key is an identifier. */
-const AGREEMENT_KEY_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 /**
  * Normalizes a workflow's `agreements`: the agreement families it collects acceptance for. A

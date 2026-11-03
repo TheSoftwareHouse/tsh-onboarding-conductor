@@ -47,16 +47,22 @@ export const EEA_ID_CARD_ISSUERS = EEA_MEMBER_STATES.filter(
 );
 
 /** Named country lists a step config references instead of spelling the codes out. */
+export const EEA_PRESET = 'eea';
+export const EEA_ID_CARD_ISSUERS_PRESET = 'eea-id-card-issuers';
+
 export const COUNTRY_PRESETS = {
-  eea: EEA_MEMBER_STATES,
-  'eea-id-card-issuers': EEA_ID_CARD_ISSUERS,
+  [EEA_PRESET]: EEA_MEMBER_STATES,
+  [EEA_ID_CARD_ISSUERS_PRESET]: EEA_ID_CARD_ISSUERS,
 } as const satisfies Record<string, readonly string[]>;
 
 export type CountryPresetName = keyof typeof COUNTRY_PRESETS;
 
 export const COUNTRY_PRESET_NAMES = Object.keys(COUNTRY_PRESETS);
 
-const ALPHA_2_PATTERN = /^[A-Z]{2}$/;
+/** The JSON-schema pattern of an ISO alpha-2 country code. */
+export const ALPHA_2_PATTERN = '^[A-Z]{2}$';
+
+const ALPHA_2_REGEX = new RegExp(ALPHA_2_PATTERN);
 
 /**
  * Resolves a config's country declaration: a preset name, or an explicit alpha-2 list for a market
@@ -72,7 +78,7 @@ export const resolveCountryList = (declared: unknown, fail: FailWorkflow): reado
   }
 
   for (const code of declared as readonly unknown[]) {
-    if (typeof code !== 'string' || !ALPHA_2_PATTERN.test(code)) {
+    if (typeof code !== 'string' || !ALPHA_2_REGEX.test(code)) {
       fail('INVALID_VALUE');
     }
   }

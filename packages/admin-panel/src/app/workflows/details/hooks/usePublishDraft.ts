@@ -13,6 +13,7 @@ import { describeDraftError } from '../../utils/describe-draft-error';
 export function usePublishDraft(
   workflowId: string,
   version: number,
+  onWritten?: () => void,
 ): UseMutationResult<WorkflowPublication, ApiError, void> {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -36,6 +37,7 @@ export function usePublishDraft(
     onSuccess: () => {
       isPublished.current = true;
       showSuccessToast(`Version ${version} published.`);
+      onWritten?.();
       void navigate(`${ADMIN_ROUTES.workflows.details(workflowId)}?version=${version}`, {
         replace: true,
       });

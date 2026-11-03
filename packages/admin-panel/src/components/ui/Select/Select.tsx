@@ -14,12 +14,18 @@ export interface SelectProps<Value extends string> {
   onValueChange: (value: Value) => void;
   /** Names the control when no visible label points at `id`. */
   'aria-label'?: string;
+  'aria-invalid'?: boolean;
+  'aria-describedby'?: string;
   id?: string;
   name?: string;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
 }
+
+/** The trigger's look, shared with other select-styled triggers. */
+export const selectTriggerClassName =
+  'flex h-10 w-full items-center justify-between gap-2 rounded-none border border-border-strong bg-tsh-white px-3 text-left font-mono text-mono text-tsh-black enabled:hover:border-tsh-black disabled:bg-bg-subtle disabled:text-fg-disabled aria-invalid:border-tsh-red';
 
 /** Controlled Base UI select, styled like the panel's native select (`h-10`, mono text). */
 export function Select<Value extends string>({
@@ -43,10 +49,9 @@ export function Select<Value extends string>({
     >
       <BaseSelect.Trigger
         aria-label={rest['aria-label']}
-        className={cn(
-          'flex h-10 w-full items-center justify-between gap-2 rounded-none border border-border-strong bg-tsh-white px-3 text-left font-mono text-mono text-tsh-black enabled:hover:border-tsh-black disabled:bg-bg-subtle disabled:text-fg-disabled',
-          className,
-        )}
+        aria-invalid={rest['aria-invalid']}
+        aria-describedby={rest['aria-describedby']}
+        className={cn(selectTriggerClassName, className)}
       >
         <BaseSelect.Value
           placeholder={placeholder}

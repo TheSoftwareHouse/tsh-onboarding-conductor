@@ -1,3 +1,4 @@
+import { FIELD_TYPE } from './field-type-names';
 import { isInteger } from '../value-guards';
 import type { DateValidation } from '../workflow-contract';
 import type {
@@ -96,7 +97,7 @@ const applyAgeBounds = (
 };
 
 export const dateFieldTypeDefinition = {
-  type: 'date',
+  type: FIELD_TYPE.date,
   aliases: [],
   levels: ['root', 'nested', 'arrayItem'],
   dataKeywords: ageKeywords,

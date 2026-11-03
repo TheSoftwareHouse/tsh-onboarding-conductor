@@ -10,6 +10,7 @@ import {
   type Viewport,
 } from '@xyflow/react';
 import type { WorkflowDefinition } from '@/api/workflows/workflow-definitions';
+import { MIN_ZOOM } from '../../constants/graph-zoom';
 import { useWorkflowGraphStore } from '../../stores/workflow-graph-store';
 import {
   ARROW_MARKER_ID,
@@ -19,8 +20,12 @@ import {
 } from '../../utils/workflow-graph-layout';
 import { WorkflowGraphEdge } from './WorkflowGraphEdge';
 import { WorkflowGraphNode } from './WorkflowGraphNode';
+import { WorkflowGroupNode } from './WorkflowGroupNode';
 import { WorkflowZoomControls } from './WorkflowZoomControls';
-import type { WorkflowStepNode } from '../../utils/workflow-graph-layout';
+import type {
+  WorkflowGroupNode as WorkflowGroupNodeType,
+  WorkflowStepNode,
+} from '../../utils/workflow-graph-layout';
 
 export interface WorkflowGraphProps {
   definition: WorkflowDefinition;
@@ -28,7 +33,7 @@ export interface WorkflowGraphProps {
   onSelectStep: (name: string) => void;
 }
 
-const NODE_TYPES: NodeTypes = { workflowStep: WorkflowGraphNode };
+const NODE_TYPES: NodeTypes = { workflowStep: WorkflowGraphNode, workflowGroup: WorkflowGroupNode };
 const EDGE_TYPES: EdgeTypes = { workflowTransition: WorkflowGraphEdge };
 
 /** Gap between the canvas's top edge and the initial step on open. */
@@ -59,9 +64,13 @@ export function WorkflowGraph({
     return () => setGraph([], []);
   }, [graph, setGraph]);
 
+  // Group frames first, so they paint under the steps they enclose.
   const nodes = useMemo(
-    () => storeNodes.map((node) => ({ ...node, selected: node.id === selectedStep })),
-    [storeNodes, selectedStep],
+    () => [
+      ...graph.groups,
+      ...storeNodes.map((node) => ({ ...node, selected: node.id === selectedStep })),
+    ],
+    [graph.groups, storeNodes, selectedStep],
   );
 
   const { setViewport } = useReactFlow();
@@ -100,21 +109,27 @@ export function WorkflowGraph({
   }, []);
 
   const handleNodesChange = useCallback(
-    (changes: NodeChange<WorkflowStepNode>[]) => {
+    (changes: NodeChange<WorkflowStepNode | WorkflowGroupNodeType>[]) => {
       for (const change of changes) {
         if (change.type === 'select' && change.selected && change.id !== selectedStep) {
           interacted.current = true;
           onSelectStep(change.id);
         }
       }
-      onNodesChange(changes.filter((change) => change.type !== 'select'));
+      // Group frames live in the layout, not the store, so their measurements are dropped here.
+      const groupIds = new Set(graph.groups.map((group) => group.id));
+      onNodesChange(
+        changes.filter(
+          (change) => change.type !== 'select' && !('id' in change && groupIds.has(change.id)),
+        ) as NodeChange<WorkflowStepNode>[],
+      );
     },
-    [selectedStep, onSelectStep, onNodesChange],
+    [selectedStep, onSelectStep, onNodesChange, graph.groups],
   );
 
   return (
     // React Flow has no natural height, so this box and its `.react-flow` root both need one.
-    <div className="min-h-0 w-full flex-auto [&_.react-flow]:size-full [&_.react-flow__handle]:invisible">
+    <div className="min-h-0 w-full flex-auto [&_.react-flow]:size-full">
       <svg aria-hidden="true" className="absolute size-0">
         <defs>
           <marker
@@ -153,7 +168,7 @@ export function WorkflowGraph({
         elementsSelectable
         onInit={openAtInitialStep}
         onMove={handleMove}
-        minZoom={0.1}
+        minZoom={MIN_ZOOM}
       >
         <Panel position="top-right">
           <WorkflowZoomControls />

@@ -3,10 +3,10 @@
 `validateAndNormalizeWorkflow` compiles the authored document and then validates what it produced,
 so a failure comes from one of two phases and they fail differently:
 
-| Phase        | What runs                                                                                                                                                    | What you get                                                                             |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| **Authored** | the workflow JSON Schema derived from the step-type registry, then `compileWorkflow` — config parsing, `include`, `substeps`, `edges`, each type's `compile` | a reason **and a `path`**, `steps[3].config.documents[1]`, `steps[0].edges.success`      |
-| **Compiled** | the compiled schema and the structural rules of §2 over the steps the types produced                                                                         | a reason, usually **no path** — a semantic invariant does not know where it was violated |
+| Phase        | What runs                                                                                                                                                    | What you get                                                                                                                                                                            |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Authored** | the workflow JSON Schema derived from the step-type registry, then `compileWorkflow` — config parsing, `include`, `substeps`, `edges`, each type's `compile` | a reason **and a `path`**, `steps[3].config.documents[1]`, `steps[0].edges.success`                                                                                                     |
+| **Compiled** | the compiled schema and the structural rules of §2 over the steps the types produced                                                                         | a reason and, for a rule checked inside one step (its connectors' field mappings, conditions, transitions, scoring), that step as `steps[i]`; a rule spanning steps carries **no path** |
 
 `pnpm workflow:compile <file>` prints `WORKFLOW_INVALID <REASON> at <path>` and exits 1, which is
 the fastest way to read both. `pnpm workflow:validate` reports the same reason.
@@ -15,7 +15,7 @@ A path indexes the **authored** document. A compiled-phase failure that carries 
 restated as the authored step whose type produced the offending compiled step — a `steps[k]` that
 indexes compiled steps never reaches you.
 
-## Localizing a failure that carries no path
+## Localizing a failure that carries no path, or only a step
 
 1. **Diff against the definition you copied.** The offending declaration is almost always inside it.
 2. **Read the compiled form.** `pnpm workflow:compile <file> --report` shows each step's

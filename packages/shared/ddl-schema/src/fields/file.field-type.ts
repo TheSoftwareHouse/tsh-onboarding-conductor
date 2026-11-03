@@ -1,3 +1,4 @@
+import { FIELD_TYPE } from './field-type-names';
 import { isInteger } from '../value-guards';
 import type { FileValidation, NormalizedWorkflowField } from '../workflow-contract';
 import type {
@@ -26,7 +27,7 @@ const normalizeContentTypes = (validation: Record<string, unknown>): string[] =>
   );
 
 export const fileFieldTypeDefinition = {
-  type: 'file',
+  type: FIELD_TYPE.file,
   aliases: [],
   levels: ['root'],
   maxOccurrencesPerStep: 1,
