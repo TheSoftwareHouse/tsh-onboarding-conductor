@@ -121,8 +121,9 @@ describe('ConnectorsPage', () => {
     renderPage();
 
     expect(screen.getByRole('status')).toHaveTextContent('Loading connectors…');
-    // A list nobody has read yet is not an empty list.
-    expect(screen.queryByText('No connectors are configurable.')).not.toBeInTheDocument();
+    // A list nobody has read yet is not an empty list, and has no summary yet.
+    expect(screen.queryByText('No connectors are configurable')).not.toBeInTheDocument();
+    expect(screen.queryByText(/adapters? discovered/)).not.toBeInTheDocument();
   });
 
   it('renders no connector-type nav while the list is loading', () => {
@@ -199,19 +200,47 @@ describe('ConnectorsPage', () => {
 
     renderPage();
 
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load connectors: Request failed with status 500.',
-      );
-    });
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Unable to load connectors');
+    expect(alert).toHaveTextContent('Request failed with status 500.');
+    expect(screen.queryByText(/adapters? discovered/)).not.toBeInTheDocument();
     // The point of the test: a failed read must not be reported as "there are none".
-    expect(screen.queryByText('No connectors are configurable.')).not.toBeInTheDocument();
+    expect(screen.queryByText('No connectors are configurable')).not.toBeInTheDocument();
+  });
+
+  it('retries a failed request from the failure state', async () => {
+    mockedFetchConnectors.mockRejectedValueOnce(
+      new ApiError('Request failed with status 500.', { status: 500 }),
+    );
+    renderPage();
+    await screen.findByRole('alert');
+    mockedFetchConnectors.mockResolvedValueOnce([createConnector()]);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('1 adapter discovered · 0 configured')).toBeInTheDocument();
+    expect(mockedFetchConnectors).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows a no-access state without a Retry for a 403', async () => {
+    mockedFetchConnectors.mockRejectedValueOnce(
+      new ApiError('Your role may not read this.', { status: 403 }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No access to connectors');
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
   });
 
   it('says so when the engine reports no configurable connectors at all', async () => {
     await renderReady([]);
 
-    expect(screen.getByText('No connectors are configurable.')).toBeInTheDocument();
+    expect(screen.getAllByRole('status')[1]).toHaveTextContent(
+      'No connectors are configurable' +
+        'The engine discovered no connector adapters when it started.',
+    );
+    expect(screen.getByText('0 adapters discovered · 0 configured')).toBeInTheDocument();
   });
 
   it('renders no connector-type nav after a failed request', async () => {
@@ -221,11 +250,10 @@ describe('ConnectorsPage', () => {
 
     renderPage();
 
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load connectors: Request failed with status 500.',
-      );
-    });
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Unable to load connectors');
+    expect(alert).toHaveTextContent('Request failed with status 500.');
+    expect(screen.queryByText(/adapters? discovered/)).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Connector type' })).not.toBeInTheDocument();
     expect(screen.queryByText('Not implemented')).not.toBeInTheDocument();
   });

@@ -1,18 +1,14 @@
 import type { ReactElement } from 'react';
 import type { AuditEvent } from '@/api/audit/audit-events';
-import { Table, TableEmptyRow, Th } from '@/components/ui/DataTable/DataTable';
+import { Table, Th } from '@/components/ui/DataTable/DataTable';
 import { AuditTableRow } from './AuditTableRow/AuditTableRow';
 
-const TABLE_COLUMN_COUNT = 6;
-
 export interface AuditTableProps {
-  showTable: boolean;
   events: AuditEvent[];
-  emptyMessage: string;
 }
 
 /**
- * Renders the semantic results table: caption, column headers, empty-state row, or data rows.
+ * Renders the semantic results table: caption, column headers and data rows.
  *
  * The layout is fixed rather than auto because metadata is the one column whose content changes
  * shape per action — a webhook payload is orders of magnitude wider than `method: GET` — and under
@@ -20,7 +16,7 @@ export interface AuditTableProps {
  * page. `colgroup` sizes the five predictable columns once and metadata takes what is left; the
  * `min-w` keeps those widths intact on a narrow viewport, where `TableSurface` scrolls instead.
  */
-export function AuditTable({ showTable, events, emptyMessage }: AuditTableProps): ReactElement {
+export function AuditTable({ events }: AuditTableProps): ReactElement {
   return (
     <Table caption="Audit events matching the current filters" className="min-w-344 table-fixed">
       <colgroup>
@@ -42,10 +38,9 @@ export function AuditTable({ showTable, events, emptyMessage }: AuditTableProps)
         </tr>
       </thead>
       <tbody>
-        {showTable && events.length === 0 && (
-          <TableEmptyRow colSpan={TABLE_COLUMN_COUNT}>{emptyMessage}</TableEmptyRow>
-        )}
-        {showTable && events.map((event) => <AuditTableRow key={event.id} event={event} />)}
+        {events.map((event) => (
+          <AuditTableRow key={event.id} event={event} />
+        ))}
       </tbody>
     </Table>
   );

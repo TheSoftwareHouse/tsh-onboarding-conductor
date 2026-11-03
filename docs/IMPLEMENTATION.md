@@ -3190,6 +3190,26 @@ cost a 4 MB variable woff2 for a handful of glyphs, and the design's Google Font
 by the same no-CDN rule as the webfonts in
 `src/app/fonts.css`.
 
+Every read's loading, failure and empty state goes through the state kit in `src/components/ui/`
+([0052](decisions/0052-admin-panel-state-kit.md)), never a bare `StatusRegion` line. `Loader` is a
+spinner, `block` (32 px, centred in its container) or `inline` beside a visible label; it fades in
+after 150 ms and has no minimum display time, and its label is announced at once. `EmptyState`
+(`empty`, `noMatch`) and `ErrorState` (`error`, `notFound`, `denied`) draw one `page` or `section`
+layout through the private `StateLayout`; `page` is centred on both axes in a flex-column container
+and has an `h2` title, `section` is a bordered in-flow row with an `h3`. `EmptyState` and `ErrorState`'s `notFound`
+are `role="status"`, the other `ErrorState` kinds `role="alert"`, so one live region announces each state. `LoadFailure` maps an `ApiError` onto an `ErrorState`: 403 is
+`denied` ("No access to …"), 404 is `notFound` when the caller gives its copy, everything else,
+a 401 included, is `error` ("Unable to load …") with **Retry** when `onRetry` is passed. A table
+keeps its column headers in every state: `TableResults` takes a `state` that renders under them in
+place of the rows and the footer (count and pager), so the footer appears only with rows. Headers,
+tabs and filters stay on screen while a page loads, and the filters are disabled. Only a part
+fetched separately has its own state: the activity log a `section`, a workflow version's tab content a `page` that fills the tab; data fetched together loads as one Loader. Connectors and Encryption show a block `Loader` or
+a `LoadFailure` page with Retry, and their header summary renders only once loaded; an empty
+adapter list is an `EmptyState` page, an empty key list an `EmptyState` section. Workflow details
+shows only the id in its header while the versions list loads, then a block `Loader`, a `notFound`
+page with a **Back to workflows** link, or a `LoadFailure` page; a version that does not exist or a
+workflow with no published version is a `page` message. `section` is only for a part nested in a page whose other parts stay usable.
+
 The Onboardings section is five bands: the header, a status tab strip, the filter panel, the
 scrolling table, and a footer carrying the live status line and the pager. Status is a strip of
 links rather than a dropdown, one per entry in `ADMIN_ONBOARDING_STATUSES` plus **All**, each
@@ -3348,13 +3368,15 @@ value formatter in `src/lib/audit-metadata.ts`, which the Logs table's `AuditMet
 from too. The status
 chip is shared the same way rather than by a second tone map: `OnboardingStatusChip` moved out of
 the list's table row into `app/onboardings/components/`, and the details header renders it at
-`size="status"`. The page's status line (`StatusRegion`, inside the header band) reports only what
-is
-happening to the page and what could not be read — loading, a failed read, an id matching
-nothing — and renders not at all once the page is read: what the page holds, each band states
-itself, including the caveat that the trail was truncated, which is the "Path taken" caption
-rather than a status line of its own. A review decision's outcome is a toast (Toasts, below); the
-status line never carries it. There is no Collected-data
+`size="status"`. The header band has no status line: the breadcrumb, the id and Reload stay on screen,
+and the body shows a block `Loader` ("Loading onboarding…"), a `LoadFailure` page with Retry, or
+an `ErrorState` `notFound` ("Onboarding not found") with a **Back to onboardings** link when the id
+matches nothing. `useAdminOnboardingDetails` returns the `ApiError` itself. The activity log
+loads and fails on its own: an inline `Loader` ("Loading activity…"), a `LoadFailure` section
+whose body adds "The rest of this onboarding is up to date." with Retry, and an `EmptyState`
+section ("No activity yet"). What the page holds, each band states
+itself, including the caveat that the trail was truncated, which is the "Path taken" caption.
+A review decision's outcome is a toast (Toasts, below). There is no Collected-data
 tab: `GET /v1/onboardings/{id}` returns the record without its collected data, so the design's PII
 sections have nothing to read from. The page draws no workflow graph; `WorkflowGraph` now lives in
 `src/app/workflows/details/` and renders on the workflow details page (Workflows, below).
@@ -3463,10 +3485,11 @@ from the URL when `VITE_NODE_ENV` is `production`, since that engine never loads
 unpublished draft**); `search`, `scope`, `hasDraft` and `page` are committed to the URL by
 `useWorkflowsFilters`, the section's own nuqs call. The page size is fixed at 20 with no page-size
 field and no `limit` param, unlike Onboardings and Logs. Applying an unchanged filter set does not
-refetch; Reload calls `refetch()` explicitly. The status line reads "Showing {from}–{to} of {total}
-workflows.", narrows to "No workflows match "{search}"." or "No workflows match these filters."
-under a search or any other applied criterion, and "No workflows loaded." with nothing applied at
-all.
+refetch; Reload calls `refetch()` explicitly. With rows the footer reads "Showing {from}–{to} of
+{total} workflows."; otherwise the table's `state` shows a block `Loader`, a `LoadFailure` with
+Retry, `EmptyState` `empty` ("No workflows yet", with a **New draft** action), or `noMatch`
+("No workflows match "{search}"" under a search, "No workflows match these filters" under any
+other criterion) with **Reset filters**.
 
 A row's **Workflow** cell links the mono `workflowId` to the details placeholder, with `name`
 underneath when the family has one; **Scope** is plain mono text; **Serving** reads a mono "vN" or a muted "Not
@@ -3529,8 +3552,7 @@ the stored document in a read-only `JsonEditor` (`components/JsonEditor.tsx`, sh
 editor; read-only is CodeMirror's `EditorState.readOnly`, so Backspace and Delete change nothing), with
 a **Copy JSON** button that toasts "JSON copied." or the clipboard's failure, including a missing
 `navigator.clipboard` outside a secure context. While the unpinned
-definition is still loading the JSON tab shows "Loading version…", and a failure of that read the Compiled graph tab's failure
-with Retry. App-wide, the `--font-display` and `--font-body` stacks in
+definition is still loading the JSON tab shows a block `Loader` ("Loading version…"), and a failure of that read shows a `LoadFailure` page with Retry, as on the Compiled graph tab. App-wide, the `--font-display` and `--font-body` stacks in
 `tailwind.css` name `Inter Tight Variable` ahead of `Inter Tight`, the family the self-hosted
 variable font registers. The inspector beside it shows the selected step's fields,
 connectors (identity and field mapping) and outgoing transitions. The inspector omits connector
@@ -3648,8 +3670,8 @@ Authored graph | Compiled graph | JSON `VersionTabs`, defaulting to Authored gra
 panel kept mounted while hidden so the editor's undo history survives.
 The page's `detail` query is disabled while the pinned status is `draft` or still unknown behind a
 loading versions list, so an invalid draft is never compiled for the page. `DraftEditor` reads
-`workflowQueries.document` and handles pending, error with Retry and 404 ("This draft no longer
-exists."). A document whose `status` is no longer `draft` (published or retired after the versions
+`workflowQueries.document` and handles pending ("Loading draft…"), a `LoadFailure` page with Retry and 404 (an `ErrorState` `notFound`
+page, "This draft no longer exists"). A document whose `status` is no longer `draft` (published or retired after the versions
 list was read) opens no editor: it says so and invalidates `workflowQueries.versions`, and the
 refetched list moves the page to the read-only tabs. The text is edited in `JsonEditor`, CodeMirror 6
 (`codemirror` `basicSetup`, `@codemirror/lang-json` with `jsonParseLinter`, `@codemirror/lint`),
@@ -3698,9 +3720,9 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
   `StepConnectors` gets `readOnly`, so no connector `<select>` or Restore button is
   offered, since a selection binds published versions, never the draft's text; the
   header reads "Read-only here — edit the draft, connectors included, on the JSON tab". It never compiles while typing: when the tab
-  opens with no result held it runs the same compile as Validate, and shows "Compiling…" meanwhile;
-  a syntax error or an engine refusal shows "This draft does not compile. Fix it on the JSON tab."
-  with a Show JSON button, while a failed request (auth, network, 5xx) shows "Unable to compile
+  opens with no result held it runs the same compile as Validate, and shows a block `Loader` ("Compiling…") meanwhile;
+  a syntax error or an engine refusal shows an `ErrorState` page ("The canvas cannot draw this
+  document", the reason, then "Fix it in the JSON tab.") with an **Open JSON tab** button, while a failed request (auth, network, 5xx) shows "Unable to compile
   this draft" with a Retry that drops the held failure and compiles again. The result is shared with Validate, Publish and `ValidationResult`, kept
   only while the text is unchanged, so an edit or Discard clears it and drops a compile still in
   flight. The graph is never stored
@@ -3717,8 +3739,8 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
 its own: every edit hands the whole next document to `onChange`. `DraftCanvas` parses the editor's text
 (`parseDocument`), passes `doc`, `readOnly={false}`, `failure` and the undo and redo props, and writes
 each change back as `JSON.stringify(next, null, 2)` into the same text the JSON tab edits, so Save,
-Validate and Discard need nothing new. Text that is not a document shows "Fix the JSON to see the
-canvas" instead.
+Validate and Discard need nothing new. Text that is not a document shows an ErrorState page titled "The canvas cannot draw this
+document", its body the reason followed by " Fix it in the JSON tab." instead.
 
 - **Mapping.** A node is an authored step, an edge a wired port (`edges.<port>`, or a condition arm
   or transition). A step's position is `meta.position` (`{ x, y }`, snapped to an 8 px grid);
@@ -4073,8 +4095,8 @@ Decisions worth keeping:
   Base UI's real timer: it pauses on hover, on focus and when the window loses focus, and a toast
   reappearing from behind the 3-toast limit resumes from its remaining time rather than a fresh
   bar; under reduced motion the bar is a static full bar. **Not a toast:** loading, a fetch error
-  and the connector count line (or, on the Encryption page, `summarize(state)`) stay in their
-  `StatusRegion`; a rejected connector setting stays inline under its field. The Connectors header
+  and an empty read go through the state kit (above); the connector count line (or, on the Encryption page,
+  `summarize(state)`) stays in its `StatusRegion`, shown once loaded; a rejected connector setting stays inline under its field. The Connectors header
   and the details page header no longer show a write's outcome as text — `ConnectorsPage`'s former
   `actionMessage` and the details page's `reviewError` status branch are gone, not merely unused;
   the Encryption page's own `actionMessage` is gone the same way.

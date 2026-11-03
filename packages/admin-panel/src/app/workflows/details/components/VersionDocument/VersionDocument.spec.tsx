@@ -118,7 +118,10 @@ describe('VersionDocument', () => {
     mockedFetch.mockResolvedValue(stored());
     renderDocument();
 
-    expect(await screen.findByText(/Unable to load the document: boom/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Unable to load the document' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('boom')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
     expect(

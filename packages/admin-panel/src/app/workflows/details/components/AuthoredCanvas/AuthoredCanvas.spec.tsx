@@ -131,8 +131,8 @@ describe('CanvasErrorBoundary', () => {
       </CanvasErrorBoundary>,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'The canvas cannot draw this document: cannot project. Fix it in the JSON tab.',
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'The canvas cannot draw this document' + 'cannot project. Fix it in the JSON tab.',
     );
 
     rerender(

@@ -289,38 +289,33 @@ describe('OnboardingDetailsPage', () => {
     expect(mockedFetchTransitions).toHaveBeenCalledWith(ONBOARDING_ID);
   });
 
-  it('renders the status line inside the header band rather than as a band of its own', () => {
+  it('keeps the header on screen and shows one loader in the body while the reads are pending', () => {
     mockedFetchOnboarding.mockReturnValue(new Promise(() => {}));
     mockedFetchTransitions.mockReturnValue(new Promise(() => {}));
 
     renderPage();
 
-    const header = screen.getByRole('status').closest('header');
-    expect(header).not.toBeNull();
-    expect(within(header as HTMLElement).getByRole('heading', { level: 1 })).toBeInTheDocument();
+    const header = screen.getByRole('banner');
+    expect(within(header).getByRole('heading', { level: 1 })).toBeInTheDocument();
+    expect(within(header).queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading onboarding…');
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
+    expect(screen.queryByRole('heading', { name: 'Path taken' })).not.toBeInTheDocument();
   });
 
-  it('reports nothing once the page is read, leaving each band to describe what it holds', async () => {
+  it('drops the loader and puts no status line in the header once the page is read', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY);
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
 
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Path taken' })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    });
-  });
-
-  it('shows a loading status and an inert Reload while the reads are pending', () => {
-    mockedFetchOnboarding.mockReturnValue(new Promise(() => {}));
-    mockedFetchTransitions.mockReturnValue(new Promise(() => {}));
-
-    renderPage();
-
-    expect(screen.getByRole('status')).toHaveTextContent('Loading onboarding…');
-    expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
-    expect(screen.queryByRole('heading', { name: 'Path taken' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading onboarding…')).not.toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole('heading', { level: 1 }).closest('header') as HTMLElement,
+      ).queryByRole('status'),
+    ).not.toBeInTheDocument();
   });
 
   it('defaults to the History tab, showing the path taken', async () => {
@@ -407,9 +402,14 @@ describe('OnboardingDetailsPage', () => {
 
     renderPage();
 
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('No onboarding matches this ID.');
-    });
+    expect(
+      await screen.findByRole('heading', { name: 'Onboarding not found' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('No onboarding matches this ID.');
+    expect(screen.getByRole('link', { name: 'Back to onboardings' })).toHaveAttribute(
+      'href',
+      '/onboardings',
+    );
     expect(screen.queryByRole('heading', { name: 'Path taken' })).not.toBeInTheDocument();
   });
 
@@ -418,9 +418,9 @@ describe('OnboardingDetailsPage', () => {
     mockedFetchTransitions.mockResolvedValue(trail([]));
 
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('No onboarding matches this ID.');
-    });
+    expect(
+      await screen.findByRole('heading', { name: 'Onboarding not found' }),
+    ).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
 
@@ -450,16 +450,36 @@ describe('OnboardingDetailsPage', () => {
     ).toBeInTheDocument();
   });
 
-  it('surfaces the failure message when a read is refused', async () => {
-    mockedFetchOnboarding.mockRejectedValue(new Error('Request failed with status 403.'));
+  it('shows the no-access state, without Retry, when a read is refused', async () => {
+    mockedFetchOnboarding.mockRejectedValue(
+      new ApiError('Request failed with status 403.', { status: 403 }),
+    );
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
 
     renderPage();
 
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('No access to onboarding');
+    expect(alert).toHaveTextContent('Request failed with status 403.');
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  });
+
+  it('shows the failure with Retry, which reloads the page reads', async () => {
+    mockedFetchOnboarding.mockRejectedValue(
+      new ApiError('Request failed with status 500.', { status: 500 }),
+    );
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+
+    renderPage();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Unable to load onboarding');
+    expect(alert).toHaveTextContent('Request failed with status 500.');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load onboarding: Request failed with status 403.',
-      );
+      expect(mockedFetchOnboarding).toHaveBeenCalledTimes(2);
     });
   });
 

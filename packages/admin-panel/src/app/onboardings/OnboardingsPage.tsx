@@ -1,11 +1,13 @@
-import type { FormEvent, ReactElement } from 'react';
+import type { FormEvent, ReactElement, ReactNode } from 'react';
 import { useState } from 'react';
 import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
-import type { ApiError } from '@/services/api/api-error';
 import type { AdminPageProps } from '@/lib/admin-page';
 import { Button } from '@/components/ui/Button/Button';
+import { EmptyState } from '@/components/ui/EmptyState/EmptyState';
 import { Download } from '@/components/ui/icons';
+import { Loader } from '@/components/ui/Loader/Loader';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
+import { LoadFailure } from '@/components/ui/LoadFailure/LoadFailure';
 import {
   countActiveAdminOnboardingFilters,
   DEFAULT_ADMIN_ONBOARDING_FILTERS,
@@ -20,10 +22,6 @@ import { useOnboardingsExport } from './hooks/useOnboardingsExport';
 import { OnboardingFilters } from './components/OnboardingFilters';
 import { OnboardingResults } from './components/OnboardingResults/OnboardingResults';
 import { OnboardingStatusTabs } from './components/OnboardingStatusTabs/OnboardingStatusTabs';
-
-function describeFetchError(error: ApiError): string {
-  return `Unable to load onboardings: ${error.message}`;
-}
 
 /** Everything the operator drafts in the controls, which is the committed set minus `status`. */
 function toDraftFilters(filters: AdminOnboardingFilters): AdminOnboardingDraftFilters {
@@ -118,33 +116,43 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
   const exportCount = pagination?.total ?? null;
 
   const disabled = phase === 'loading';
-  const showTable = phase === 'ready';
   const appliedCount = countActiveAdminOnboardingFilters(appliedSearchValues);
   const appliedFilterActive = appliedCount > 0;
 
-  let statusMessage: string;
+  let state: ReactNode;
+  let statusMessage: string | null = null;
   let visibleRecords: AdminOnboardingSummary[] = [];
-  let emptyMessage = '';
 
   if (phase === 'loading') {
-    statusMessage = 'Loading onboardings…';
+    state = <Loader label="Loading onboardings…" />;
   } else if (phase === 'error') {
-    statusMessage = error ? describeFetchError(error) : 'Unable to load onboardings.';
+    state = <LoadFailure error={error} subject="onboardings" onRetry={handleReload} />;
   } else if (draftError !== null) {
-    statusMessage = draftError.message;
-    if (records.length === 0) {
-      emptyMessage = 'Correct the refused filter to see results.';
-    } else {
-      visibleRecords = records;
-    }
+    state = (
+      <EmptyState
+        kind="noMatch"
+        title="Correct the refused filter to see results"
+        body={draftError.message}
+      />
+    );
   } else if (records.length === 0 || pagination === null) {
-    if (appliedFilterActive) {
-      statusMessage = 'No onboardings match the current filters.';
-      emptyMessage = 'No onboardings match the current filters.';
-    } else {
-      statusMessage = 'No onboardings were returned.';
-      emptyMessage = 'No onboardings were returned.';
-    }
+    state = appliedFilterActive ? (
+      <EmptyState
+        kind="noMatch"
+        title="No onboardings match the current filters"
+        body="Change or reset the filters to see more."
+        actions={
+          <Button variant="primary" size="lg" onClick={handleReset}>
+            Reset filters
+          </Button>
+        }
+      />
+    ) : (
+      <EmptyState
+        title="No onboardings yet"
+        body="Onboardings appear here once an applicant starts a workflow."
+      />
+    );
   } else {
     statusMessage = `Showing ${records.length} of ${pagination.total} onboardings (page ${pagination.page} of ${pagination.totalPages}).`;
     visibleRecords = records;
@@ -180,9 +188,8 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
       />
       <OnboardingResults
         statusMessage={statusMessage}
-        showTable={showTable}
+        state={state}
         visibleRecords={visibleRecords}
-        emptyMessage={emptyMessage}
         pagination={pagination}
         paginationDisabled={disabled}
         onPageChange={goToPage}

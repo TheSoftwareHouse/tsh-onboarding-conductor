@@ -4,6 +4,7 @@ import { onboardingQueries } from '@/api/onboardings/onboarding-queries';
 import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
 import type { OnboardingTransition } from '@/api/onboardings/onboarding-transitions';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
+import type { ApiError } from '@/services/api/api-error';
 import type {
   WorkflowDefinition,
   WorkflowScoreDefinition,
@@ -34,8 +35,8 @@ export interface UseAdminOnboardingDetailsResult {
   scores: OnboardingScoreView[];
   /** True when the trail holds more moves than one request reads, so the chain starts mid-journey. */
   transitionsTruncated: boolean;
-  /** Message of the first failed read, or null while nothing has failed. */
-  error: string | null;
+  /** The first failed read, or null while nothing has failed. */
+  error: ApiError | null;
   refetch: () => void;
 }
 
@@ -95,7 +96,7 @@ export function useAdminOnboardingDetails(onboardingId: string): UseAdminOnboard
     definition: isFetching || isError || definitionQuery.isFetching ? null : definition,
     scores: isFetching || isError ? NO_SCORES : scores,
     transitionsTruncated: transitionsQuery.data?.truncated ?? false,
-    error: (summaryQuery.error ?? transitionsQuery.error)?.message ?? null,
+    error: summaryQuery.error ?? transitionsQuery.error,
     refetch,
   };
 }

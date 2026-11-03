@@ -1,5 +1,7 @@
 import type { ReactElement } from 'react';
 import type { AdminPageProps } from '@/lib/admin-page';
+import { LoadFailure } from '@/components/ui/LoadFailure/LoadFailure';
+import { Loader } from '@/components/ui/Loader/Loader';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
 import {
@@ -50,8 +52,17 @@ function summarize(state: EncryptionState): string {
  * screen; it uses the Tailwind primitives the other sections are built from.
  */
 export function EncryptionPage({ eyebrow, title }: AdminPageProps): ReactElement {
-  const { phase, state, error, pendingAction, setEnabled, setRotationInterval, addKey, reencrypt } =
-    useEncryption();
+  const {
+    phase,
+    state,
+    error,
+    refetch,
+    pendingAction,
+    setEnabled,
+    setRotationInterval,
+    addKey,
+    reencrypt,
+  } = useEncryption();
   const { notifyPending } = useSettledChangeToast(state);
 
   async function handleToggle(enabled: boolean): Promise<void> {
@@ -100,27 +111,19 @@ export function EncryptionPage({ eyebrow, title }: AdminPageProps): ReactElement
     }
   }
 
-  let statusMessage: string;
-
-  if (phase === 'loading') {
-    statusMessage = 'Loading encryption settings…';
-  } else if (phase === 'error') {
-    statusMessage = error
-      ? `Unable to load encryption settings: ${error.message}`
-      : 'Unable to load encryption settings.';
-  } else {
-    statusMessage = state ? summarize(state) : 'Encryption settings loaded.';
-  }
-
   const ready = phase === 'ready' && state !== null;
   const writePending = pendingAction !== null;
 
   return (
     <>
       <PageHeader eyebrow={eyebrow} title={title}>
-        <StatusRegion>{statusMessage}</StatusRegion>
+        {ready && <StatusRegion>{summarize(state)}</StatusRegion>}
       </PageHeader>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-8">
+        {phase === 'loading' && <Loader label="Loading encryption settings…" />}
+        {phase === 'error' && (
+          <LoadFailure error={error} subject="encryption settings" onRetry={refetch} />
+        )}
         {ready && (
           <>
             <EncryptionStatus state={state} />

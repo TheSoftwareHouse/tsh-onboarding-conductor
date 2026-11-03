@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TableResults } from './TableResults';
 import type { PaginationWindow } from '@/lib/pagination';
@@ -19,7 +19,6 @@ describe('TableResults', () => {
         statusMessage="Showing 20 of 41 onboardings"
         regionLabel="Onboardings results"
         paginationLabel="Onboarding pages"
-        showTable
         pagination={pagination()}
         paginationDisabled={false}
         onPageChange={vi.fn()}
@@ -38,7 +37,6 @@ describe('TableResults', () => {
         statusMessage="Showing 20 of 41 onboardings"
         regionLabel="Onboardings results"
         paginationLabel="Onboarding pages"
-        showTable
         pagination={pagination()}
         paginationDisabled={false}
         onPageChange={vi.fn()}
@@ -56,7 +54,6 @@ describe('TableResults', () => {
         statusMessage="Loading…"
         regionLabel="Onboardings results"
         paginationLabel="Onboarding pages"
-        showTable={false}
         pagination={null}
         paginationDisabled
         onPageChange={vi.fn()}
@@ -74,7 +71,6 @@ describe('TableResults', () => {
         statusMessage="No results"
         regionLabel="Onboardings results"
         paginationLabel="Onboarding pages"
-        showTable
         pagination={pagination({ totalPages: 0 })}
         paginationDisabled={false}
         onPageChange={vi.fn()}
@@ -83,6 +79,47 @@ describe('TableResults', () => {
       </TableResults>,
     );
 
+    expect(screen.queryByRole('navigation', { name: 'Onboarding pages' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the table and renders the state under it, with no footer', () => {
+    render(
+      <TableResults
+        statusMessage="Showing 20 of 41 onboardings"
+        regionLabel="Onboardings results"
+        paginationLabel="Onboarding pages"
+        state={<p>Nothing here</p>}
+        pagination={pagination()}
+        paginationDisabled={false}
+        onPageChange={vi.fn()}
+      >
+        <table aria-label="Onboardings" />
+      </TableResults>,
+    );
+
+    const region = screen.getByRole('region', { name: 'Onboardings results' });
+
+    expect(within(region).getByRole('table', { name: 'Onboardings' })).toBeInTheDocument();
+    expect(within(region).getByText('Nothing here')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Onboarding pages' })).not.toBeInTheDocument();
+  });
+
+  it('hides the footer when the status message is null', () => {
+    render(
+      <TableResults
+        statusMessage={null}
+        regionLabel="Onboardings results"
+        paginationLabel="Onboarding pages"
+        pagination={pagination()}
+        paginationDisabled={false}
+        onPageChange={vi.fn()}
+      >
+        <table />
+      </TableResults>,
+    );
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Onboarding pages' })).not.toBeInTheDocument();
   });
 });

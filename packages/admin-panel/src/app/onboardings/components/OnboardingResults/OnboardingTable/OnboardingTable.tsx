@@ -1,22 +1,14 @@
 import type { ReactElement } from 'react';
 import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
-import { Table, TableEmptyRow, Th } from '@/components/ui/DataTable/DataTable';
+import { Table, Th } from '@/components/ui/DataTable/DataTable';
 import { OnboardingTableRow } from './OnboardingTableRow/OnboardingTableRow';
 
-const TABLE_COLUMN_COUNT = 9;
-
 export interface OnboardingTableProps {
-  showTable: boolean;
   records: AdminOnboardingSummary[];
-  emptyMessage: string;
 }
 
-/** Renders the semantic results table: caption, column headers, empty-state row, or data rows. */
-export function OnboardingTable({
-  showTable,
-  records,
-  emptyMessage,
-}: OnboardingTableProps): ReactElement {
+/** Renders the semantic results table: caption, column headers and data rows. */
+export function OnboardingTable({ records }: OnboardingTableProps): ReactElement {
   return (
     <Table caption="Onboardings matching the current filters">
       <thead>
@@ -33,11 +25,9 @@ export function OnboardingTable({
         </tr>
       </thead>
       <tbody>
-        {showTable && records.length === 0 && (
-          <TableEmptyRow colSpan={TABLE_COLUMN_COUNT}>{emptyMessage}</TableEmptyRow>
-        )}
-        {showTable &&
-          records.map((record) => <OnboardingTableRow key={record.onboardingId} record={record} />)}
+        {records.map((record) => (
+          <OnboardingTableRow key={record.onboardingId} record={record} />
+        ))}
       </tbody>
     </Table>
   );

@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Table, TableEmptyRow, TableSurface, Th } from './DataTable';
+import { Table, TableSurface, Th } from './DataTable';
 
 afterEach(() => {
   cleanup();
@@ -16,16 +16,6 @@ describe('TableSurface', () => {
     );
 
     expect(screen.getByRole('region', { name: 'Onboardings table' })).toBeInTheDocument();
-  });
-
-  it('honours hidden, removing the region from the accessibility tree', () => {
-    render(
-      <TableSurface label="Onboardings table" hidden>
-        <p>content</p>
-      </TableSurface>,
-    );
-
-    expect(screen.queryByRole('region', { name: 'Onboardings table' })).not.toBeInTheDocument();
   });
 });
 
@@ -74,23 +64,5 @@ describe('Th', () => {
     );
 
     expect(screen.getByRole('columnheader', { name: 'Actions' })).toHaveClass('text-right');
-  });
-});
-
-describe('TableEmptyRow', () => {
-  it('spans the given colSpan', () => {
-    render(
-      <table>
-        <tbody>
-          <TableEmptyRow colSpan={5}>No onboardings match the current filters.</TableEmptyRow>
-        </tbody>
-      </table>,
-    );
-
-    const cell = screen.getByRole('cell', {
-      name: 'No onboardings match the current filters.',
-    });
-
-    expect(cell).toHaveAttribute('colspan', '5');
   });
 });

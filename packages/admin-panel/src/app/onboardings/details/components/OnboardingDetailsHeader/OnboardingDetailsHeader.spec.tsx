@@ -96,7 +96,6 @@ describe('OnboardingDetailsHeader', () => {
         isReconciling={false}
         onReconcile={() => {}}
         isRefreshing={false}
-        statusMessage="Loading onboarding…"
       />,
     );
 
@@ -120,7 +119,6 @@ describe('OnboardingDetailsHeader', () => {
         isReconciling={false}
         onReconcile={() => {}}
         isRefreshing={false}
-        statusMessage={null}
       />,
     );
 
@@ -138,7 +136,6 @@ describe('OnboardingDetailsHeader', () => {
         isReconciling={false}
         onReconcile={() => {}}
         isRefreshing={false}
-        statusMessage={null}
       />,
     );
 
@@ -158,7 +155,6 @@ describe('OnboardingDetailsHeader', () => {
         isReconciling
         onReconcile={() => {}}
         isRefreshing={false}
-        statusMessage={null}
       />,
     );
 
@@ -180,7 +176,6 @@ describe('OnboardingDetailsHeader', () => {
         isReconciling={false}
         onReconcile={() => {}}
         isRefreshing={false}
-        statusMessage={null}
       />,
     );
 
@@ -200,7 +195,6 @@ describe('OnboardingDetailsHeader', () => {
         isReconciling={false}
         onReconcile={() => {}}
         isRefreshing={false}
-        statusMessage={null}
       />,
     );
 
@@ -211,28 +205,6 @@ describe('OnboardingDetailsHeader', () => {
       `${ADMIN_ROUTES.workflows.details('manual-review')}?version=1`,
     );
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
-  });
-
-  it('renders the status message as a live region within the header itself', () => {
-    renderHeader(
-      <OnboardingDetailsHeader
-        onboardingId={ONBOARDING_ID}
-        summary={null}
-        definition={null}
-        backSearch=""
-        onRefresh={() => {}}
-        pendingAction={null}
-        onReviewSubmit={() => {}}
-        isReconciling={false}
-        onReconcile={() => {}}
-        isRefreshing={false}
-        statusMessage="Loading onboarding…"
-      />,
-    );
-
-    const status = screen.getByRole('status');
-    expect(status).toHaveTextContent('Loading onboarding…');
-    expect(screen.getByRole('banner')).toContainElement(status);
   });
 
   it('carries the handed-in search string on the back link', () => {
@@ -248,7 +220,6 @@ describe('OnboardingDetailsHeader', () => {
         isReconciling={false}
         onReconcile={() => {}}
         isRefreshing={false}
-        statusMessage={null}
       />,
     );
 
@@ -271,7 +242,6 @@ describe('OnboardingDetailsHeader', () => {
         isReconciling={false}
         onReconcile={() => {}}
         isRefreshing
-        statusMessage={null}
       />,
     );
 
@@ -291,30 +261,9 @@ describe('OnboardingDetailsHeader', () => {
         isReconciling={false}
         onReconcile={() => {}}
         isRefreshing={false}
-        statusMessage={null}
       />,
     );
 
     expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
-  });
-
-  it('renders no live region at all when the page has nothing to report', () => {
-    renderHeader(
-      <OnboardingDetailsHeader
-        onboardingId={ONBOARDING_ID}
-        summary={summary()}
-        definition={null}
-        backSearch=""
-        onRefresh={() => {}}
-        pendingAction={null}
-        onReviewSubmit={() => {}}
-        isReconciling={false}
-        onReconcile={() => {}}
-        isRefreshing={false}
-        statusMessage={null}
-      />,
-    );
-
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });

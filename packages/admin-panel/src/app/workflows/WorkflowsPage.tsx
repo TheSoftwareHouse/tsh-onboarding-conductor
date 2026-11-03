@@ -1,11 +1,14 @@
-import type { FormEvent, ReactElement } from 'react';
+import type { FormEvent, ReactElement, ReactNode } from 'react';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { AdminWorkflowSummary } from '@/api/workflows/admin-workflows';
-import type { ApiError } from '@/services/api/api-error';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
 import type { AdminPageProps } from '@/lib/admin-page';
+import { Button } from '@/components/ui/Button/Button';
+import { EmptyState } from '@/components/ui/EmptyState/EmptyState';
+import { Loader } from '@/components/ui/Loader/Loader';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
+import { LoadFailure } from '@/components/ui/LoadFailure/LoadFailure';
 import {
   countActiveAdminWorkflowFilters,
   DEFAULT_ADMIN_WORKFLOW_FILTERS,
@@ -15,10 +18,6 @@ import { useWorkflowsFilters } from './hooks/useWorkflowsFilters';
 import { WorkflowFilters } from './components/WorkflowFilters';
 import { NewDraftDialog } from './components/NewDraftDialog/NewDraftDialog';
 import { WorkflowResults } from './components/WorkflowResults/WorkflowResults';
-
-function describeLoadError(error: ApiError): string {
-  return `Unable to load workflows: ${error.message}`;
-}
 
 /** Composes the workflows section: its header, filter band, and results table. */
 export function WorkflowsPage({ eyebrow, title }: AdminPageProps): ReactElement {
@@ -51,39 +50,61 @@ export function WorkflowsPage({ eyebrow, title }: AdminPageProps): ReactElement 
   };
 
   const disabled = isPending;
-  const showTable = !isPending && !isError;
   const appliedCount = countActiveAdminWorkflowFilters(appliedSearchValues);
 
   // `data`/`error` stay optional after destructuring, so every read below falls back explicitly.
   const records = data?.records ?? [];
   const pagination = isPending || isError ? null : (data?.pagination ?? null);
 
-  let statusMessage: string;
+  const resetAction = (
+    <Button variant="primary" size="lg" onClick={handleReset}>
+      Reset filters
+    </Button>
+  );
+
+  let state: ReactNode;
+  let statusMessage: string | null = null;
   let visibleRecords: AdminWorkflowSummary[] = [];
-  let emptyMessage = '';
 
   if (isPending) {
-    statusMessage = 'Loading workflows…';
+    state = <Loader label="Loading workflows…" />;
   } else if (isError) {
-    statusMessage = error ? describeLoadError(error) : 'Unable to load workflows.';
-  } else if (records.length === 0) {
+    state = <LoadFailure error={error} subject="workflows" onRetry={handleReload} />;
+  } else if (records.length === 0 || pagination === null) {
     if (pagination !== null && pagination.total > 0) {
-      statusMessage = 'No workflows on this page.';
+      state = <EmptyState kind="noMatch" title="No workflows on this page" />;
     } else if (filters.search !== null) {
-      statusMessage = `No workflows match "${filters.search}".`;
+      state = (
+        <EmptyState
+          kind="noMatch"
+          title={`No workflows match "${filters.search}"`}
+          body="Check the spelling, or reset the filters."
+          actions={resetAction}
+        />
+      );
     } else if (appliedCount > 0) {
-      statusMessage = 'No workflows match these filters.';
+      state = (
+        <EmptyState
+          kind="noMatch"
+          title="No workflows match these filters"
+          body="Change or reset the filters to see more."
+          actions={resetAction}
+        />
+      );
     } else {
-      statusMessage = 'No workflows loaded.';
+      state = (
+        <EmptyState
+          title="No workflows yet"
+          body="Start one from a blank draft."
+          actions={<NewDraftDialog />}
+        />
+      );
     }
-    emptyMessage = statusMessage;
-  } else if (pagination !== null) {
+  } else {
     const from = (pagination.page - 1) * pagination.limit + 1;
     const to = Math.min(pagination.page * pagination.limit, pagination.total);
     statusMessage = `Showing ${from}–${to} of ${pagination.total} workflows.`;
     visibleRecords = records;
-  } else {
-    statusMessage = 'No workflows loaded.';
   }
 
   return (
@@ -102,9 +123,8 @@ export function WorkflowsPage({ eyebrow, title }: AdminPageProps): ReactElement 
       />
       <WorkflowResults
         statusMessage={statusMessage}
-        showTable={showTable}
+        state={state}
         visibleRecords={visibleRecords}
-        emptyMessage={emptyMessage}
         pagination={pagination}
         paginationDisabled={disabled}
         onPageChange={goToPage}
