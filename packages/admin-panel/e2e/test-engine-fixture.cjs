@@ -5,6 +5,9 @@ const { URL } = require('node:url');
 
 const HOST = '127.0.0.1';
 const PATH = '/v1/onboardings';
+const WORKFLOWS_PATH = '/v1/admin/workflows';
+const WORKFLOW_VERSIONS_PATTERN = /^\/v1\/admin\/workflows\/([^/]+)\/versions$/;
+const WORKFLOW_LIST_KEYS = new Set(['page', 'limit', 'search', 'scope', 'hasDraft']);
 const PANEL_ORIGIN = process.env.PANEL_ORIGIN || process.env.BASE_URL || 'http://localhost:5174';
 const RESPONSE_DELAY_MS = 250;
 const ALLOWED_KEYS = new Set([
@@ -80,6 +83,50 @@ const RESPONSES = [
     context: { hidden: 'fixture-context-special' },
   },
 ];
+
+const WORKFLOW_TIMESTAMP = '2026-07-01T00:00:00.000Z';
+
+/** Every workflow id the onboarding rows and the spec's cases filter by, so each can be picked. */
+const WORKFLOWS = [
+  'kyc-standard',
+  'kyc-basic',
+  'kyc-enhanced-with-an-excessively-long-workflow-identifier-for-scroll-testing',
+  'kyc basic / encoding?',
+  'kyc-reloaded',
+  'no-onboardings',
+].map((workflowId) => ({
+  workflowId,
+  name: null,
+  scope: 'fixtures',
+  servingVersion: 1,
+  versionCount: 2,
+  draftCount: 0,
+  inProgressCount: 0,
+  createdAt: WORKFLOW_TIMESTAMP,
+  updatedAt: WORKFLOW_TIMESTAMP,
+}));
+
+/** Newest first, as the engine lists them; the draft must not reach the panel's version select. */
+function versionsFor(workflowId) {
+  const versions =
+    workflowId === 'kyc basic / encoding?'
+      ? [
+          [8, 'draft'],
+          [7, 'published'],
+          [6, 'retired'],
+        ]
+      : [
+          [2, 'published'],
+          [1, 'retired'],
+        ];
+
+  return versions.map(([version, status]) => ({
+    version,
+    status,
+    createdAt: WORKFLOW_TIMESTAMP,
+    updatedAt: WORKFLOW_TIMESTAMP,
+  }));
+}
 
 function isUuid(value) {
   return UUID_PATTERN.test(value);
@@ -207,10 +254,16 @@ function recordRequest(request) {
   };
 }
 
+function isKnownPath(pathname) {
+  return (
+    pathname === PATH || pathname === WORKFLOWS_PATH || WORKFLOW_VERSIONS_PATTERN.test(pathname)
+  );
+}
+
 function isValidRequest(record) {
   return (
     record.origin === PANEL_ORIGIN &&
-    record.pathname === PATH &&
+    isKnownPath(record.pathname) &&
     (record.method === 'GET' || record.method === 'OPTIONS')
   );
 }
@@ -223,8 +276,43 @@ async function respondWithUnexpected(response, record) {
   });
 }
 
+function respondToWorkflowsList(requestUrl, response) {
+  const params = requestUrl.searchParams;
+
+  for (const key of params.keys()) {
+    if (!WORKFLOW_LIST_KEYS.has(key)) {
+      throw new Error(`Fixture received an unsupported query string: ${requestUrl.search}`);
+    }
+  }
+
+  const search = (params.get('search') ?? '').toLowerCase();
+  const matching = WORKFLOWS.filter((workflow) =>
+    workflow.workflowId.toLowerCase().includes(search),
+  );
+
+  sendCorsHeaders(response);
+  sendJson(response, 200, paginate(matching, params));
+}
+
+function respondToWorkflowVersions(workflowId, response) {
+  sendCorsHeaders(response);
+  sendJson(response, 200, { items: versionsFor(workflowId) });
+}
+
 async function respondToGet(request, response) {
   const requestUrl = new URL(request.url || '/', `http://${HOST}`);
+  const versionsMatch = WORKFLOW_VERSIONS_PATTERN.exec(requestUrl.pathname);
+
+  if (versionsMatch !== null) {
+    respondToWorkflowVersions(decodeURIComponent(versionsMatch[1]), response);
+    return;
+  }
+
+  if (requestUrl.pathname === WORKFLOWS_PATH) {
+    respondToWorkflowsList(requestUrl, response);
+    return;
+  }
+
   const query = validateQueryParams(requestUrl.searchParams);
 
   if (query === null) {

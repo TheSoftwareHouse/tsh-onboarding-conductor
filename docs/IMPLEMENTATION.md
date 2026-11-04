@@ -3252,11 +3252,13 @@ single key's parser can express — `occurredFrom <= occurredTo` — is plain Ty
 `filter-audit-events.ts`, read two ways: `findOccurredWindowError` gives `AuditPage` the message it
 shows inline and refuses to Apply on, and `toAuditEventQueryFilters` drops a window it refuses back
 to absent, so a URL stating a backwards one narrows nothing by it while every other criterion still
-applies. Onboardings has no cross-field rule, only three single-control predicates —
-`isRequestableWorkflowVersion`, `isRequestableConnectorId` and `isRequestableParkedBefore` — folded
+applies. Onboardings has no cross-field rule, only two single-control predicates —
+`isRequestableConnectorId` and `isRequestableParkedBefore` — folded
 by `findDraftError` into the one refused field and message `OnboardingsPage` blocks Apply on and
-the panel's single message element (`#onboarding-filters-error`) describes; each shares its
-validity check (`isValidWorkflowVersion`, `isValidConnectorId`, `toIsoInstant`) with the URL's own
+the panel's single message element (`#onboarding-filters-error`) describes; the workflow version is
+not among them, since its picker cannot produce a malformed one, though the URL parser still rejects
+one a hand-edited link carries. Each shares its
+validity check (`isValidConnectorId`, `toIsoInstant`) with the URL's own
 parser for that key, so a control and the URL cannot disagree about what is requestable. Absence has one representation throughout,
 `null`: a criterion the URL omits, states blank, or states unparseably reads as `null` and stays
 `null` into the axios `params`, which drops it — axios would send `''` as a bare `key=`, so blank
@@ -3283,9 +3285,23 @@ Two things the design draws are deliberately absent, each for want of an endpoin
 column of masked contact details and per-status counts on the inactive tabs. A third, the "Started"
 date range, is absent because `ListAdminOnboardingsQueryDto` accepts no date
 criteria — `createdAt` is returned and is the query's primary sort key, but nothing filters on it.
-Workflow and version stay free-text inputs rather than the design's dropdowns — turning them into
-one is out of this change's scope, even though `GET /v1/admin/workflows` (§12, below) now exists to
-populate one. The `workflowId` parser is shared rather than duplicated: it moved to
+Workflow and version are pickers, not free text. **Workflow** is a `Combobox` fed by
+`GET /v1/admin/workflows` (`workflowQueries.listPages`), searched as the operator types (debounced
+300 ms, trimmed, cut to the engine's 100-character `search` limit) and loading the next page on
+scroll; families with only drafts are left out, since no onboarding can run on a draft. **Workflow
+version** is a `SelectFilterField` of the workflow's non-draft versions, newest first, labelled
+`v<n> — <status>` so a retired version stays pickable, from `workflowQueries.versions`. It is
+disabled until a workflow is picked and while its versions load — unless a version is already
+drafted, so its any-option can always clear it — and picking another or clearing the
+workflow clears the drafted version in the same update (`OnboardingsPage`'s `updateFilter`). A
+workflow id the loaded pages do not hold — a link, or a workflow further down the list — is looked
+up by exact id so it shows its name, and otherwise shows as the raw id, so the control always
+reflects the committed filter. A version the select has no option for — a version-only link, a
+draft, or a failed versions request — is added as `v<n>` for the same reason. Both pickers read through `useWorkflowFilterOptions`, which
+`OnboardingFilters` calls. A failed list shows "Could not load workflows." in the combobox; failed
+versions leave the select reading **Versions unavailable**, disabled unless a drafted version still
+needs clearing. A pick is still a draft until
+Apply, and `useDebouncedValue` moved to `src/lib/` because two routes now use it. The `workflowId` parser is shared rather than duplicated: it moved to
 `src/lib/onboarding-search-params.ts`, the same module the Workflows page's In progress link
 serializes with ([0032](decisions/0032-admin-workflows-list.md)).
 
@@ -3438,7 +3454,7 @@ Reload both refetch, which is how an operator brings it current.
 The Logs page carries its own list of absences, again each for want of a parameter the audit
 endpoint does not accept: **Export** (the audit endpoint has no export route, unlike
 `GET /v1/onboardings/export`); **Workflow** and **Version** (`ListAuditQueryDto` declares neither `workflowId` nor
-`workflowVersion` — unlike Onboardings, where the two stay free-text inputs, the audit endpoint has
+`workflowVersion` — unlike Onboardings, where the two are pickers, the audit endpoint has
 no criterion of any kind for either, so both are omitted outright); **Persona / applicant** (no
 applicant projection anywhere in the engine, the same call as the Onboardings applicant column);
 the **Outcome** column (reasoned above: no field on `AuditEvent`, and the design's values are
@@ -3609,7 +3625,10 @@ The button still shows when the family has a draft, and the guard covers it.
 The dialog's pickers are Base UI wrappers in `src/components/ui/`
 ([0031](decisions/0031-base-ui-toasts-for-admin-panel-mutation-outcomes.md)), generic and unaware of workflows.
 `Select` is controlled, takes typed `{ value, label }` items and is styled like the native select
-(`h-10`, mono text). `Combobox` is server-driven: the parent owns the input text, the selected
+(`h-10`, mono text by default; `font="text"` switches to body text). `anyOptionLabel` adds a first
+item with value `null`, and `onValueChange` reports `null` only when it is set. The filter panels use
+it too: `SelectFilterField` and `DateTimeRangeField` render it with `font="text"`, and
+`SelectFilterField` passes its `anyOptionLabel` through. `Combobox` is server-driven: the parent owns the input text, the selected
 item and the filtering (`filter={null}`), and it shows loading, error and empty rows.
 
 When the selected version is a `draft` (a pinned `?version=`, or the draft a family with no published
