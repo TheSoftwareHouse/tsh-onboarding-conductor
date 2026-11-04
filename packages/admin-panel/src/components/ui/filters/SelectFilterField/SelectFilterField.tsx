@@ -1,5 +1,5 @@
-import type { ChangeEvent, ReactElement } from 'react';
-import { input } from '@/components/ui/Input/Input';
+import type { ReactElement } from 'react';
+import { Select } from '@/components/ui/Select/Select';
 import { FilterField, type FilterControlProps } from '../FilterField';
 
 export interface FilterOption {
@@ -33,23 +33,18 @@ export function SelectFilterField({
 }: SelectFilterFieldProps): ReactElement {
   return (
     <FilterField controlId={id} label={label}>
-      <select
+      <Select
         id={id}
         name={name}
         aria-describedby={describedBy}
         aria-invalid={invalid}
         disabled={disabled}
-        value={value}
-        onChange={(event: ChangeEvent<HTMLSelectElement>) => onChange(event.target.value)}
-        className={input()}
-      >
-        {anyOptionLabel !== undefined && <option value="">{anyOptionLabel}</option>}
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+        font="text"
+        items={options}
+        value={value === '' ? null : value}
+        anyOptionLabel={anyOptionLabel}
+        onValueChange={(next) => onChange(next ?? '')}
+      />
     </FilterField>
   );
 }

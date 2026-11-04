@@ -1,8 +1,11 @@
 import type { FormEvent, ReactElement } from 'react';
+import { Combobox, type ComboboxItem } from '@/components/ui/Combobox/Combobox';
 import { CheckboxFilterField } from '@/components/ui/filters/CheckboxFilterField/CheckboxFilterField';
 import { DateTimePickerField } from '@/components/ui/filters/DateTimePickerField/DateTimePickerField';
+import { FilterField } from '@/components/ui/filters/FilterField';
 import { FilterPanel } from '@/components/ui/filters/FilterPanel/FilterPanel';
 import { PageSizeFilterField } from '@/components/ui/filters/PageSizeFilterField/PageSizeFilterField';
+import { SelectFilterField } from '@/components/ui/filters/SelectFilterField/SelectFilterField';
 import { TextFilterField } from '@/components/ui/filters/TextFilterField/TextFilterField';
 import { resolveLocalTimeZoneName } from '@/lib/datetime-local';
 import type { PageSize } from '@/lib/pagination';
@@ -11,6 +14,7 @@ import {
   type AdminOnboardingDraftFilters,
   PENDING_CONNECTOR_ID_MAX_LENGTH,
 } from '../utils/filter-admin-onboardings';
+import { useWorkflowFilterOptions } from '../hooks/useWorkflowFilterOptions';
 
 /** Element every refusable control is described by while its value is refused, since the panel has one message area. */
 const FILTER_ERROR_ID = 'onboarding-filters-error';
@@ -48,6 +52,7 @@ export function OnboardingFilters({
 }: OnboardingFiltersProps): ReactElement {
   const timeZone = resolveLocalTimeZoneName();
   const invalidField = error?.field ?? null;
+  const workflowOptions = useWorkflowFilterOptions(filters.workflowId, filters.workflowVersion);
 
   return (
     <FilterPanel
@@ -67,22 +72,39 @@ export function OnboardingFilters({
         value={filters.onboardingId}
         onChange={(value: string) => onFilterChange('onboardingId', value)}
       />
-      <TextFilterField
-        id="workflow-id-filter"
-        name="workflowId"
-        label="Workflow ID"
-        disabled={disabled}
-        value={filters.workflowId}
-        onChange={(value: string) => onFilterChange('workflowId', value)}
-      />
-      <TextFilterField
+      <FilterField controlId="workflow-id-filter" label="Workflow">
+        <Combobox
+          id="workflow-id-filter"
+          items={workflowOptions.items}
+          value={workflowOptions.selectedItem}
+          onValueChange={(item: ComboboxItem | null) => {
+            workflowOptions.pick(item);
+            onFilterChange('workflowId', item?.value ?? '');
+          }}
+          inputValue={workflowOptions.inputValue}
+          onInputValueChange={workflowOptions.setInputText}
+          placeholder="Search by ID or name"
+          disabled={disabled}
+          loading={workflowOptions.isSearching}
+          error={workflowOptions.listFailed ? 'Could not load workflows.' : null}
+          emptyText="No workflow with a published or retired version."
+          onLoadMore={workflowOptions.loadMore}
+        />
+      </FilterField>
+      <SelectFilterField
         id="workflow-version-filter"
         name="workflowVersion"
         label="Workflow version"
-        inputMode="numeric"
-        describedBy={FILTER_ERROR_ID}
-        invalid={invalidField === 'workflowVersion'}
-        disabled={disabled}
+        anyOptionLabel={workflowOptions.versionsFailed ? 'Versions unavailable' : 'Any version'}
+        options={workflowOptions.versionOptions}
+        // A drafted version keeps the select open, so its any-option can always clear it.
+        disabled={
+          disabled ||
+          (filters.workflowVersion === '' &&
+            (filters.workflowId === '' ||
+              workflowOptions.versionsLoading ||
+              workflowOptions.versionsFailed))
+        }
         value={filters.workflowVersion}
         onChange={(value: string) => onFilterChange('workflowVersion', value)}
       />

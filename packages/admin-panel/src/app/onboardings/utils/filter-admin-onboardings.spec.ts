@@ -5,14 +5,12 @@ import {
   findDraftError,
   isRequestableConnectorId,
   isRequestableParkedBefore,
-  isRequestableWorkflowVersion,
   isValidConnectorId,
   isValidWorkflowVersion,
   PARKED_BEFORE_ERROR_MESSAGE,
   PENDING_CONNECTOR_ERROR_MESSAGE,
   PENDING_CONNECTOR_ID_MAX_LENGTH,
   toIsoInstant,
-  WORKFLOW_VERSION_ERROR_MESSAGE,
 } from './filter-admin-onboardings';
 
 describe('DEFAULT_ADMIN_ONBOARDING_FILTERS', () => {
@@ -32,24 +30,6 @@ describe('DEFAULT_ADMIN_ONBOARDING_FILTERS', () => {
 
   it('is frozen, since every consumer shares the one object', () => {
     expect(Object.isFrozen(DEFAULT_ADMIN_ONBOARDING_FILTERS)).toBe(true);
-  });
-});
-
-describe('isRequestableWorkflowVersion', () => {
-  it('accepts a blank draft, which names no criterion at all', () => {
-    expect(isRequestableWorkflowVersion('')).toBe(true);
-    expect(isRequestableWorkflowVersion('   ')).toBe(true);
-  });
-
-  it('accepts a positive whole number, with or without the operator’s whitespace', () => {
-    expect(isRequestableWorkflowVersion('7')).toBe(true);
-    expect(isRequestableWorkflowVersion('  7  ')).toBe(true);
-  });
-
-  it('refuses anything the endpoint would not accept', () => {
-    for (const value of ['0', '-1', '1.2', 'abc']) {
-      expect(isRequestableWorkflowVersion(value)).toBe(false);
-    }
   });
 });
 
@@ -127,22 +107,18 @@ describe('findDraftError', () => {
     expect(findDraftError(DEFAULT_ADMIN_ONBOARDING_FILTERS)).toBeNull();
   });
 
-  it('names the refused criterion, the version first', () => {
-    expect(findDraftError({ ...DEFAULT_ADMIN_ONBOARDING_FILTERS, workflowVersion: 'abc' })).toEqual(
-      { field: 'workflowVersion', message: WORKFLOW_VERSION_ERROR_MESSAGE },
-    );
+  it('names the refused criterion', () => {
     expect(
-      findDraftError({ ...DEFAULT_ADMIN_ONBOARDING_FILTERS, pendingConnectorId: 'Veriff' }),
+      findDraftError({ ...DEFAULT_ADMIN_ONBOARDING_FILTERS, pendingConnectorId: 'Bad Id' }),
     ).toEqual({ field: 'pendingConnectorId', message: PENDING_CONNECTOR_ERROR_MESSAGE });
     expect(
       findDraftError({ ...DEFAULT_ADMIN_ONBOARDING_FILTERS, parkedBefore: 'yesterday' }),
     ).toEqual({ field: 'parkedBefore', message: PARKED_BEFORE_ERROR_MESSAGE });
+  });
+
+  it('does not refuse a drafted workflow version, since the picker offers only real ones', () => {
     expect(
-      findDraftError({
-        ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
-        workflowVersion: 'abc',
-        pendingConnectorId: 'Veriff',
-      }),
-    ).toEqual({ field: 'workflowVersion', message: WORKFLOW_VERSION_ERROR_MESSAGE });
+      findDraftError({ ...DEFAULT_ADMIN_ONBOARDING_FILTERS, workflowVersion: 'abc' }),
+    ).toBeNull();
   });
 });

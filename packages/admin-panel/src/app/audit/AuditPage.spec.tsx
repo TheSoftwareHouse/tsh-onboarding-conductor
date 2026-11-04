@@ -166,6 +166,11 @@ async function pickDayOfThisMonth(bound: 'From' | 'To', dayOfMonth: number): Pro
   await userEvent.click(within(calendar).getByRole('button', { name: 'Done' }));
 }
 
+async function pickOption(select: 'Actor' | 'Occurred', option: string): Promise<void> {
+  await userEvent.click(screen.getByRole('combobox', { name: select }));
+  await userEvent.click(await screen.findByRole('option', { name: option }));
+}
+
 beforeEach(() => {
   mockedGet.mockReset();
 });
@@ -194,7 +199,7 @@ describe('AuditPage', () => {
     expect(mockedGet).toHaveBeenNthCalledWith(1, ADMIN_AUDIT_ENDPOINT, {
       params: expectedParams({ page: 2, actorType: 'operator', action: 'auth.access_granted' }),
     });
-    expect(screen.getByLabelText('Actor')).toHaveValue('operator');
+    expect(screen.getByRole('combobox', { name: 'Actor' })).toHaveTextContent('Operator');
     expect(screen.getByLabelText('Action')).toHaveValue('auth.access_granted');
   });
 
@@ -236,7 +241,7 @@ describe('AuditPage', () => {
     await renderReady(page([EVENT_ONE]));
     mockedGet.mockResolvedValueOnce(page([EVENT_ONE]));
 
-    await userEvent.selectOptions(screen.getByLabelText('Actor'), 'operator');
+    await pickOption('Actor', 'Operator');
     await userEvent.type(screen.getByLabelText('Action'), '  auth.access_granted  ');
     await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
 
@@ -251,7 +256,7 @@ describe('AuditPage', () => {
   it('refuses a backwards time window as soon as it is entered, without issuing a request', async () => {
     await renderReady(page([EVENT_ONE]));
 
-    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'Custom range…');
+    await pickOption('Occurred', 'Custom range…');
     await pickDayOfThisMonth('From', 20);
     await pickDayOfThisMonth('To', 10);
 
@@ -270,7 +275,7 @@ describe('AuditPage', () => {
     await renderReady(page([EVENT_ONE]));
     mockedGet.mockResolvedValueOnce(page([EVENT_ONE]));
 
-    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'Last 24 hours');
+    await pickOption('Occurred', 'Last 24 hours');
     await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
@@ -289,14 +294,14 @@ describe('AuditPage', () => {
   it('clears both bounds of the window in one action', async () => {
     await renderReady(page([EVENT_ONE]));
 
-    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'Custom range…');
+    await pickOption('Occurred', 'Custom range…');
     await pickDayOfThisMonth('From', 10);
     await pickDayOfThisMonth('To', 20);
     expect(screen.getByLabelText('From')).not.toHaveValue('');
 
-    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'All time');
+    await pickOption('Occurred', 'All time');
     // Reopening Custom range proves the bounds themselves were cleared, not just hidden.
-    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'Custom range…');
+    await pickOption('Occurred', 'Custom range…');
 
     expect(screen.getByLabelText('From')).toHaveValue('');
     expect(screen.getByLabelText('To')).toHaveValue('');

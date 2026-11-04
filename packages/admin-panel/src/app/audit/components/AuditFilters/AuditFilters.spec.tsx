@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import { AuditFilters, type AuditFiltersProps } from './AuditFilters';
@@ -43,17 +44,19 @@ describe('AuditFilters', () => {
     renderFilters();
 
     expect(screen.getByLabelText('Resource ID')).toBeInTheDocument();
-    expect(screen.getByLabelText('Actor')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Actor' })).toBeInTheDocument();
     expect(screen.getByLabelText('Actor ID')).toBeInTheDocument();
     expect(screen.getByLabelText('Action')).toBeInTheDocument();
-    expect(screen.getByLabelText('Occurred')).toBeInTheDocument();
-    expect(screen.getByLabelText('Per page')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Occurred' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Per page' })).toBeInTheDocument();
   });
 
-  it('offers "All actors" as the Actor criterion\'s cleared value', () => {
+  it('offers "All actors" as the Actor criterion\'s cleared value', async () => {
     renderFilters();
 
-    expect(screen.getByRole('option', { name: 'All actors' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('combobox', { name: 'Actor' }));
+
+    expect(await screen.findByRole('option', { name: 'All actors' })).toBeInTheDocument();
   });
 
   it('does not render Resource type, which has no grid cell', () => {
