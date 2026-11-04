@@ -10,20 +10,24 @@ afterEach(() => {
 });
 
 describe('PageSizeFilterField', () => {
-  it('offers only the page sizes the engine accepts', () => {
+  it('offers only the page sizes the engine accepts', async () => {
     render(<PageSizeFilterField value={20} disabled={false} onChange={vi.fn()} />);
 
-    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(
+    const trigger = screen.getByRole('combobox', { name: 'Per page' });
+    expect(trigger).toHaveTextContent('20');
+    await userEvent.click(trigger);
+
+    expect((await screen.findAllByRole('option')).map((option) => option.textContent)).toEqual(
       PAGE_SIZES.map(String),
     );
-    expect(screen.getByLabelText('Per page')).toHaveValue('20');
   });
 
   it('reports the chosen size as a number, which is what the query carries', async () => {
     const onChange = vi.fn();
     render(<PageSizeFilterField value={20} disabled={false} onChange={onChange} />);
 
-    await userEvent.selectOptions(screen.getByLabelText('Per page'), '50');
+    await userEvent.click(screen.getByRole('combobox', { name: 'Per page' }));
+    await userEvent.click(await screen.findByRole('option', { name: '50' }));
 
     expect(onChange).toHaveBeenLastCalledWith(50);
   });
