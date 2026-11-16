@@ -18,6 +18,9 @@ One product version covers the whole monorepo. Every pull request adds its line 
 - Fonts — The commercial TWK Everett files are no longer in the repository and the typeface is no
   longer referenced. The documentation site and the admin panel ship Inter Tight and JetBrains Mono
   (SIL Open Font License) as their only type.
+- Tooling — `.claude/settings.local.json` is no longer tracked and is git-ignored, so each person's
+  local Claude Code settings stay on their machine. `tsh-product-design`, the one plugin it enabled,
+  moved to the shared `.claude/settings.json`.
 
 ### Fixed
 
