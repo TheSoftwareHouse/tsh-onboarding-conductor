@@ -38,3 +38,4 @@ packages/docs/static/openapi/
 packages/docs/api_versions.json
 packages/docs/api_versioned_docs/
 packages/docs/api_versioned_sidebars/
+.claude/settings.local.json
