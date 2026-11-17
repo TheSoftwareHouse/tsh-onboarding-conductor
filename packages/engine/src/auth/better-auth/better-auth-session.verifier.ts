@@ -5,7 +5,7 @@ import {
   type AdminSession,
   type AdminSessionVerifierPort,
 } from '../admin-session-verifier.port';
-import type { AdminPermission } from '../domain/admin-permissions';
+import { isTwoFactorWaived, type AdminPermission } from '../domain/admin-permissions';
 import { loadBetterAuth, type BetterAuthInstance } from './load-better-auth';
 
 /** `account.providerId` of an email + password account; a social (Microsoft) account has its own. */
@@ -51,6 +51,7 @@ export class BetterAuthSessionVerifier implements AdminSessionVerifierPort {
   constructor(
     private readonly auth: BetterAuthInstance,
     private readonly pool: Pool,
+    private readonly superadminTwoFactorRequired: boolean,
   ) {}
 
   async resolve(headers: IncomingHttpHeaders): Promise<AdminSession | null> {
@@ -69,9 +70,12 @@ export class BetterAuthSessionVerifier implements AdminSessionVerifierPort {
         email: user.email,
         platformRole: user.role ?? null,
         // 2FA rule: a credential user must have TOTP; a user with no credential account (Microsoft
-        // only) is exempt because the tenant's Conditional Access enforces MFA.
+        // only) is exempt because the tenant's Conditional Access enforces MFA. A superadmin is
+        // exempt too when AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED is false.
         twoFactorSatisfied:
-          user.twoFactorEnabled === true || !(await hasCredentialAccount(this.pool, user.id)),
+          user.twoFactorEnabled === true ||
+          isTwoFactorWaived(user.role, this.superadminTwoFactorRequired) ||
+          !(await hasCredentialAccount(this.pool, user.id)),
         activeOrganizationId: session.activeOrganizationId ?? null,
       };
     } catch (error) {

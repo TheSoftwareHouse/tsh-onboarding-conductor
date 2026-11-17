@@ -63,6 +63,7 @@ function SignedInGate({ children }: AuthGateProps): ReactElement {
   const { data: session, isPending, error } = authClient.useSession();
   const [isChallenged, setIsChallenged] = useState(false);
   const [isSetupRequired, setIsSetupRequired] = useTwoFactorSetupRequired();
+  const [isSetupOffered, setIsSetupOffered] = useState(false);
   // better-auth flags a refetch (after every sign-in) as pending too, with the old data still
   // there; only the first load may replace the screen, or a half-typed 2FA code is wiped.
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -83,6 +84,7 @@ function SignedInGate({ children }: AuthGateProps): ReactElement {
     if (!isSignedIn) {
       setIsChallenged(false);
       setIsSetupRequired(false);
+      setIsSetupOffered(false);
     }
   }
 
@@ -105,15 +107,19 @@ function SignedInGate({ children }: AuthGateProps): ReactElement {
         error={error?.message ?? null}
         onTwoFactorRequired={() => setIsChallenged(true)}
         onTwoFactorSetupRequired={() => setIsSetupRequired(true)}
+        onTwoFactorSetupOffered={() => setIsSetupOffered(true)}
       />
     );
   }
 
-  if (isSetupRequired) {
+  if (isSetupRequired || isSetupOffered) {
     return (
       <TwoFactorSetup
+        // An engine 403 makes setup mandatory even after the panel offered it as optional.
+        onSkip={isSetupRequired ? undefined : () => setIsSetupOffered(false)}
         onDone={() => {
           setIsSetupRequired(false);
+          setIsSetupOffered(false);
           // Requests that were refused while 2FA was missing are stale; refetch them on mount.
           void queryClient.invalidateQueries();
         }}

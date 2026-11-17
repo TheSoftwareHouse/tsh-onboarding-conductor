@@ -110,6 +110,7 @@ describe('Admin panel served by the engine (e2e)', () => {
     expect(response.text).toContain('"VITE_AUTH_ENABLED": "false"');
     // Derived from the engine's own Microsoft client id, which this suite leaves unset.
     expect(response.text).toContain('"VITE_AUTH_MICROSOFT_ENABLED": "false"');
+    expect(response.text).toContain('"VITE_AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED": "true"');
   });
 
   it('points the panel at this engine, so a remapped host port cannot break it', async () => {

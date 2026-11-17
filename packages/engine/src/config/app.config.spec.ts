@@ -741,6 +741,14 @@ describe('validateConfig', () => {
         ).not.toThrow();
       });
 
+      it('requires superadmin 2FA unless AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED is false', () => {
+        expect(validateConfig(authOn).AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED).toBe(true);
+        expect(
+          validateConfig({ ...authOn, AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED: 'false' })
+            .AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED,
+        ).toBe(false);
+      });
+
       it.each(Object.keys(microsoftConfig))('refuses a Microsoft triple missing %s', (name) => {
         expect(() => validateConfig({ ...authOn, ...microsoftConfig, [name]: undefined })).toThrow(
           /must be set together/,

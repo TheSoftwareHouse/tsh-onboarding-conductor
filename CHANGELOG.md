@@ -54,7 +54,9 @@ One product version covers the whole monorepo. Every pull request adds its line 
   `ADMIN_REQUIRED_ROLES`, `VITE_SSO_PROVIDER`, `VITE_AZURE_CLIENT_ID`, `VITE_AZURE_TENANT_ID`,
   `VITE_AZURE_API_SCOPE` and `VITE_AZURE_REDIRECT_URI`. Added, required while
   `ADMIN_AUTH_ENABLED=true`: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `AUTH_SMTP_URL` and
-  `AUTH_MAIL_FROM`; optional: `AUTH_SUPERADMIN_EMAIL`, `AUTH_SUPERADMIN_PASSWORD` and the Microsoft
+  `AUTH_MAIL_FROM`; optional: `AUTH_SUPERADMIN_EMAIL`, `AUTH_SUPERADMIN_PASSWORD`,
+  `AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED` (default `true`; `false` makes TOTP optional for superadmins
+  only) and the Microsoft
   triple `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET`, `AUTH_MICROSOFT_TENANT_ID`.
   Microsoft sign-in is now optional and skips the engine's TOTP step, so require MFA in the tenant.
   Migration `0003` creates the `auth` schema; the audit actions `auth.token_rejected` and

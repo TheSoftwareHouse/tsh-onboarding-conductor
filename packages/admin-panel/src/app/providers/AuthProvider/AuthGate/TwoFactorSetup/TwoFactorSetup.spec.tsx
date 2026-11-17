@@ -36,6 +36,18 @@ afterEach(() => {
 });
 
 describe('TwoFactorSetup', () => {
+  it('offers a skip button only when setup is optional', async () => {
+    const onSkip = vi.fn();
+    const { rerender } = render(<TwoFactorSetup onDone={vi.fn()} />);
+
+    expect(screen.queryByRole('button', { name: 'Skip for now' })).not.toBeInTheDocument();
+
+    rerender(<TwoFactorSetup onDone={vi.fn()} onSkip={onSkip} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Skip for now' }));
+
+    expect(onSkip).toHaveBeenCalledTimes(1);
+  });
+
   it('asks for the password first and sends it to enable', async () => {
     render(<TwoFactorSetup onDone={vi.fn()} />);
 
