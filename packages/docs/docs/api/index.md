@@ -15,7 +15,7 @@ Routes are grouped by who calls them.
 | Group              | Who calls it                                                              | Credential                                                               |
 | ------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | Onboarding flow    | Your front-end, on behalf of the customer                                 | None. The onboarding id is the only handle, so treat it as a capability. |
-| Admin              | The admin panel, or your own tooling; includes the manual review decision | A Microsoft Entra ID bearer token.                                       |
+| Admin              | The admin panel, or your own tooling; includes the manual review decision | An operator session cookie and the permission the route needs.           |
 | Provider callbacks | A connector's provider                                                    | The HMAC signature the connector adapter declares.                       |
 | Health             | Orchestration and load balancers                                          | None.                                                                    |
 

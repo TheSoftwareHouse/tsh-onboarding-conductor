@@ -26,6 +26,39 @@ describe('AuditActorCell', () => {
     expect(screen.getByText('9f3c0000-0000-0000-0000-00000000000a')).toBeInTheDocument();
   });
 
+  it('prefers the email recorded with a session-based row over the actor id', () => {
+    render(
+      <AuditActorCell
+        actorType="operator"
+        actorId="user-1"
+        metadata={{ email: 'ada@example.com', platformRole: 'superadmin' }}
+      />,
+    );
+
+    expect(screen.getByText('ada@example.com')).toBeInTheDocument();
+    expect(screen.queryByText('user-1')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the legacy userPrincipalName, then objectId, on a row written before better-auth', () => {
+    render(
+      <AuditActorCell
+        actorType="operator"
+        actorId="object-id-1"
+        metadata={{ userPrincipalName: 'ada@tenant.example', objectId: 'object-id-1' }}
+      />,
+    );
+
+    expect(screen.getByText('ada@tenant.example')).toBeInTheDocument();
+
+    cleanup();
+
+    render(
+      <AuditActorCell actorType="operator" actorId="unknown" metadata={{ objectId: 'oid-9' }} />,
+    );
+
+    expect(screen.getByText('oid-9')).toBeInTheDocument();
+  });
+
   it('tones an anonymous actor the same as system, both neutral', () => {
     render(<AuditActorCell actorType="anonymous" actorId="unknown" />);
 

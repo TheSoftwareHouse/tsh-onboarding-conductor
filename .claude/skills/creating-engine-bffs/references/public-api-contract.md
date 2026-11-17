@@ -9,26 +9,26 @@ the controller rather than trusting this table alone — auth is declared per ro
 
 ## Routes
 
-| Route                                                     | Auth        | A BFF                                                                                             |
-| --------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
-| `POST /v1/onboardings`                                    | none        | calls it — body `{ workflowId }`                                                                  |
-| `GET /v1/onboardings/:id/state`                           | none        | calls it — the only customer-facing read                                                          |
-| `POST /v1/onboardings/:id/submit`                         | none        | calls it — body is the step's own fields                                                          |
-| `POST /v1/onboardings/:id/documents`                      | none        | calls it — reserve an upload                                                                      |
-| `POST /v1/onboardings/:id/documents/:docId/complete`      | none        | calls it — body `{}`                                                                              |
-| `POST /v1/onboardings/:id/review/:action`                 | Entra JWT   | **never proxies** — an operator's decision, behind the same guard as the admin routes             |
-| `POST /v1/onboardings/:id/agreements/:agreementId/accept` | none        | calls it — empty body, `200`; the customer accepts a version the onboarding already holds         |
-| `GET /v1/health/live`                                     | none        | may use it for readiness                                                                          |
-| `GET /v1/onboardings`                                     | Entra JWT   | **never proxies** — the admin list                                                                |
-| `GET /v1/onboardings/:id`                                 | Entra JWT   | **never proxies** — the admin record                                                              |
-| `GET /v1/onboardings/:id/transitions`                     | Entra JWT   | **never proxies** — there is no `/history` route; this is the admin-only successor                |
-| `GET /v1/onboardings/:id/agreements`                      | Entra JWT   | **never proxies** — accepted-versus-latest per agreement family                                   |
-| `POST /v1/onboardings/:id/agreements`                     | Entra JWT   | **never proxies** — an operator links a published version out of flow                             |
-| `/v1/admin/*`                                             | Entra JWT   | **never proxies** — audit, connectors, workflows, `step-types`, `workflows/compile`, `agreements` |
-| `POST /v1/webhooks/:providerKey/callback`                 | per-adapter | never calls — providers call this, not the BFF                                                    |
+| Route                                                     | Auth          | A BFF                                                                                             |
+| --------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
+| `POST /v1/onboardings`                                    | none          | calls it — body `{ workflowId }`                                                                  |
+| `GET /v1/onboardings/:id/state`                           | none          | calls it — the only customer-facing read                                                          |
+| `POST /v1/onboardings/:id/submit`                         | none          | calls it — body is the step's own fields                                                          |
+| `POST /v1/onboardings/:id/documents`                      | none          | calls it — reserve an upload                                                                      |
+| `POST /v1/onboardings/:id/documents/:docId/complete`      | none          | calls it — body `{}`                                                                              |
+| `POST /v1/onboardings/:id/review/:action`                 | Admin session | **never proxies** — an operator's decision, behind the same guard as the admin routes             |
+| `POST /v1/onboardings/:id/agreements/:agreementId/accept` | none          | calls it — empty body, `200`; the customer accepts a version the onboarding already holds         |
+| `GET /v1/health/live`                                     | none          | may use it for readiness                                                                          |
+| `GET /v1/onboardings`                                     | Admin session | **never proxies** — the admin list                                                                |
+| `GET /v1/onboardings/:id`                                 | Admin session | **never proxies** — the admin record                                                              |
+| `GET /v1/onboardings/:id/transitions`                     | Admin session | **never proxies** — there is no `/history` route; this is the admin-only successor                |
+| `GET /v1/onboardings/:id/agreements`                      | Admin session | **never proxies** — accepted-versus-latest per agreement family                                   |
+| `POST /v1/onboardings/:id/agreements`                     | Admin session | **never proxies** — an operator links a published version out of flow                             |
+| `/v1/admin/*`                                             | Admin session | **never proxies** — audit, connectors, workflows, `step-types`, `workflows/compile`, `agreements` |
+| `POST /v1/webhooks/:providerKey/callback`                 | per-adapter   | never calls — providers call this, not the BFF                                                    |
 
 `review/:action` takes `approve`, `reject` or `invalid` and answers `200`. It requires an operator's
-Entra access token, so a BFF serving customers has nothing to send it with and must not try;
+better-auth session cookie (`/v1/auth/*`, `superadmin` or an org permission), so a BFF serving customers has nothing to send it with and must not try;
 exposing a review decision to a customer would be a privilege escalation.
 
 ## Agreements

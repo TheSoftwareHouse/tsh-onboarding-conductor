@@ -7,6 +7,10 @@ describe('isFailureAuditAction', () => {
     'webhook.inbound_callback_rejected',
     'webhook.outbound_resend_not_found',
     'auth.role_missing',
+    'auth.token_rejected',
+    'auth.session_missing',
+    'auth.two_factor_required',
+    'auth.permission_missing',
     'auth.verification_unavailable',
     'onboarding.rejected_attempt',
   ])('is true for %s', (action) => {
@@ -21,6 +25,8 @@ describe('isFailureAuditAction', () => {
     'connector.failure_propagated',
     'connector_settings.updated',
     'auth.access_unauthenticated',
+    'auth.access_granted',
+    'auth.unauthenticated',
   ])('is false for %s', (action) => {
     expect(isFailureAuditAction(action)).toBe(false);
   });

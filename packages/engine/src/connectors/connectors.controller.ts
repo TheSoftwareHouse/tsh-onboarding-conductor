@@ -18,7 +18,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { AdminRoute } from '../auth/admin-route.decorator';
-import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
+import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/admin-session.guard';
 import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-responses.decorator';
 import { API_TAGS } from '../openapi/openapi.constants';
 import { ConnectorSettingsAdminService } from './connector-settings-admin.service';
@@ -51,7 +51,7 @@ export class ConnectorsController {
   constructor(private readonly connectorSettingsAdminService: ConnectorSettingsAdminService) {}
 
   @Get()
-  @AdminRoute()
+  @AdminRoute({ resource: 'connector', action: 'read' })
   @ApiOperation({
     operationId: 'listConnectorSettings',
     summary: 'List connector settings',
@@ -70,7 +70,7 @@ export class ConnectorsController {
   }
 
   @Get(':connectorId')
-  @AdminRoute()
+  @AdminRoute({ resource: 'connector', action: 'read' })
   @ApiOperation({ operationId: 'getConnectorSettings', summary: "Read one connector's settings" })
   @ConnectorIdParam()
   @ApiOkResponse({
@@ -85,7 +85,7 @@ export class ConnectorsController {
   }
 
   @Put(':connectorId')
-  @AdminRoute()
+  @AdminRoute({ resource: 'connector', action: 'write' })
   @ApiOperation({
     operationId: 'replaceConnectorSettings',
     summary: 'Replace connector settings wholesale',
@@ -93,7 +93,7 @@ export class ConnectorsController {
       'Stores the body as the whole settings map. Because a secret is never read back, a body ' +
       'that omits a currently stored key is refused by default rather than silently dropping it; ' +
       '`replace=true` opts in to dropping it. Every key and value is validated against the ' +
-      "adapter's schema. The write is audited under the operator the token identifies.",
+      "adapter's schema. The write is audited under the operator the session identifies.",
   })
   @ConnectorIdParam()
   @ApiOkResponse({
@@ -114,7 +114,7 @@ export class ConnectorsController {
     const view = await this.connectorSettingsAdminService.replaceSettings(
       connectorId,
       dto.settings,
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
       query.replace === 'true',
     );
 
@@ -122,7 +122,7 @@ export class ConnectorsController {
   }
 
   @Patch(':connectorId')
-  @AdminRoute()
+  @AdminRoute({ resource: 'connector', action: 'write' })
   @ApiOperation({
     operationId: 'mergeConnectorSettings',
     summary: 'Merge connector settings',
@@ -130,7 +130,7 @@ export class ConnectorsController {
       'Changes only the keys the body names: a string overwrites, `null` deletes, an absent key is ' +
       'left as it is. This is how an operator changes one field without resubmitting secrets the ' +
       "API never returns. Every submitted key and value is validated against the adapter's schema. " +
-      'The write is audited under the operator the token identifies.',
+      'The write is audited under the operator the session identifies.',
   })
   @ConnectorIdParam()
   @ApiOkResponse({
@@ -150,7 +150,7 @@ export class ConnectorsController {
     const view = await this.connectorSettingsAdminService.mergeSettings(
       connectorId,
       dto.settings,
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
 
     return toConnectorSettingsResponse(view);
@@ -158,13 +158,13 @@ export class ConnectorsController {
 
   @Delete(':connectorId')
   @HttpCode(204)
-  @AdminRoute()
+  @AdminRoute({ resource: 'connector', action: 'write' })
   @ApiOperation({
     operationId: 'removeConnectorSettings',
     summary: 'Clear connector settings',
     description:
       'Removes every stored setting of the connector, so each key reports as unset and the ' +
-      'connector is no longer configured. The write is audited under the operator the token ' +
+      'connector is no longer configured. The write is audited under the operator the session ' +
       'identifies.',
   })
   @ConnectorIdParam()
@@ -176,7 +176,7 @@ export class ConnectorsController {
   ): Promise<void> {
     await this.connectorSettingsAdminService.removeSettings(
       connectorId,
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
   }
 }

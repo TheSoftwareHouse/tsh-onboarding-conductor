@@ -18,9 +18,9 @@ function operatorMetadata(
 ): AdminAccessAuditMetadata {
   return {
     method,
-    tenantId: operator.tenantId,
-    userPrincipalName: operator.userPrincipalName,
-    grantedRoles: operator.roles,
+    email: operator.email,
+    platformRole: operator.platformRole,
+    organizationId: operator.organizationId,
   };
 }
 
@@ -40,36 +40,41 @@ export function toAdminAccessAuditInput(event: AdminAccessAuditEvent): AdminAcce
         ...base,
         action: 'auth.access_granted',
         actorType: 'operator',
-        actorId: event.operator.objectId ?? ADMIN_ACCESS_UNKNOWN_ACTOR,
+        actorId: event.operator.userId,
         metadata: operatorMetadata(event.endpoint.method, event.operator),
       };
 
-    case 'role_missing':
+    case 'session_missing':
       return {
         ...base,
-        action: 'auth.role_missing',
-        actorType: 'operator',
-        actorId: event.operator.objectId ?? ADMIN_ACCESS_UNKNOWN_ACTOR,
-        metadata: {
-          ...operatorMetadata(event.endpoint.method, event.operator),
-          requiredRoles: event.requiredRoles,
-        },
-      };
-
-    case 'token_rejected':
-      return {
-        ...base,
-        action: 'auth.token_rejected',
+        action: 'auth.session_missing',
         actorType: 'anonymous',
         actorId: ADMIN_ACCESS_UNKNOWN_ACTOR,
+        metadata: { method: event.endpoint.method, reason: event.reason },
+      };
+
+    case 'two_factor_required':
+      return {
+        ...base,
+        action: 'auth.two_factor_required',
+        actorType: 'operator',
+        actorId: event.operator.userId,
+        metadata: operatorMetadata(event.endpoint.method, event.operator),
+      };
+
+    case 'permission_missing':
+      return {
+        ...base,
+        action: 'auth.permission_missing',
+        actorType: 'operator',
+        actorId: event.operator.userId,
         metadata: {
-          method: event.endpoint.method,
-          reason: event.reason,
-          // Omitted rather than stored as null: a refusal with no readable token should not carry
-          // empty claim fields that read as though something had been parsed out of it.
-          ...(event.token.issuer !== null ? { tokenIssuer: event.token.issuer } : {}),
-          ...(event.token.audience !== null ? { tokenAudience: event.token.audience } : {}),
-          ...(event.token.version !== null ? { tokenVersion: event.token.version } : {}),
+          ...operatorMetadata(event.endpoint.method, event.operator),
+          ...(event.requiredPermission
+            ? {
+                requiredPermission: `${event.requiredPermission.resource}:${event.requiredPermission.action}`,
+              }
+            : {}),
         },
       };
 

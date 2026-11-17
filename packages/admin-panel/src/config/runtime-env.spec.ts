@@ -21,9 +21,9 @@ describe('readRuntimeEnv', () => {
   });
 
   it('falls through to the build-time value when window.__ENV__ carries an empty string, rather than shadowing it', () => {
-    vi.stubEnv('VITE_AZURE_CLIENT_ID', 'build-time-client-id');
-    window.__ENV__ = { VITE_AZURE_CLIENT_ID: '' };
+    vi.stubEnv('VITE_AUTH_MICROSOFT_ENABLED', 'true');
+    window.__ENV__ = { VITE_AUTH_MICROSOFT_ENABLED: '' };
 
-    expect(readRuntimeEnv().VITE_AZURE_CLIENT_ID).toBe('build-time-client-id');
+    expect(readRuntimeEnv().VITE_AUTH_MICROSOFT_ENABLED).toBe('true');
   });
 });

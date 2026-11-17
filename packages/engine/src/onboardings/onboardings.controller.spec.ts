@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import { Logger, StreamableFile, ValidationPipe } from '@nestjs/common';
-import { AzureJwtGuard, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
+import { AdminSessionGuard, type AdminAuthenticatedRequest } from '../auth/admin-session.guard';
 import type { ApiFailureAuditFilter } from '../audit/api-failure-audit.filter';
 import { ExportAdminOnboardingsQueryDto } from './dto/export-admin-onboardings.query.dto';
 import { OnboardingsExportService } from './onboardings-export.service';
@@ -126,7 +126,7 @@ describe('OnboardingsController', () => {
 
     await expect(
       controller.reconcilePendingConnector('onboarding-id', {
-        adminTokenClaims: { oid: 'operator-oid', preferred_username: 'op@tsh.io' },
+        adminSession: { userId: 'operator-oid' },
       } as never),
     ).resolves.toBe(outcome);
     expect(pendingConnectorReconcileService.reconcile).toHaveBeenCalledWith(
@@ -191,25 +191,25 @@ describe('OnboardingsController', () => {
     });
 
     // The guard placement is the security decision this feature turns on: linking and reading are
-    // operator actions, while accepting is the end user's own, from a flow that holds no Entra
+    // operator actions, while accepting is the end user's own, from a flow that holds no operator
     // identity. Read off the metadata rather than trusted to a reviewer's eye.
     it.each([
       ['listAgreements', true],
       ['linkAgreement', true],
       ['acceptAgreement', false],
-    ])('guards %s with the admin token: %s', (handler, guarded) => {
+    ])('guards %s with the admin session: %s', (handler, guarded) => {
       const guards = Reflect.getMetadata(
         '__guards__',
         OnboardingsController.prototype[handler as keyof OnboardingsController],
       );
 
-      expect((guards ?? []).includes(AzureJwtGuard)).toBe(guarded);
+      expect((guards ?? []).includes(AdminSessionGuard)).toBe(guarded);
     });
   });
 
   describe('export', () => {
     const request = {
-      adminTokenClaims: { oid: 'operator-1' },
+      adminSession: { userId: 'operator-1' },
     } as unknown as AdminAuthenticatedRequest;
 
     it('starts the export as the operator, then streams the CSV with its headers', async () => {

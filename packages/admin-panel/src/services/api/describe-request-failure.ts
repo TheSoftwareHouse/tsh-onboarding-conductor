@@ -17,11 +17,11 @@ export function describeRequestFailure(
     case HttpStatusCode.Unauthorized:
       return 'Your session is no longer accepted by the engine. Sign in again.';
     case HttpStatusCode.Forbidden:
-      return `Your account is signed in but is not assigned a role that may view ${resourceLabel}.`;
+      return `Your role in the active organization does not allow viewing ${resourceLabel}.`;
     case HttpStatusCode.ServiceUnavailable:
-      // The engine could not reach Entra to check the token. Nothing is wrong with the session,
+      // The engine could not reach the sign-in service. Nothing is wrong with the session,
       // so signing in again would not help and the operator should simply retry.
-      return 'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.';
+      return 'The sign-in service is unavailable right now. This is not a problem with your account — try again shortly.';
     case undefined:
       return cause instanceof Error ? cause.message : 'Request failed.';
     default:

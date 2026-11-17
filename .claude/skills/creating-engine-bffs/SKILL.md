@@ -13,7 +13,7 @@ name and version, no source, and no earlier skeleton in git history to recover.
 
 The expensive mistake is writing the engine client from memory of what an onboarding API "should"
 look like: a service-secret header the engine never reads, a `/history` route that does not exist,
-and admin reads that sit behind Entra SSO everywhere except a developer machine. Take the scaffold
+and admin reads that sit behind a better-auth admin session everywhere except a developer machine. Take the scaffold
 from `packages/engine`, the one NestJS service in the repository, and the contract from the live
 controller and the OpenAPI document.
 
@@ -46,9 +46,9 @@ lets you make quietly.
   the engine must not be publicly routable and the BFF owns every authorization decision.
 - **Only `/state` is a customer-facing read, and locally the engine will not stop you proving
   otherwise.** `GET /v1/onboardings/:id`, `/:id/transitions` and `/:id/agreements` sit behind
-  `AzureJwtGuard`, but `.env.dist` ships `ADMIN_AUTH_ENABLED=false`, so they answer `200` on a
+  `AdminSessionGuard` (a better-auth session cookie, never a bearer token), but `.env.dist` ships `ADMIN_AUTH_ENABLED=false`, so they answer `200` on a
   developer machine and `401` everywhere auth is on. There is no `/history` route; `/:id/transitions`
-  is its admin-only successor. Never proxy an admin route to an end user, and do not take a local
+  is its admin-only successor. Admin routes take a session cookie from `/v1/auth/*` and answer `401 ADMIN_SESSION_REQUIRED`, `403 TWO_FACTOR_REQUIRED` or `403 ADMIN_PERMISSION_MISSING`; a BFF has no credential for them, and API-key or client-credentials access is not built. Never proxy an admin route to an end user, and do not take a local
   `200` as evidence that you may.
 - **`POST /submit` runs the connector chain inline.** It is not a queue hand-off: both submits against
   the `base` fixture block — 5 s on the first, **10 s** on the second while two mock KYC connectors deliberate, and a real
@@ -128,7 +128,7 @@ lets you make quietly.
 | [Public API contract](references/public-api-contract.md)      | Before writing or changing any call into the engine, every time                  | Every route with its auth, request and response shape; the `/state` descriptor field by field; the error-code table; the webhook payload                                                                                                                             |
 | [Journey walkthrough](references/journey-walkthrough.md)      | Proving a BFF against a running engine, or reproducing a failure by hand         | A verified `curl` transcript of a full journey, the document upload, and the CORS preflight, with real responses                                                                                                                                                     |
 | `packages/shared/openapi/engine.openapi.json`                 | Typing a request or response, or confirming a route's auth and error codes       | The generated HTTP contract: every operation with its security requirement, request and response schemas, and the error codes it documents                                                                                                                           |
-| `docs/IMPLEMENTATION.md` → §11, §3, §6, §7                    | The reasoning behind a contract is needed, or this skill and the engine disagree | HTTP surface, error contract, Entra auth, `/state`, the outbox, documents and object storage                                                                                                                                                                         |
+| `docs/IMPLEMENTATION.md` → §11, §3, §6, §7                    | The reasoning behind a contract is needed, or this skill and the engine disagree | HTTP surface, error contract, admin session auth, `/state`, the outbox, documents and object storage                                                                                                                                                                 |
 | `packages/engine/CLAUDE.md`                                   | Writing the module, config or error classes                                      | Vertical modules, `AppConfig` + `validateConfig`, the two-tier error contract, route versioning                                                                                                                                                                      |
 | `@tsh/ddl-schema` (`packages/shared/ddl-schema/src/index.ts`) | Typing the `/state` descriptor, or re-resolving a field's `when` client-side     | A real, implemented package — unlike `@tsh/shared`. Exports `WorkflowStatus`, `NormalizedWorkflowCondition`, `isNormalizedFileField`, and `evaluateCondition` / `collectConditionReferences`, the engine's own condition evaluator. Never reimplement `when` by hand |
 

@@ -28,6 +28,7 @@ function SecretFormFieldHarness({
   isRequired,
   rules,
   onSubmit,
+  autoComplete,
 }: {
   defaultValue?: string;
   placeholder?: string;
@@ -36,6 +37,7 @@ function SecretFormFieldHarness({
   isRequired?: boolean;
   rules?: UseControllerProps<TestFormValues>['rules'];
   onSubmit?: (values: TestFormValues) => void;
+  autoComplete?: 'current-password' | 'new-password';
 }): ReactElement {
   const { control, handleSubmit } = useForm<TestFormValues>({
     defaultValues: { apiKey: defaultValue },
@@ -54,6 +56,7 @@ function SecretFormFieldHarness({
         disabled={disabled}
         isRequired={isRequired}
         rules={rules}
+        autoComplete={autoComplete}
       />
       <button type="submit">Submit</button>
     </form>
@@ -72,6 +75,19 @@ describe('SecretFormField', () => {
     expect(input).toHaveAttribute('data-bwignore');
     expect(input).toHaveAttribute('name', 'apiKey');
   });
+
+  it.each(['current-password', 'new-password'] as const)(
+    'takes the %s token and drops the password-manager opt-outs',
+    (autoComplete) => {
+      render(<SecretFormFieldHarness defaultValue="pw" autoComplete={autoComplete} />);
+
+      const input = screen.getByLabelText('apiKey');
+      expect(input).toHaveAttribute('autocomplete', autoComplete);
+      expect(input).not.toHaveAttribute('data-1p-ignore');
+      expect(input).not.toHaveAttribute('data-lpignore');
+      expect(input).not.toHaveAttribute('data-bwignore');
+    },
+  );
 
   it('shows what was typed on request and masks it again on the second click', async () => {
     const user = userEvent.setup();

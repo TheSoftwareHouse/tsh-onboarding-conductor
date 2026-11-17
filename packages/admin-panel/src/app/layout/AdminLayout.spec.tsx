@@ -2,9 +2,18 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link, MemoryRouter, Route, Routes } from 'react-router';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AdminLayout } from './AdminLayout';
 import { ADMIN_SECTIONS } from '../navigation';
+
+const { mockedSession } = vi.hoisted(() => ({
+  mockedSession: { role: 'superadmin' as string | null },
+}));
+
+vi.mock('@/services/auth/auth-client', () => ({
+  authClient: { useSession: () => ({ data: { user: { role: mockedSession.role } } }) },
+}));
+vi.mock('./SessionBar/SessionBar', () => ({ SessionBar: () => null }));
 
 function renderLayout(initialPath: string): void {
   render(
@@ -27,6 +36,7 @@ function renderLayout(initialPath: string): void {
 
 afterEach(() => {
   cleanup();
+  mockedSession.role = 'superadmin';
 });
 
 describe('AdminLayout', () => {
@@ -40,6 +50,22 @@ describe('AdminLayout', () => {
         'href',
         section.path,
       );
+    }
+  });
+
+  it('lists the platform sections for a superadmin only', () => {
+    mockedSession.role = 'user';
+    renderLayout(ADMIN_SECTIONS[0].path);
+
+    const sidebar = screen.getByRole('navigation', { name: 'Sections' });
+
+    for (const section of ADMIN_SECTIONS) {
+      const link = within(sidebar).queryByRole('link', { name: section.label });
+      if (section.superadminOnly) {
+        expect(link).not.toBeInTheDocument();
+      } else {
+        expect(link).toBeInTheDocument();
+      }
     }
   });
 

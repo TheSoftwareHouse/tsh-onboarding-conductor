@@ -26,7 +26,7 @@ This document assumes you have the local stack running; see the [README](../READ
 - [Add a connector error handler](#add-a-connector-error-handler)
 - [Add a field type or text format](#add-a-field-type-or-text-format)
 - [Add an email template](#add-an-email-template)
-- [Add an SSO provider](#add-an-sso-provider)
+- [Add a better-auth social provider](#add-a-better-auth-social-provider)
 - [Add a package](#add-a-package)
 
 ## Definition scopes: built-in, fixtures, users
@@ -273,11 +273,14 @@ Two things have to line up.
 ```bash
 curl -X POST http://localhost:3000/v1/admin/agreements \
   -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Cookie: $ADMIN_SESSION_COOKIE" \
   -d '{"key":"my-terms","type":"terms_and_conditions"}'
 ```
 
-The route is guarded, so `$ADMIN_TOKEN` is an operator's Entra access token; locally with
+The route is guarded, so `$ADMIN_SESSION_COOKIE` is an operator's better-auth session cookie
+(`better-auth.session_token=…`), from `POST /v1/auth/sign-in/email` and, for an operator with
+TOTP, `POST /v1/auth/two-factor/verify-totp`, and the operator needs `agreement:write`; see
+[Authentication](../packages/docs/docs/api/authentication.md). Locally with
 `ADMIN_AUTH_ENABLED=false` the header can be dropped. The engine assigns `version: 1`, or
 `MAX(version) + 1` if the family already exists. `type` belongs
 to the family, so a later publish under the same `key` with a different `type` is rejected. There is
@@ -881,22 +884,39 @@ path — `"templatePath": "users/welcome.html"`. Template variables are supplied
 directory is rejected and the connector step fails. `email-templates/fixtures/manual-smtp.html` is a
 working example, referenced as `"templatePath": "fixtures/manual-smtp.html"`.
 
-## Add an SSO provider
+## Add a better-auth social provider
 
-Microsoft Entra ID is the only implemented provider, but signing operators in against a different
-directory is confined to three places:
+Microsoft is the only social provider wired in, but better-auth supports others, and adding one
+touches four places:
 
-1. An entry in the panel's `SSO_PROVIDERS` registry
-   ([auth-config.ts](../packages/admin-panel/src/services/auth/auth-config.ts)), with the
-   client wiring behind it.
-2. A member of the engine's [`SsoProvider`](../packages/engine/src/auth/sso-provider.ts) enum, with
-   an `AdminTokenVerifierPort` implementation registered in `auth.module.ts`.
-3. That provider's required settings in `validateConfig`.
+1. The `socialProviders` block of
+   [`better-auth.factory.ts`](../packages/engine/src/auth/better-auth/better-auth.factory.ts):
+   add the provider beside `microsoft`, built from its own settings and only when they are set.
+   The library's provider reference lists the options each one takes.
+2. The provider's settings in `AppConfig` and `validateBetterAuthConfig`
+   ([`app.config.ts`](../packages/engine/src/config/app.config.ts)), all-or-none like the Microsoft
+   triple, with `.env.dist` and both engine services in `docker-compose.yml` updated to match.
+3. A flag for the panel, the way `VITE_AUTH_MICROSOFT_ENABLED` is derived from the Microsoft
+   settings in
+   [`admin-panel-static.ts`](../packages/engine/src/admin-panel/admin-panel-static.ts), listed in
+   [`admin-panel-runtime-config.ts`](../packages/engine/src/admin-panel/admin-panel-runtime-config.ts)
+   and read in
+   [`auth-config.ts`](../packages/admin-panel/src/services/auth/auth-config.ts). The flag is a
+   boolean; the client secret is never rendered.
+4. A button in the panel's `SignInPage`, calling `authClient.signIn.social({ provider })`.
 
-The request guard, the audit trail and the admin endpoints only ever see the port, so they do not
-change. Both sides must name the same provider — `VITE_SSO_PROVIDER` on the panel and
-`ADMIN_SSO_PROVIDER` on the engine — or the panel hands the engine tokens it refuses. An
-unsupported value is refused by name at startup rather than falling back to Entra.
+The guard, the audit trail and the admin endpoints never see the provider, so they do not change.
+Two rules apply to the new provider automatically, and both are decisions to make deliberately:
+
+- **Invite-only.** The user-creation hook covers a social implicit sign-up, so a person with no
+  pending invitation for their email is refused. The email the provider reports is what the
+  invitation is matched against, so accept only a provider whose email claim you trust.
+- **2FA.** A user with no password (`credential`) account is exempt from the engine's TOTP rule,
+  on the premise that the identity provider enforces MFA. A provider whose tenant does not require
+  MFA would let operators skip it. Either require MFA there, or extend the rule in
+  `better-auth-session.verifier.ts` and `auth-endpoint-guards.hook.ts`, which must agree.
+
+Register `<BETTER_AUTH_URL>/v1/auth/callback/<provider>` as the redirect URI with the provider.
 
 ## Add a package
 

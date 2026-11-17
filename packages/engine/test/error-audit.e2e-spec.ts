@@ -21,18 +21,16 @@ type AuditLogRow = {
  * import time - not per `NestFactory.create()` call - so every app booted from this module in
  * this process shares one validated config snapshot. Auth is therefore enabled for the whole
  * suite; it only matters for scenario 4 below, since every other route this file drives is
- * public and never reaches `AzureJwtGuard`. No real Entra tenant is needed either - the denial
- * this suite exercises (a missing bearer token) is rejected before the verifier is ever called.
+ * public and never reaches `AdminSessionGuard`. The denial this suite exercises (a request
+ * carrying no session cookie) needs no signed-in operator.
  */
-const AUTH_TENANT_ID = '77777777-7777-7777-7777-777777777777';
-const AUTH_AUDIENCE = '88888888-8888-8888-8888-888888888888';
 
 /** `ApiFailureAuditFilter`'s `resourceId` format: `${method} ${matched route template}`. */
 const DOCUMENTS_ROUTE_RESOURCE_ID = 'POST /v1/onboardings/:id/documents';
 const SUBMIT_ROUTE_RESOURCE_ID = 'POST /v1/onboardings/:id/submit';
 const CREATE_ROUTE_RESOURCE_ID = 'POST /v1/onboardings';
 const LIST_ROUTE_RESOURCE_ID = 'GET /v1/onboardings';
-/** `AzureJwtGuard`'s `admin_endpoint` resource id is the bare route path, no method prefix. */
+/** `AdminSessionGuard`'s `admin_endpoint` resource id is the bare route path, no method prefix. */
 const LIST_ADMIN_RESOURCE_ID = '/v1/onboardings';
 
 /** Exactly what `ApiFailureAuditMetadata` may carry - see Proposed Solution S1 of the plan. */
@@ -145,9 +143,6 @@ describe('Error audit logs (e2e)', () => {
     suiteStartedAt.setMilliseconds(suiteStartedAt.getMilliseconds() - 1);
 
     process.env.ADMIN_AUTH_ENABLED = 'true';
-    process.env.AZURE_TENANT_ID = AUTH_TENANT_ID;
-    process.env.AZURE_API_AUDIENCE = AUTH_AUDIENCE;
-    process.env.ADMIN_REQUIRED_ROLES = 'admin';
 
     const { createApp } = await import('../src/main');
 
@@ -323,17 +318,17 @@ describe('Error audit logs (e2e)', () => {
       expect.objectContaining({
         actor_type: 'anonymous',
         actor_id: 'unknown',
-        action: 'auth.token_rejected',
+        action: 'auth.session_missing',
         resource_type: 'admin_endpoint',
         resource_id: LIST_ADMIN_RESOURCE_ID,
-        metadata: { method: 'GET', reason: 'Missing bearer access token' },
+        metadata: { method: 'GET', reason: 'No valid admin session' },
       }),
     );
 
     const authRowsInWindow = await readAuditRows('admin_endpoint', LIST_ADMIN_RESOURCE_ID, since);
     expect(authRowsInWindow).toHaveLength(1);
 
-    // The guard's denial throw is deliberately left unmarked (see `azure-jwt.guard.ts`), so the
+    // The guard's denial throw is deliberately left unmarked (see `admin-session.guard.ts`), so the
     // filter also schedules its own `api.request_rejected` row for the same 401 - a guaranteed
     // duplicate, chosen deliberately over the risk of a failed `auth.*` write leaving zero
     // evidence behind.
@@ -352,8 +347,8 @@ describe('Error audit logs (e2e)', () => {
           method: 'GET',
           route: '/v1/onboardings',
           status: 401,
-          code: null,
-          errorName: 'UnauthorizedException',
+          code: 'ADMIN_SESSION_REQUIRED',
+          errorName: 'AdminSessionRequiredException',
         },
       }),
     );

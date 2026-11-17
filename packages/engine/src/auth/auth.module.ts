@@ -1,25 +1,30 @@
-import { Module, forwardRef } from '@nestjs/common';
+import {
+  Inject,
+  Module,
+  Optional,
+  forwardRef,
+  type MiddlewareConsumer,
+  type NestModule,
+  type OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { Pool } from 'pg';
 import { AuditModule } from '../audit/audit.module';
-import { ADMIN_TOKEN_VERIFIER, type AdminTokenVerifierPort } from './admin-token-verifier.port';
-import { AzureJwtGuard } from './azure-jwt.guard';
-import { AzureTokenVerifier } from './azure-token-verifier';
-import { DEFAULT_SSO_PROVIDER, SUPPORTED_SSO_PROVIDERS, SsoProvider } from './sso-provider';
+import {
+  ADMIN_SESSION_VERIFIER,
+  type AdminSessionVerifierPort,
+} from './admin-session-verifier.port';
+import { AuthMailer } from './auth-mailer';
+import { AdminSessionGuard } from './admin-session.guard';
+import { BetterAuthSessionVerifier } from './better-auth/better-auth-session.verifier';
+import { createAuthPool, createBetterAuth } from './better-auth/better-auth.factory';
+import { BetterAuthMiddleware } from './better-auth/better-auth.middleware';
+import { BETTER_AUTH, BETTER_AUTH_POOL } from './better-auth/better-auth.tokens';
+import type { BetterAuthInstance } from './better-auth/load-better-auth';
+import { SuperadminSeedService } from './superadmin-seed.service';
 
-type AdminTokenVerifierFactory = (configService: ConfigService) => AdminTokenVerifierPort;
-
-/**
- * One entry per SSO provider the engine can verify tokens from. This is the whole switching
- * seam: everything downstream sees only {@link AdminTokenVerifierPort}, so a second directory is
- * a second entry here and nothing else in the request path changes.
- */
-const VERIFIER_FACTORIES: Record<SsoProvider, AdminTokenVerifierFactory> = {
-  [SsoProvider.AZURE]: (configService) =>
-    new AzureTokenVerifier({
-      tenantId: configService.getOrThrow<string>('AZURE_TENANT_ID'),
-      audience: configService.getOrThrow<string>('AZURE_API_AUDIENCE'),
-    }),
-};
+const isAdminAuthEnabled = (configService: ConfigService): boolean =>
+  configService.get<boolean>('ADMIN_AUTH_ENABLED') === true;
 
 @Module({
   // Deferred both ways: the guard records access decisions in the audit log, and the audit
@@ -27,32 +32,50 @@ const VERIFIER_FACTORIES: Record<SsoProvider, AdminTokenVerifierFactory> = {
   imports: [forwardRef(() => AuditModule)],
   providers: [
     {
-      provide: ADMIN_TOKEN_VERIFIER,
+      provide: BETTER_AUTH_POOL,
       inject: [ConfigService],
-      useFactory: (configService: ConfigService): AdminTokenVerifierPort | null => {
-        // Configuration validation already guarantees the selected provider's settings whenever
-        // admin auth is on, so a null verifier only ever means the local escape hatch is in use.
-        if (configService.get<boolean>('ADMIN_AUTH_ENABLED') !== true) {
-          return null;
-        }
-
-        const provider =
-          configService.get<SsoProvider>('ADMIN_SSO_PROVIDER') ?? DEFAULT_SSO_PROVIDER;
-        // Config validation rejects an unknown provider first. Asserting it again keeps the
-        // failure a refusal to start rather than an undefined verifier reaching the guard.
-        const buildVerifier: AdminTokenVerifierFactory | undefined = VERIFIER_FACTORIES[provider];
-
-        if (!buildVerifier) {
-          throw new Error(
-            `ADMIN_SSO_PROVIDER='${String(provider)}' is not a supported SSO provider (one of: ${SUPPORTED_SSO_PROVIDERS.join(', ')})`,
-          );
-        }
-
-        return buildVerifier(configService);
-      },
+      useFactory: (configService: ConfigService): Pool | null =>
+        isAdminAuthEnabled(configService) ? createAuthPool(configService) : null,
     },
-    AzureJwtGuard,
+    {
+      provide: BETTER_AUTH,
+      inject: [ConfigService, BETTER_AUTH_POOL, AuthMailer],
+      useFactory: (configService: ConfigService, pool: Pool | null, mailer: AuthMailer) =>
+        pool ? createBetterAuth(configService, pool, mailer) : null,
+    },
+    {
+      provide: ADMIN_SESSION_VERIFIER,
+      inject: [BETTER_AUTH, BETTER_AUTH_POOL],
+      useFactory: (
+        auth: BetterAuthInstance | null,
+        pool: Pool | null,
+      ): AdminSessionVerifierPort | null =>
+        auth && pool ? new BetterAuthSessionVerifier(auth, pool) : null,
+    },
+    AdminSessionGuard,
+    BetterAuthMiddleware,
+    AuthMailer,
+    SuperadminSeedService,
   ],
-  exports: [ADMIN_TOKEN_VERIFIER, AzureJwtGuard],
+  exports: [ADMIN_SESSION_VERIFIER, AdminSessionGuard, BETTER_AUTH],
 })
-export class AuthModule {}
+export class AuthModule implements NestModule, OnModuleDestroy {
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional() @Inject(BETTER_AUTH_POOL) private readonly pool: Pool | null,
+  ) {}
+
+  configure(consumer: MiddlewareConsumer): void {
+    if (!isAdminAuthEnabled(this.configService)) {
+      return;
+    }
+
+    // `{*path}` also matches `/v1/auth` itself. Mounted here rather than in main.ts so the e2e
+    // suites, which build the app through `Test.createTestingModule`, get the handler too.
+    consumer.apply(BetterAuthMiddleware).forRoutes('v1/auth/{*path}');
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.pool?.end();
+  }
+}

@@ -1,33 +1,31 @@
-import { applyDecorators, HttpStatus, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth } from '@nestjs/swagger';
-import { ApiErrorResponses, frameworkError } from '../openapi/api-error-responses.decorator';
-import { ADMIN_BEARER_AUTH } from '../openapi/openapi.constants';
-import { AzureJwtGuard } from './azure-jwt.guard';
+import { applyDecorators, SetMetadata, UseGuards } from '@nestjs/common';
+import { ApiCookieAuth } from '@nestjs/swagger';
+import { ApiErrorResponses } from '../openapi/api-error-responses.decorator';
+import { ADMIN_SESSION_AUTH } from '../openapi/openapi.constants';
+import { ADMIN_PERMISSION_METADATA, AdminSessionGuard } from './admin-session.guard';
+import type { AdminPermission } from './domain/admin-permissions';
+import { AdminPermissionMissingException } from './errors/admin-permission-missing.exception';
+import { AdminSessionRequiredException } from './errors/admin-session-required.exception';
+import { AuthUnavailableException } from './errors/auth-unavailable.exception';
+import { TwoFactorRequiredException } from './errors/two-factor-required.exception';
 
 /**
- * Marks a handler as part of the admin surface: guards it with `AzureJwtGuard` and documents that
- * guard's contract in the same decorator, so the OpenAPI document can neither claim a route is
- * protected when it is not nor stay silent about one that is. Applied per route rather than per
- * controller because `OnboardingsController` mixes the public flow with admin reads.
+ * Marks a handler as part of the admin surface: guards it with `AdminSessionGuard`, records the
+ * permission the guard checks, and documents the guard's contract in the same decorator, so the
+ * OpenAPI document can neither claim a route is protected when it is not nor stay silent about one
+ * that is. Applied per route rather than per controller because `OnboardingsController` mixes the
+ * public flow with admin reads.
  */
-export function AdminRoute(): MethodDecorator {
+export function AdminRoute(permission: AdminPermission): MethodDecorator {
   return applyDecorators(
-    UseGuards(AzureJwtGuard),
-    ApiBearerAuth(ADMIN_BEARER_AUTH),
+    SetMetadata(ADMIN_PERMISSION_METADATA, permission),
+    UseGuards(AdminSessionGuard),
+    ApiCookieAuth(ADMIN_SESSION_AUTH),
     ApiErrorResponses(
-      frameworkError(
-        HttpStatus.UNAUTHORIZED,
-        'No bearer token, or the token fails signature, issuer, audience or expiry verification.',
-      ),
-      frameworkError(
-        HttpStatus.FORBIDDEN,
-        'The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in ' +
-          'again cannot fix this.',
-      ),
-      frameworkError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        "Entra's signing key set could not be reached, so the token was never judged. Retry.",
-      ),
+      AdminSessionRequiredException,
+      TwoFactorRequiredException,
+      AdminPermissionMissingException,
+      AuthUnavailableException,
     ),
   );
 }

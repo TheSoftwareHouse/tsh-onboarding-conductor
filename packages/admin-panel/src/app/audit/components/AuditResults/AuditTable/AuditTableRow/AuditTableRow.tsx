@@ -24,7 +24,11 @@ export function AuditTableRow({ event }: AuditTableRowProps): ReactElement {
         {formatLogDateTime(event.occurredAt)}
       </Td>
       <Td variant="text">
-        <AuditActorCell actorType={event.actorType} actorId={event.actorId} />
+        <AuditActorCell
+          actorType={event.actorType}
+          actorId={event.actorId}
+          metadata={event.metadata}
+        />
       </Td>
       <Td
         variant="mono"
