@@ -3141,7 +3141,11 @@ schema.
 bootstrap. With `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD` set and no user holding the
 `superadmin` role, it creates one through the admin plugin's `createUser` and logs the email, never
 the password. A second boot finds the superadmin and does nothing. The seeded user is an ordinary
-credential user: it must enroll TOTP before any admin route answers it.
+credential user: it must enroll TOTP before any admin route answers it, unless
+`AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED=false`. That flag (default `true`) waives the TOTP rule for a
+user holding the `superadmin` role only, in both `BetterAuthSessionVerifier` and the endpoint-guard
+hook; the engine renders it into `/config.js` as `VITE_AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED`, and the
+panel then offers the setup screen with a "Skip for now" button instead of forcing it.
 
 **Mail.** `AuthMailer` (`src/auth/auth-mailer.ts`) sends the invitation
 (`<BETTER_AUTH_URL>/accept-invitation/<invitation id>`) and the password-reset link through
@@ -3157,7 +3161,8 @@ neither. `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET` and `AUTH_MI
 are optional, all or none, and the tenant must be a GUID; the redirect URI to register is
 `<BETTER_AUTH_URL>/v1/auth/callback/microsoft`. The pair and the triple are validated even while
 auth is off. The secrets never reach the panel: `/config.js` carries only
-`VITE_AUTH_MICROSOFT_ENABLED`, derived from the triple, beside `VITE_AUTH_ENABLED`. The Entra-era
+`VITE_AUTH_MICROSOFT_ENABLED`, derived from the triple, and
+`VITE_AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED`, beside `VITE_AUTH_ENABLED`. The Entra-era
 variables — the SSO provider switch, the Azure tenant and audience pair, the required-roles
 allowlist and the panel's `VITE_AZURE_*` family — no longer exist.
 

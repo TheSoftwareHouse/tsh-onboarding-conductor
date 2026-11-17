@@ -45,12 +45,19 @@ const isAdminAuthEnabled = (configService: ConfigService): boolean =>
     },
     {
       provide: ADMIN_SESSION_VERIFIER,
-      inject: [BETTER_AUTH, BETTER_AUTH_POOL],
+      inject: [BETTER_AUTH, BETTER_AUTH_POOL, ConfigService],
       useFactory: (
         auth: BetterAuthInstance | null,
         pool: Pool | null,
+        configService: ConfigService,
       ): AdminSessionVerifierPort | null =>
-        auth && pool ? new BetterAuthSessionVerifier(auth, pool) : null,
+        auth && pool
+          ? new BetterAuthSessionVerifier(
+              auth,
+              pool,
+              configService.getOrThrow<boolean>('AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED'),
+            )
+          : null,
     },
     AdminSessionGuard,
     BetterAuthMiddleware,

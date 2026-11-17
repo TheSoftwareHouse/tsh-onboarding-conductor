@@ -12,6 +12,7 @@ const lookups = (overrides: Partial<EndpointGuardLookups> = {}): EndpointGuardLo
   hasCredentialAccount: jest.fn().mockResolvedValue(true),
   findUser: jest.fn().mockResolvedValue({ role: 'superadmin', banned: false }),
   countActiveSuperadminsExcept: jest.fn().mockResolvedValue(0),
+  superadminTwoFactorRequired: true,
   ...overrides,
 });
 
@@ -41,6 +42,40 @@ describe('findEndpointGuardRefusal', () => {
           lookups({ hasCredentialAccount: jest.fn().mockResolvedValue(false) }),
         ),
       ).resolves.toBeNull();
+    });
+
+    it('refuses a superadmin without TOTP while AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED is true', async () => {
+      const superadmin = { ...credentialUserWithoutTotp, role: 'superadmin' };
+
+      await expect(
+        findEndpointGuardRefusal(
+          '/admin/list-users',
+          undefined,
+          lookups({ findSessionUser: jest.fn().mockResolvedValue(superadmin) }),
+        ),
+      ).resolves.toBe(EndpointGuardRefusal.TWO_FACTOR_REQUIRED);
+    });
+
+    it('exempts only a superadmin when AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED is false', async () => {
+      const superadmin = { ...credentialUserWithoutTotp, role: 'user,superadmin' };
+
+      await expect(
+        findEndpointGuardRefusal(
+          '/admin/list-users',
+          undefined,
+          lookups({
+            findSessionUser: jest.fn().mockResolvedValue(superadmin),
+            superadminTwoFactorRequired: false,
+          }),
+        ),
+      ).resolves.toBeNull();
+      await expect(
+        findEndpointGuardRefusal(
+          '/admin/list-users',
+          undefined,
+          lookups({ superadminTwoFactorRequired: false }),
+        ),
+      ).resolves.toBe(EndpointGuardRefusal.TWO_FACTOR_REQUIRED);
     });
 
     it('lets a user with TOTP through without a credential lookup', async () => {

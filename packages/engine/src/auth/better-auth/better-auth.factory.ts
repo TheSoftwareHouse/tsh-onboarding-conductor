@@ -170,6 +170,9 @@ export async function createBetterAuth(
       before: api.createAuthMiddleware(async (ctx) => {
         const lookups: EndpointGuardLookups = {
           ...store,
+          superadminTwoFactorRequired: configService.getOrThrow<boolean>(
+            'AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED',
+          ),
           findSessionUser: async () => (await api.getSessionFromCtx(ctx as never))?.user ?? null,
         };
         const refusal = await findEndpointGuardRefusal(ctx.path, ctx.body, lookups);

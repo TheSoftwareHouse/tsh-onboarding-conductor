@@ -1,4 +1,4 @@
-import { hasSuperadminRole } from '../domain/admin-permissions';
+import { hasSuperadminRole, isTwoFactorWaived } from '../domain/admin-permissions';
 
 export enum EndpointGuardRefusal {
   TWO_FACTOR_REQUIRED = 'TWO_FACTOR_REQUIRED',
@@ -12,10 +12,13 @@ export interface EndpointGuardLookups {
   findUser(userId: string): Promise<{ role: string | null; banned: boolean } | null>;
   /** Non-banned superadmins other than the given user. */
   countActiveSuperadminsExcept(userId: string): Promise<number>;
+  /** `AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED`: `false` exempts a superadmin from the 2FA rule. */
+  superadminTwoFactorRequired: boolean;
 }
 
 export interface EndpointGuardSessionUser {
   id: string;
+  role?: string | null;
   twoFactorEnabled?: boolean | null;
 }
 
@@ -34,7 +37,8 @@ const SUPERADMIN_LOSING_PATHS = [
 /**
  * The refusal better-auth's own `/admin/*` and `/organization/*` endpoints owe, or null to let the
  * request through. They never pass `AdminSessionGuard`, so this re-applies its 2FA rule (a user
- * with a credential account needs `twoFactorEnabled`; a Microsoft-only user is exempt) and keeps at
+ * with a credential account needs `twoFactorEnabled`; a Microsoft-only user is exempt, and so is a
+ * superadmin when `AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED` is false) and keeps at
  * least one non-banned superadmin.
  */
 export async function findEndpointGuardRefusal(
@@ -58,6 +62,7 @@ export async function findEndpointGuardRefusal(
     if (
       sessionUser &&
       sessionUser.twoFactorEnabled !== true &&
+      !isTwoFactorWaived(sessionUser.role, lookups.superadminTwoFactorRequired) &&
       (await lookups.hasCredentialAccount(sessionUser.id))
     ) {
       return EndpointGuardRefusal.TWO_FACTOR_REQUIRED;

@@ -4,14 +4,21 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignInPage } from './SignInPage';
 
-const { mockedSocial, mockedSignInEmail, mockedRequestReset, mockedMicrosoftEnabled, mockedToast } =
-  vi.hoisted(() => ({
-    mockedSocial: vi.fn(),
-    mockedSignInEmail: vi.fn(),
-    mockedRequestReset: vi.fn(),
-    mockedMicrosoftEnabled: vi.fn<() => boolean>(),
-    mockedToast: vi.fn(),
-  }));
+const {
+  mockedSocial,
+  mockedSignInEmail,
+  mockedRequestReset,
+  mockedMicrosoftEnabled,
+  mockedSuperadminTwoFactorRequired,
+  mockedToast,
+} = vi.hoisted(() => ({
+  mockedSocial: vi.fn(),
+  mockedSignInEmail: vi.fn(),
+  mockedRequestReset: vi.fn(),
+  mockedMicrosoftEnabled: vi.fn<() => boolean>(),
+  mockedSuperadminTwoFactorRequired: vi.fn<() => boolean>(),
+  mockedToast: vi.fn(),
+}));
 
 vi.mock('@/services/auth/auth-client', () => ({
   authClient: {
@@ -22,6 +29,7 @@ vi.mock('@/services/auth/auth-client', () => ({
 
 vi.mock('@/services/auth/auth-config', () => ({
   isMicrosoftSignInEnabled: mockedMicrosoftEnabled,
+  isSuperadminTwoFactorRequired: mockedSuperadminTwoFactorRequired,
 }));
 
 vi.mock('@/components/ui/Toast/toast-manager', () => ({ showSuccessToast: mockedToast }));
@@ -35,6 +43,7 @@ async function fillAndSubmit(): Promise<void> {
 beforeEach(() => {
   vi.clearAllMocks();
   mockedMicrosoftEnabled.mockReturnValue(true);
+  mockedSuperadminTwoFactorRequired.mockReturnValue(true);
   mockedSocial.mockResolvedValue({});
   mockedSignInEmail.mockResolvedValue({ data: { user: { twoFactorEnabled: true } }, error: null });
   mockedRequestReset.mockResolvedValue({ data: {}, error: null });
@@ -122,6 +131,48 @@ describe('SignInPage', () => {
   it('asks for 2FA setup after a credential sign-in without 2FA', async () => {
     mockedSignInEmail.mockResolvedValue({
       data: { user: { twoFactorEnabled: false } },
+      error: null,
+    });
+    const onTwoFactorSetupRequired = vi.fn();
+
+    render(<SignInPage onTwoFactorSetupRequired={onTwoFactorSetupRequired} />);
+    await fillAndSubmit();
+
+    await waitFor(() => expect(onTwoFactorSetupRequired).toHaveBeenCalledTimes(1));
+  });
+
+  it.each([
+    [true, 'required'],
+    [false, 'offered'],
+  ])('treats 2FA setup for a superadmin as %s -> %s', async (isRequired, expected) => {
+    mockedSuperadminTwoFactorRequired.mockReturnValue(isRequired);
+    mockedSignInEmail.mockResolvedValue({
+      data: { user: { twoFactorEnabled: false, role: 'superadmin' } },
+      error: null,
+    });
+    const onTwoFactorSetupRequired = vi.fn();
+    const onTwoFactorSetupOffered = vi.fn();
+
+    render(
+      <SignInPage
+        onTwoFactorSetupRequired={onTwoFactorSetupRequired}
+        onTwoFactorSetupOffered={onTwoFactorSetupOffered}
+      />,
+    );
+    await fillAndSubmit();
+
+    const [called, notCalled] =
+      expected === 'required'
+        ? [onTwoFactorSetupRequired, onTwoFactorSetupOffered]
+        : [onTwoFactorSetupOffered, onTwoFactorSetupRequired];
+    await waitFor(() => expect(called).toHaveBeenCalledTimes(1));
+    expect(notCalled).not.toHaveBeenCalled();
+  });
+
+  it('still requires 2FA setup from a non-superadmin when superadmin 2FA is optional', async () => {
+    mockedSuperadminTwoFactorRequired.mockReturnValue(false);
+    mockedSignInEmail.mockResolvedValue({
+      data: { user: { twoFactorEnabled: false, role: 'user' } },
       error: null,
     });
     const onTwoFactorSetupRequired = vi.fn();

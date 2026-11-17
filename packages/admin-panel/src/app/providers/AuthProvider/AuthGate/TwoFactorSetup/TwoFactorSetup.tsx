@@ -15,6 +15,8 @@ import { AuthShell } from '../AuthShell/AuthShell';
 export interface TwoFactorSetupProps {
   /** Called after the operator has seen the backup codes and continued. */
   onDone: () => void;
+  /** Present only when enrollment is optional for this operator; renders a skip button. */
+  onSkip?: () => void;
 }
 
 interface Enrollment {
@@ -140,12 +142,14 @@ function VerifyStep({
  * Enrolls the signed-in operator in TOTP: password, QR code, first code, then the backup codes,
  * which are shown once and never again.
  */
-export function TwoFactorSetup({ onDone }: TwoFactorSetupProps): ReactElement {
+export function TwoFactorSetup({ onDone, onSkip }: TwoFactorSetupProps): ReactElement {
   const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
   const [isVerified, setIsVerified] = useState(false);
 
   const description = !enrollment
-    ? 'Your account needs two-factor authentication before you can use the panel.'
+    ? onSkip
+      ? 'Two-factor authentication is recommended for your account. You can set it up now or skip it.'
+      : 'Your account needs two-factor authentication before you can use the panel.'
     : isVerified
       ? 'Save these backup codes now. Each works once, and they are not shown again.'
       : 'Scan the QR code with an authenticator app, then enter the code it shows.';
@@ -184,6 +188,11 @@ export function TwoFactorSetup({ onDone }: TwoFactorSetupProps): ReactElement {
               I have saved my backup codes
             </Button>
           </div>
+        ) : null}
+        {onSkip && !isVerified ? (
+          <Button variant="quiet" onClick={onSkip}>
+            Skip for now
+          </Button>
         ) : null}
       </div>
     </AuthShell>

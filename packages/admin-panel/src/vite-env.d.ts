@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly VITE_AUTH_ENABLED?: string;
   /** Set by the engine in `/config.js` when Microsoft sign-in is configured; never set at build time. */
   readonly VITE_AUTH_MICROSOFT_ENABLED?: string;
+  /** The engine's `AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED`, written into `/config.js`; never set at build time. */
+  readonly VITE_AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED?: string;
   /** The engine's own `NODE_ENV`, written into `/config.js` by the engine; never set at build time. */
   readonly VITE_NODE_ENV?: string;
   /** The engine's `ENVIRONMENT_NAME`, written into `/config.js` by the engine; never set at build time. */
