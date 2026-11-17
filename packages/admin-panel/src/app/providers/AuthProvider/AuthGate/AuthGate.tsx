@@ -1,127 +1,92 @@
 import type { ReactElement, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import {
-  EventType,
-  InteractionStatus,
-  InteractionType,
-  type EventMessage,
-} from '@azure/msal-browser';
-import { useIsAuthenticated, useMsal } from '@azure/msal-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
+import { ApiError } from '@/services/api/api-error';
+import { authClient } from '@/services/auth/auth-client';
 import { isAuthEnabled } from '@/services/auth/auth-config';
 import { AuthShell } from './AuthShell/AuthShell';
+import { RESET_PASSWORD_PATH, ResetPassword } from './ResetPassword/ResetPassword';
 import { SignInPage } from './SignInPage/SignInPage';
+import { TwoFactorChallenge } from './TwoFactorChallenge/TwoFactorChallenge';
+import { TwoFactorSetup } from './TwoFactorSetup/TwoFactorSetup';
 
 export interface AuthGateProps {
   children: ReactNode;
 }
 
-// MSAL v5 has no LOGIN_FAILURE: a failed redirect sign-in surfaces as ACQUIRE_TOKEN_FAILURE.
-const FAILURE_EVENTS: readonly string[] = [
-  EventType.ACQUIRE_TOKEN_FAILURE,
-  EventType.BROKERED_REQUEST_FAILURE,
-];
+/** The engine's answer to a credential account that has not enrolled in two-factor authentication. */
+const TWO_FACTOR_REQUIRED_CODE = 'TWO_FACTOR_REQUIRED';
 
-/**
- * How long MSAL may stay in `Startup` before the gate stops waiting on it. `MsalProvider`
- * swallows a rejected `initialize()` and only leaves `Startup` on the success path, so a bad
- * authority or a blocked network would otherwise hold the panel on "Signing in…" indefinitely
- * with nothing said about why.
- */
-const STARTUP_TIMEOUT_MS = 15_000;
-
-const STARTUP_TIMEOUT_MESSAGE =
-  'Sign-in could not be started. Reload the page, and check the panel’s Entra configuration if this persists.';
-
-/**
- * Whether the failure came from an attempt the operator is actually waiting on.
- *
- * `acquireTokenSilent` runs on every request the panel makes, so a background renewal failing —
- * an expired session, a revoked consent — raises `ACQUIRE_TOKEN_FAILURE` during ordinary use.
- * Its message describes a token refresh rather than a sign-in, and this gate can never render it
- * while the operator is signed in, so recording it would only leave a misleading string to be
- * shown on the sign-in screen they eventually land on.
- */
-function isInteractiveFailure(message: EventMessage): boolean {
-  return message.interactionType !== InteractionType.Silent;
+function isTwoFactorRequired(error: unknown): boolean {
+  return (
+    error instanceof ApiError && error.status === 403 && error.code === TWO_FACTOR_REQUIRED_CODE
+  );
 }
 
-function describeAuthFailure(message: EventMessage): string {
-  const error = message.error;
-
-  if (!error) {
-    return 'Sign-in failed.';
-  }
-
-  // The Entra error code (AADSTS…) is the part that identifies the misconfiguration, so it is
-  // shown rather than hidden behind a generic message.
-  const code = 'errorCode' in error && error.errorCode ? error.errorCode : null;
-
-  return code ? `Sign-in failed (${code}): ${error.message}` : `Sign-in failed: ${error.message}`;
-}
-
-function SignedInGate({ children }: AuthGateProps): ReactElement {
-  const { instance, inProgress, accounts } = useMsal();
-  const isAuthenticated = useIsAuthenticated();
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [startupTimedOut, setStartupTimedOut] = useState(false);
-  const isStartingUp = inProgress === InteractionStatus.Startup;
+/** True once any query or mutation the panel runs fails with `403 TWO_FACTOR_REQUIRED`. */
+function useTwoFactorSetupRequired(): [boolean, (value: boolean) => void] {
+  const queryClient = useQueryClient();
+  const [isRequired, setIsRequired] = useState(false);
 
   useEffect(() => {
-    if (!instance.getActiveAccount() && accounts.length > 0) {
-      instance.setActiveAccount(accounts[0]);
-    }
-  }, [accounts, instance]);
-
-  useEffect(() => {
-    if (!isStartingUp) {
-      setStartupTimedOut(false);
-
-      return;
-    }
-
-    const timer = window.setTimeout(() => setStartupTimedOut(true), STARTUP_TIMEOUT_MS);
-
-    return () => window.clearTimeout(timer);
-  }, [isStartingUp]);
-
-  // A failure reported before sign-in completed has been answered by the sign-in that followed,
-  // so it must not survive to be shown the next time the operator reaches the sign-in screen.
-  useEffect(() => {
-    if (isAuthenticated) {
-      setAuthError(null);
-    }
-  }, [isAuthenticated]);
-
-  useEffect(() => {
-    // MsalProvider deliberately swallows redirect errors and expects them to be observed here.
-    // Without this the browser simply returns to the sign-in screen with no explanation.
-    const callbackId = instance.addEventCallback((message: EventMessage) => {
-      if (FAILURE_EVENTS.includes(message.eventType) && isInteractiveFailure(message)) {
-        setAuthError(describeAuthFailure(message));
-      } else if (
-        message.eventType === EventType.LOGIN_SUCCESS ||
-        message.eventType === EventType.ACQUIRE_TOKEN_SUCCESS
+    const unsubscribeQueries = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        event.type === 'updated' &&
+        event.action.type === 'error' &&
+        isTwoFactorRequired(event.action.error)
       ) {
-        setAuthError(null);
+        setIsRequired(true);
+      }
+    });
+    const unsubscribeMutations = queryClient.getMutationCache().subscribe((event) => {
+      if (
+        event.type === 'updated' &&
+        event.action.type === 'error' &&
+        isTwoFactorRequired(event.action.error)
+      ) {
+        setIsRequired(true);
       }
     });
 
     return () => {
-      if (callbackId) {
-        instance.removeEventCallback(callbackId);
-      }
+      unsubscribeQueries();
+      unsubscribeMutations();
     };
-  }, [instance]);
+  }, [queryClient]);
 
-  // MSAL never came up. Offering sign-in is more use than a spinner that will not resolve: the
-  // attempt reports its own failure if the client is still unusable.
-  if (isStartingUp && startupTimedOut) {
-    return <SignInPage error={authError ?? STARTUP_TIMEOUT_MESSAGE} />;
+  return [isRequired, setIsRequired];
+}
+
+function SignedInGate({ children }: AuthGateProps): ReactElement {
+  const queryClient = useQueryClient();
+  const { data: session, isPending, error } = authClient.useSession();
+  const [isChallenged, setIsChallenged] = useState(false);
+  const [isSetupRequired, setIsSetupRequired] = useTwoFactorSetupRequired();
+  // better-auth flags a refetch (after every sign-in) as pending too, with the old data still
+  // there; only the first load may replace the screen, or a half-typed 2FA code is wiped.
+  const [hasLoaded, setHasLoaded] = useState(false);
+
+  if (!isPending && !hasLoaded) {
+    setHasLoaded(true);
   }
 
-  // Covers MSAL's startup, the redirect coming back from Entra, and sign-out.
-  if (inProgress !== InteractionStatus.None) {
+  // The flags describe one operator's sign-in; they must not outlive it and greet the next one.
+  // Reset on the signed-in -> signed-out edge only: the sign-in form raises the setup flag just
+  // before the session it belongs to appears.
+  const [wasSignedIn, setWasSignedIn] = useState(false);
+  const isSignedIn = Boolean(session);
+
+  if (isSignedIn !== wasSignedIn) {
+    setWasSignedIn(isSignedIn);
+
+    if (!isSignedIn) {
+      setIsChallenged(false);
+      setIsSetupRequired(false);
+    }
+  }
+
+  if (isPending && !hasLoaded) {
     return (
       <AuthShell>
         <StatusRegion>Signing in&#8230;</StatusRegion>
@@ -129,8 +94,31 @@ function SignedInGate({ children }: AuthGateProps): ReactElement {
     );
   }
 
-  if (!isAuthenticated) {
-    return <SignInPage error={authError} />;
+  if (!session) {
+    return isChallenged ? (
+      <TwoFactorChallenge
+        onVerified={() => setIsChallenged(false)}
+        onCancel={() => setIsChallenged(false)}
+      />
+    ) : (
+      <SignInPage
+        error={error?.message ?? null}
+        onTwoFactorRequired={() => setIsChallenged(true)}
+        onTwoFactorSetupRequired={() => setIsSetupRequired(true)}
+      />
+    );
+  }
+
+  if (isSetupRequired) {
+    return (
+      <TwoFactorSetup
+        onDone={() => {
+          setIsSetupRequired(false);
+          // Requests that were refused while 2FA was missing are stale; refetch them on mount.
+          void queryClient.invalidateQueries();
+        }}
+      />
+    );
   }
 
   return <>{children}</>;
@@ -138,11 +126,16 @@ function SignedInGate({ children }: AuthGateProps): ReactElement {
 
 /**
  * Renders the panel only for a signed-in operator. This gate decides whether the UI appears;
- * the engine's own token verification is what actually protects the data.
+ * the engine's own session check is what actually protects the data.
  */
 export function AuthGate({ children }: AuthGateProps): ReactElement {
   if (!isAuthEnabled()) {
     return <>{children}</>;
+  }
+
+  // Sits above the router, so the mailed reset link is matched on the raw location.
+  if (window.location.pathname.replace(/\/+$/, '') === RESET_PASSWORD_PATH) {
+    return <ResetPassword />;
   }
 
   return <SignedInGate>{children}</SignedInGate>;

@@ -1,34 +1,176 @@
 import type { ReactElement } from 'react';
 import { useState } from 'react';
-import { useMsal } from '@azure/msal-react';
-import { SSO_PROVIDERS, readAuthConfig } from '@/services/auth/auth-config';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm } from 'react-hook-form';
+import { z } from 'zod';
+import { authClient } from '@/services/auth/auth-client';
+import { isMicrosoftSignInEnabled } from '@/services/auth/auth-config';
 import { Button } from '@/components/ui/Button/Button';
+import { SecretFormField } from '@/components/ui/form/SecretFormField/SecretFormField';
+import { TextFormField } from '@/components/ui/form/TextFormField/TextFormField';
 import { ArrowForward } from '@/components/ui/icons';
+import { showSuccessToast } from '@/components/ui/Toast/toast-manager';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { AuthShell } from '../AuthShell/AuthShell';
+import { RESET_PASSWORD_PATH } from '../ResetPassword/ResetPassword';
 
 export interface SignInPageProps {
-  /** Failure reported by MSAL for an earlier attempt, typically a redirect that came back broken. */
+  /** Failure reported for an earlier attempt. */
   error?: string | null;
+  /** The password was right and a second factor is required. */
+  onTwoFactorRequired?: () => void;
+  /** A credential sign-in finished without a second factor, so the account still has to enroll. */
+  onTwoFactorSetupRequired?: () => void;
 }
 
-/** Sign-in screen shown in place of the panel until an account is present. */
-export function SignInPage({ error = null }: SignInPageProps): ReactElement {
-  const { instance } = useMsal();
-  // Safe to read during render: the client this page needs is built from the same configuration,
-  // so an unreadable one would have failed before the gate ever rendered.
-  const { apiScope, provider } = readAuthConfig();
-  const [startError, setStartError] = useState<string | null>(null);
-  const visibleError = startError ?? error;
+const signInSchema = z.object({
+  email: z.string().trim().email('Enter a valid email address.'),
+  password: z.string().min(1, 'Enter your password.'),
+});
+const forgotSchema = z.object({ email: signInSchema.shape.email });
 
-  const handleSignIn = (): void => {
-    setStartError(null);
+type SignInValues = z.infer<typeof signInSchema>;
+type ForgotValues = z.infer<typeof forgotSchema>;
 
-    // Requesting the engine scope during sign-in gets consent out of the way up front, so the
-    // first data request can be served silently from the cache.
-    instance.loginRedirect({ scopes: [apiScope] }).catch((cause: unknown) => {
-      setStartError(cause instanceof Error ? cause.message : 'Sign-in could not be started.');
+function SignInForm({
+  onForgot,
+  onTwoFactorRequired,
+  onTwoFactorSetupRequired,
+  onFailure,
+}: {
+  onForgot: () => void;
+  onTwoFactorRequired?: () => void;
+  onTwoFactorSetupRequired?: () => void;
+  onFailure: (message: string | null) => void;
+}): ReactElement {
+  const {
+    control,
+    handleSubmit,
+    formState: { isSubmitting },
+  } = useForm<SignInValues>({
+    defaultValues: { email: '', password: '' },
+    resolver: zodResolver(signInSchema),
+  });
+
+  const submit = handleSubmit(async (values) => {
+    onFailure(null);
+    const { data, error } = await authClient.signIn.email(values);
+    if (error) {
+      onFailure(error.message ?? 'Sign-in failed.');
+      return;
+    }
+    if (data && 'twoFactorRedirect' in data && data.twoFactorRedirect) {
+      onTwoFactorRequired?.();
+      return;
+    }
+    // An email sign-in is always a credential account, which must carry 2FA.
+    if (!data?.user.twoFactorEnabled) {
+      onTwoFactorSetupRequired?.();
+    }
+  });
+
+  return (
+    <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+      <TextFormField
+        control={control}
+        name="email"
+        controlId="sign-in-email"
+        label="Email"
+        autoComplete="username"
+        isRequired
+      />
+      <SecretFormField
+        autoComplete="current-password"
+        control={control}
+        name="password"
+        controlId="sign-in-password"
+        label="Password"
+        revealLabel="password"
+        isRequired
+      />
+      <Button type="submit" variant="primary" size="xl" disabled={isSubmitting}>
+        {isSubmitting ? 'Signing in…' : 'Sign in'}
+      </Button>
+      <Button variant="quiet" onClick={onForgot}>
+        Forgot password
+      </Button>
+    </form>
+  );
+}
+
+function ForgotPasswordForm({
+  onBack,
+  onFailure,
+}: {
+  onBack: () => void;
+  onFailure: (message: string | null) => void;
+}): ReactElement {
+  const {
+    control,
+    handleSubmit,
+    formState: { isSubmitting },
+  } = useForm<ForgotValues>({
+    defaultValues: { email: '' },
+    resolver: zodResolver(forgotSchema),
+  });
+
+  const submit = handleSubmit(async ({ email }) => {
+    onFailure(null);
+    const { error } = await authClient.requestPasswordReset({
+      email,
+      redirectTo: `${window.location.origin}${RESET_PASSWORD_PATH}`,
     });
+    if (error) {
+      onFailure(error.message ?? 'The reset link could not be requested.');
+      return;
+    }
+    showSuccessToast('If the address has an account, a reset link is on its way');
+    onBack();
+  });
+
+  return (
+    <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+      <TextFormField
+        control={control}
+        name="email"
+        controlId="forgot-password-email"
+        label="Email"
+        autoComplete="username"
+        isRequired
+      />
+      <Button type="submit" variant="primary" size="xl" disabled={isSubmitting}>
+        {isSubmitting ? 'Sending…' : 'Send reset link'}
+      </Button>
+      <Button variant="quiet" onClick={onBack}>
+        Back to sign in
+      </Button>
+    </form>
+  );
+}
+
+/** Sign-in screen shown in place of the panel until a session is present. */
+export function SignInPage({
+  error = null,
+  onTwoFactorRequired,
+  onTwoFactorSetupRequired,
+}: SignInPageProps): ReactElement {
+  const [isForgotten, setIsForgotten] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const visibleError = failure ?? error;
+
+  const handleMicrosoftSignIn = (): void => {
+    setFailure(null);
+
+    authClient.signIn
+      .social({ provider: 'microsoft', callbackURL: window.location.href })
+      .catch((cause: unknown) => {
+        setFailure(cause instanceof Error ? cause.message : 'Sign-in could not be started.');
+      });
+  };
+
+  const toggleForgotten = (): void => {
+    setFailure(null);
+    setIsForgotten((previous) => !previous);
   };
 
   return (
@@ -39,18 +181,32 @@ export function SignInPage({ error = null }: SignInPageProps): ReactElement {
             Admin onboardings
           </Typography>
           <Typography variant="body-md" className="text-fg-3">
-            Sign in with your work account to continue.
+            {isForgotten
+              ? 'Enter your email and we will send you a link to choose a new password.'
+              : 'Sign in to continue.'}
           </Typography>
         </div>
-        <Button
-          variant="primary"
-          size="xl"
-          className="w-full justify-between"
-          onClick={handleSignIn}
-        >
-          {SSO_PROVIDERS[provider].signInLabel}
-          <ArrowForward aria-hidden className="size-5" />
-        </Button>
+        {isForgotten ? (
+          <ForgotPasswordForm onBack={toggleForgotten} onFailure={setFailure} />
+        ) : (
+          <SignInForm
+            onForgot={toggleForgotten}
+            onTwoFactorRequired={onTwoFactorRequired}
+            onTwoFactorSetupRequired={onTwoFactorSetupRequired}
+            onFailure={setFailure}
+          />
+        )}
+        {!isForgotten && isMicrosoftSignInEnabled() ? (
+          <Button
+            variant="outline"
+            size="xl"
+            className="w-full justify-between"
+            onClick={handleMicrosoftSignIn}
+          >
+            Sign in with Microsoft
+            <ArrowForward aria-hidden className="size-5" />
+          </Button>
+        ) : null}
         {visibleError ? (
           <Typography variant="body-sm" className="text-tsh-red" role="alert">
             {visibleError}

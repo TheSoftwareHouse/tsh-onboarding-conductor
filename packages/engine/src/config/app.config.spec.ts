@@ -16,9 +16,17 @@ describe('validateConfig', () => {
     ADMIN_AUTH_ENABLED: 'false',
   };
 
-  const azureConfig = {
-    AZURE_TENANT_ID: '11111111-1111-1111-1111-111111111111',
-    AZURE_API_AUDIENCE: '22222222-2222-2222-2222-222222222222',
+  const betterAuthConfig = {
+    BETTER_AUTH_SECRET: 'x'.repeat(32),
+    BETTER_AUTH_URL: 'http://localhost:3000',
+    AUTH_SMTP_URL: 'smtp://mailhog:1025',
+    AUTH_MAIL_FROM: 'no-reply@example.test',
+  };
+
+  const microsoftConfig = {
+    AUTH_MICROSOFT_CLIENT_ID: '33333333-3333-3333-3333-333333333333',
+    AUTH_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
+    AUTH_MICROSOFT_TENANT_ID: '11111111-1111-1111-1111-111111111111',
   };
 
   it('leaves WORKFLOWS_USERS_DIR unset when it is not provided', () => {
@@ -610,7 +618,7 @@ describe('validateConfig', () => {
       expect(
         validateConfig({
           ...baseConfig,
-          ...azureConfig,
+          ...betterAuthConfig,
           // Production refuses to start with the admin-auth escape hatch open, which is a rule
           // of its own; this case is only about the mock pairs.
           ADMIN_AUTH_ENABLED: 'true',
@@ -663,138 +671,96 @@ describe('validateConfig', () => {
 
   describe('admin endpoint authentication', () => {
     it('is enabled when the flag is absent, so an unconfigured deployment cannot serve admin data unguarded', () => {
-      const configWithoutFlag = { ...baseConfig, ...azureConfig };
+      const configWithoutFlag = { ...baseConfig, ...betterAuthConfig };
       delete (configWithoutFlag as Partial<typeof configWithoutFlag>).ADMIN_AUTH_ENABLED;
 
       expect(validateConfig(configWithoutFlag).ADMIN_AUTH_ENABLED).toBe(true);
     });
 
-    it('refuses to start without AZURE_TENANT_ID', () => {
-      expect(() =>
-        validateConfig({
-          ...baseConfig,
-          ...azureConfig,
-          ADMIN_AUTH_ENABLED: 'true',
-          AZURE_TENANT_ID: undefined,
-        }),
-      ).toThrow(/AZURE_TENANT_ID is required when ADMIN_AUTH_ENABLED=true/);
-    });
-
-    it('refuses to start without AZURE_API_AUDIENCE', () => {
-      expect(() =>
-        validateConfig({
-          ...baseConfig,
-          ...azureConfig,
-          ADMIN_AUTH_ENABLED: 'true',
-          AZURE_API_AUDIENCE: '   ',
-        }),
-      ).toThrow(/AZURE_API_AUDIENCE is required when ADMIN_AUTH_ENABLED=true/);
-    });
-
-    it.each(['common', 'organizations', 'consumers', 'COMMON'])(
-      'rejects the multi-tenant placeholder %s, which would widen the accepted issuer',
-      (tenantId) => {
-        expect(() =>
-          validateConfig({
-            ...baseConfig,
-            ...azureConfig,
-            ADMIN_AUTH_ENABLED: 'true',
-            AZURE_TENANT_ID: tenantId,
-          }),
-        ).toThrow(/concrete directory \(tenant\) id/);
-      },
-    );
-
-    it('accepts and trims a concrete tenant and audience', () => {
-      const config = validateConfig({
+    describe('better-auth settings', () => {
+      const authOn = {
         ...baseConfig,
+        ...betterAuthConfig,
         ADMIN_AUTH_ENABLED: 'true',
-        AZURE_TENANT_ID: `  ${azureConfig.AZURE_TENANT_ID}  `,
-        AZURE_API_AUDIENCE: `  ${azureConfig.AZURE_API_AUDIENCE}  `,
+      };
+
+      it('accepts a complete configuration', () => {
+        expect(validateConfig(authOn).BETTER_AUTH_URL).toBe('http://localhost:3000');
       });
 
-      expect(config.ADMIN_AUTH_ENABLED).toBe(true);
-      expect(config.AZURE_TENANT_ID).toBe(azureConfig.AZURE_TENANT_ID);
-      expect(config.AZURE_API_AUDIENCE).toBe(azureConfig.AZURE_API_AUDIENCE);
-    });
+      it.each(['BETTER_AUTH_SECRET', 'BETTER_AUTH_URL', 'AUTH_SMTP_URL', 'AUTH_MAIL_FROM'])(
+        'refuses to start without %s',
+        (name) => {
+          expect(() => validateConfig({ ...authOn, [name]: undefined })).toThrow(
+            new RegExp(`${name} is required when ADMIN_AUTH_ENABLED=true`),
+          );
+          expect(() => validateConfig({ ...authOn, [name]: '   ' })).toThrow(
+            new RegExp(`${name} is required`),
+          );
+        },
+      );
 
-    it('defaults the required app role to admin', () => {
-      const config = validateConfig({ ...baseConfig, ...azureConfig, ADMIN_AUTH_ENABLED: 'true' });
-
-      expect(config.ADMIN_REQUIRED_ROLES).toBe('admin');
-    });
-
-    it('normalizes a comma-separated role allowlist', () => {
-      const config = validateConfig({
-        ...baseConfig,
-        ...azureConfig,
-        ADMIN_AUTH_ENABLED: 'true',
-        ADMIN_REQUIRED_ROLES: ' admin , auditor ,, ',
-      });
-
-      expect(config.ADMIN_REQUIRED_ROLES).toBe('admin,auditor');
-    });
-
-    it('refuses to start when the role allowlist is blank, which would lock everyone out', () => {
-      expect(() =>
-        validateConfig({
-          ...baseConfig,
-          ...azureConfig,
-          ADMIN_AUTH_ENABLED: 'true',
-          ADMIN_REQUIRED_ROLES: ' , ',
-        }),
-      ).toThrow(/ADMIN_REQUIRED_ROLES must name at least one Entra app role/);
-    });
-
-    describe('the SSO provider switch', () => {
-      it('defaults to Entra, so an existing deployment keeps verifying what it always did', () => {
-        const config = validateConfig({
-          ...baseConfig,
-          ...azureConfig,
-          ADMIN_AUTH_ENABLED: 'true',
-        });
-
-        expect(config.ADMIN_SSO_PROVIDER).toBe('azure');
-      });
-
-      it('accepts a supported provider regardless of casing or padding', () => {
-        const config = validateConfig({
-          ...baseConfig,
-          ...azureConfig,
-          ADMIN_AUTH_ENABLED: 'true',
-          ADMIN_SSO_PROVIDER: '  Azure  ',
-        });
-
-        expect(config.ADMIN_SSO_PROVIDER).toBe('azure');
-      });
-
-      it('refuses to start on an unsupported provider rather than silently verifying against Entra', () => {
-        // Quietly falling back would accept tokens from a directory the operator believed they
-        // had switched away from, which is the one failure this switch must not have.
-        expect(() =>
-          validateConfig({
-            ...baseConfig,
-            ...azureConfig,
-            ADMIN_AUTH_ENABLED: 'true',
-            ADMIN_SSO_PROVIDER: 'google',
-          }),
-        ).toThrow(/ADMIN_SSO_PROVIDER/);
-      });
-
-      it('rejects an unsupported provider even while admin auth is off', () => {
-        // The escape hatch skips the provider's own settings, not the name of the provider: a
-        // typo should be reported at the point it is written, not the day auth is switched on.
-        expect(() => validateConfig({ ...baseConfig, ADMIN_SSO_PROVIDER: 'google' })).toThrow(
-          /ADMIN_SSO_PROVIDER/,
+      it('refuses a BETTER_AUTH_SECRET shorter than 32 characters', () => {
+        expect(() => validateConfig({ ...authOn, BETTER_AUTH_SECRET: 'x'.repeat(31) })).toThrow(
+          /BETTER_AUTH_SECRET must be at least 32 characters/,
         );
       });
-    });
 
-    it('does not require the Azure settings when the flag is off', () => {
-      const config = validateConfig({ ...baseConfig, ADMIN_AUTH_ENABLED: 'false' });
+      it.each(['not a url', 'ftp://engine.example.com', 'localhost:3000'])(
+        'refuses BETTER_AUTH_URL %s that is not an absolute http(s) URL',
+        (url) => {
+          expect(() => validateConfig({ ...authOn, BETTER_AUTH_URL: url })).toThrow(
+            /BETTER_AUTH_URL must be an absolute http\(s\) URL/,
+          );
+        },
+      );
 
-      expect(config.ADMIN_AUTH_ENABLED).toBe(false);
-      expect(config.AZURE_TENANT_ID).toBeUndefined();
+      it('does not require the settings while admin auth is off', () => {
+        expect(() => validateConfig(baseConfig)).not.toThrow();
+      });
+
+      it.each([
+        ['AUTH_SUPERADMIN_EMAIL', 'AUTH_SUPERADMIN_PASSWORD'],
+        ['AUTH_SUPERADMIN_PASSWORD', 'AUTH_SUPERADMIN_EMAIL'],
+      ])('refuses %s without %s', (present) => {
+        expect(() => validateConfig({ ...authOn, [present]: 'value-1234567' })).toThrow(
+          /AUTH_SUPERADMIN_EMAIL and AUTH_SUPERADMIN_PASSWORD must be set together/,
+        );
+      });
+
+      it('accepts the superadmin pair and treats blank values as unset', () => {
+        expect(() =>
+          validateConfig({
+            ...authOn,
+            AUTH_SUPERADMIN_EMAIL: 'root@example.test',
+            AUTH_SUPERADMIN_PASSWORD: 'a-long-password',
+          }),
+        ).not.toThrow();
+        expect(() =>
+          validateConfig({ ...authOn, AUTH_SUPERADMIN_EMAIL: '', AUTH_SUPERADMIN_PASSWORD: '' }),
+        ).not.toThrow();
+      });
+
+      it.each(Object.keys(microsoftConfig))('refuses a Microsoft triple missing %s', (name) => {
+        expect(() => validateConfig({ ...authOn, ...microsoftConfig, [name]: undefined })).toThrow(
+          /must be set together/,
+        );
+      });
+
+      it.each(['common', 'organizations', 'consumers', 'not-a-guid'])(
+        'refuses the Microsoft tenant %s, which is not a concrete GUID',
+        (tenant) => {
+          expect(() =>
+            validateConfig({ ...authOn, ...microsoftConfig, AUTH_MICROSOFT_TENANT_ID: tenant }),
+          ).toThrow(/AUTH_MICROSOFT_TENANT_ID must be a concrete tenant GUID/);
+        },
+      );
+
+      it('accepts a complete Microsoft triple', () => {
+        expect(validateConfig({ ...authOn, ...microsoftConfig }).AUTH_MICROSOFT_TENANT_ID).toBe(
+          microsoftConfig.AUTH_MICROSOFT_TENANT_ID,
+        );
+      });
     });
 
     describe('the escape hatch outside local development', () => {
@@ -813,10 +779,10 @@ describe('validateConfig', () => {
         ).toBe(false);
       });
 
-      it('starts in production when the flag is on and the tenant is configured', () => {
+      it('starts in production when the flag is on and better-auth is configured', () => {
         const config = validateConfig({
           ...baseConfig,
-          ...azureConfig,
+          ...betterAuthConfig,
           NODE_ENV: 'production',
           ADMIN_AUTH_ENABLED: 'true',
         });
@@ -849,7 +815,7 @@ describe('validateConfig', () => {
     it('lets any name run in production', () => {
       const config = validateConfig({
         ...baseConfig,
-        ...azureConfig,
+        ...betterAuthConfig,
         ADMIN_AUTH_ENABLED: 'true',
         ENVIRONMENT_NAME: 'pre-prod',
         NODE_ENV: NodeEnv.PRODUCTION,

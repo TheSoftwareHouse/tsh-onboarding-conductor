@@ -24,7 +24,7 @@ import { UnconfiguredEncryptionService } from './unconfigured-encryption.service
  * transformer can resolve it lazily. `AuditModule` is imported directly, not assumed global, because the admin service
  * (turning encryption on or off, rotating) and the sweep both write `encryption.*` audit rows.
  * `AuthModule` is imported the same way every other admin controller's module does, so
- * `AzureJwtGuard` (behind `@AdminRoute()`) can resolve its own dependencies.
+ * `AdminSessionGuard` (behind `@AdminRoute(...)`) can resolve its own dependencies.
  *
  * Registered ahead of `TypeOrmModule.forRootAsync` in `AppModule.imports`, so the registry is
  * populated before any entity operation can run.

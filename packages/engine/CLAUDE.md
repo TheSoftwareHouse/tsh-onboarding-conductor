@@ -28,9 +28,21 @@ it before changing any of those areas; this file only orients within the package
   HTTP/transport concerns.
 - Keep types local to the owning module or class until real reuse establishes a
   boundary. Do not create shared type modules preemptively.
-- Admin routes are marked `@AdminRoute()` (`src/auth/admin-route.decorator.ts`), never a bare
-  `@UseGuards(AzureJwtGuard)`: the decorator applies the guard and writes its contract into the
-  OpenAPI document, so the two cannot disagree.
+- Admin routes are marked `@AdminRoute({ resource, action })` (`src/auth/admin-route.decorator.ts`),
+  never a bare `@UseGuards(AdminSessionGuard)`: the decorator applies the guard, stores the permission
+  and writes its contract into the OpenAPI document, so the three cannot disagree. A new admin route
+  names a permission from `ADMIN_PERMISSION_STATEMENTS` (`src/auth/domain/admin-permissions.ts`); a
+  new resource or action is added there, which is also the organization plugin's access control.
+  There is no global auth guard, because the public onboarding flow and webhooks stay open.
+- **ESM loader rule.** `better-auth` is ESM-only and this package emits CommonJS, so only
+  `src/auth/better-auth/load-better-auth.ts` names the `better-auth` specifier, through a dynamic
+  `import()` hidden from the TypeScript emitter. Take runtime exports from `loadBetterAuth()` and
+  types through that file; never `import` the library elsewhere, and never import it in a unit
+  spec — mock `ADMIN_SESSION_VERIFIER` instead. `load-better-auth.spec.ts` fails on a second
+  module naming it.
+- better-auth's tables live in the Postgres schema `auth`, created by migration
+  `0003_better_auth_schema.ts` and never by `better-auth migrate`. They have no entities; a change
+  to them is a new TypeORM migration.
 - Every route and DTO carries `@nestjs/swagger` metadata, and response shapes are decorated
   classes under `dto/` (domain types stay plain; the DTO mirrors them). `.claude/rules/api-docs.md`
   states the conventions; `src/openapi/openapi-document.spec.ts` holds the committed

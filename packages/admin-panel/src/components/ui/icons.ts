@@ -5,11 +5,14 @@ import ArrowForward from '@material-symbols/svg-300/outlined/arrow_forward.svg?r
 import AssignmentTurnedIn from '@material-symbols/svg-300/outlined/assignment_turned_in.svg?react';
 import Cable from '@material-symbols/svg-300/outlined/cable.svg?react';
 import Check from '@material-symbols/svg-300/outlined/check.svg?react';
+import CorporateFare from '@material-symbols/svg-300/outlined/corporate_fare.svg?react';
 import Close from '@material-symbols/svg-300/outlined/close.svg?react';
 import Download from '@material-symbols/svg-300/outlined/download.svg?react';
+import Group from '@material-symbols/svg-300/outlined/group.svg?react';
 import Info from '@material-symbols/svg-300/outlined/info.svg?react';
 import Lock from '@material-symbols/svg-300/outlined/lock.svg?react';
 import Logout from '@material-symbols/svg-300/outlined/logout.svg?react';
+import ManageAccounts from '@material-symbols/svg-300/outlined/manage_accounts.svg?react';
 import PriorityHigh from '@material-symbols/svg-300/outlined/priority_high.svg?react';
 import ReceiptLong from '@material-symbols/svg-300/outlined/receipt_long.svg?react';
 import Refresh from '@material-symbols/svg-300/outlined/refresh.svg?react';
@@ -38,10 +41,13 @@ export {
   Cable,
   Check,
   Close,
+  CorporateFare,
   Download,
+  Group,
   Info,
   Lock,
   Logout,
+  ManageAccounts,
   PriorityHigh,
   ReceiptLong,
   Refresh,

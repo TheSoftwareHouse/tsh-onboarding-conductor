@@ -1,3 +1,5 @@
+import type { AdminPermission } from './domain/admin-permissions';
+
 export const ADMIN_ACCESS_AUDIT = Symbol('ADMIN_ACCESS_AUDIT');
 
 /** The admin route a decision was made about. */
@@ -7,33 +9,14 @@ export type AdminAccessEndpoint = {
 };
 
 /**
- * Identity read out of a token the verifier already accepted, so these values carry the tenant's
- * word for who the caller is. `objectId` is Entra's immutable per-directory user id and is what
- * the trail is keyed on; a user principal name can be reassigned, so it is recorded as a
- * convenience for whoever reads the log rather than as the identifier.
+ * Identity of the operator behind a session the verifier accepted. `userId` is what the trail is
+ * keyed on; the email is recorded as a convenience for whoever reads it.
  */
 export type AdminOperatorIdentity = {
-  objectId: string | null;
-  userPrincipalName: string | null;
-  tenantId: string | null;
-  roles: readonly string[];
-};
-
-/**
- * `iss`, `aud` and `ver` read out of a token that was *not* accepted. Entirely attacker-controlled
- * — recorded so an operator can tell a misconfigured app registration from a forged credential,
- * never trusted for a decision.
- */
-export type UnverifiedTokenDescriptor = {
-  issuer: string | null;
-  audience: string | null;
-  version: string | null;
-};
-
-export const EMPTY_TOKEN_DESCRIPTOR: UnverifiedTokenDescriptor = {
-  issuer: null,
-  audience: null,
-  version: null,
+  userId: string;
+  email: string;
+  platformRole: string | null;
+  organizationId: string | null;
 };
 
 /**
@@ -48,16 +31,20 @@ export type AdminAccessAuditEvent =
       operator: AdminOperatorIdentity;
     }
   | {
-      outcome: 'role_missing';
-      endpoint: AdminAccessEndpoint;
-      operator: AdminOperatorIdentity;
-      requiredRoles: readonly string[];
-    }
-  | {
-      outcome: 'token_rejected';
+      outcome: 'session_missing';
       endpoint: AdminAccessEndpoint;
       reason: string;
-      token: UnverifiedTokenDescriptor;
+    }
+  | {
+      outcome: 'two_factor_required';
+      endpoint: AdminAccessEndpoint;
+      operator: AdminOperatorIdentity;
+    }
+  | {
+      outcome: 'permission_missing';
+      endpoint: AdminAccessEndpoint;
+      operator: AdminOperatorIdentity;
+      requiredPermission: AdminPermission | undefined;
     }
   | {
       outcome: 'verification_unavailable';

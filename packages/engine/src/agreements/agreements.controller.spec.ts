@@ -1,9 +1,12 @@
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import type { ArgumentMetadata } from '@nestjs/common';
-import type { Request } from 'express';
 import { ADMIN_ACCESS_UNKNOWN_ACTOR } from '../audit/audit.types';
-import { AzureJwtGuard } from '../auth/azure-jwt.guard';
+import {
+  ADMIN_PERMISSION_METADATA,
+  AdminSessionGuard,
+  type AdminAuthenticatedRequest,
+} from '../auth/admin-session.guard';
 import { AgreementsController } from './agreements.controller';
 import type { AgreementsService, PublishedAgreement } from './agreements.service';
 import { ListAgreementsQueryDto } from './dto/list-agreements.query.dto';
@@ -36,10 +39,8 @@ const createServiceStub = (): jest.Mocked<AgreementsService> =>
     linkPending: jest.fn(),
   }) as unknown as jest.Mocked<AgreementsService>;
 
-const createRequest = (claims?: Record<string, unknown>) =>
-  ({ adminTokenClaims: claims }) as unknown as Request & {
-    adminTokenClaims?: Record<string, unknown>;
-  };
+const createRequest = (session?: { userId: string }) =>
+  ({ adminSession: session }) as unknown as AdminAuthenticatedRequest;
 
 const validate = async (dto: object, metatype: ArgumentMetadata['metatype']) =>
   new ValidationPipe({ whitelist: true, transform: true }).transform(dto, {
@@ -48,15 +49,17 @@ const validate = async (dto: object, metatype: ArgumentMetadata['metatype']) =>
   });
 
 describe('AgreementsController', () => {
-  it('carries AzureJwtGuard on every route', () => {
-    for (const method of ['publish', 'list'] as const) {
-      const guards = Reflect.getMetadata(
-        GUARDS_METADATA,
-        AgreementsController.prototype[method],
-      ) as unknown[] | undefined;
+  it.each([
+    ['publish', 'write'],
+    ['list', 'read'],
+  ] as const)('guards %s with the agreement:%s permission', (method, action) => {
+    const handler = AgreementsController.prototype[method];
 
-      expect(guards).toEqual([AzureJwtGuard]);
-    }
+    expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toEqual([AdminSessionGuard]);
+    expect(Reflect.getMetadata(ADMIN_PERMISSION_METADATA, handler)).toEqual({
+      resource: 'agreement',
+      action,
+    });
   });
 
   describe('publish', () => {
@@ -73,7 +76,7 @@ describe('AgreementsController', () => {
         type: 'terms_and_conditions' as const,
       });
 
-      const response = await controller.publish(dto, createRequest({ oid: 'operator-oid' }));
+      const response = await controller.publish(dto, createRequest({ userId: 'operator-oid' }));
 
       expect(service.publish).toHaveBeenCalledWith(KEY, 'terms_and_conditions', 'operator-oid');
       expect(response).toEqual({

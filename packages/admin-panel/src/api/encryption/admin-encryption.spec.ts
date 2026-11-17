@@ -63,10 +63,10 @@ function axiosFailure(status: number, data?: unknown): AxiosError {
 
 const AUTH_FAILURES: [number, string][] = [
   [401, 'Your session is no longer accepted by the engine. Sign in again.'],
-  [403, 'Your account is signed in but is not assigned a role that may view encryption settings.'],
+  [403, 'Your role in the active organization does not allow viewing encryption settings.'],
   [
     503,
-    'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.',
+    'The sign-in service is unavailable right now. This is not a problem with your account — try again shortly.',
   ],
   [500, 'Request failed with status 500.'],
 ];
@@ -319,7 +319,7 @@ describe('setEncryptionEnabled', () => {
       code: null,
       status: 503,
       message:
-        'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.',
+        'The sign-in service is unavailable right now. This is not a problem with your account — try again shortly.',
     });
   });
 

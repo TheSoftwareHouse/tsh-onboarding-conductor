@@ -1,6 +1,6 @@
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
 import { ADMIN_ACCESS_UNKNOWN_ACTOR } from '../audit/audit.types';
-import type { AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
+import type { AdminAuthenticatedRequest } from '../auth/admin-session.guard';
 import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
@@ -147,7 +147,7 @@ describe('WorkflowsController', () => {
 
   describe('connector selection', () => {
     const operatorRequest = {
-      adminTokenClaims: { oid: 'operator-oid' },
+      adminSession: { userId: 'operator-oid' },
     } as unknown as AdminAuthenticatedRequest;
 
     it('binds the slot on behalf of the operator the token identifies and returns the projection', async () => {
@@ -178,7 +178,7 @@ describe('WorkflowsController', () => {
       );
     });
 
-    it('falls back to the unknown actor when the request carries no token claims', async () => {
+    it('falls back to the unknown actor when the request carries no admin session', async () => {
       const service = {
         select: jest.fn().mockResolvedValue({}),
       } as unknown as WorkflowConnectorSelectionService;
@@ -241,7 +241,7 @@ describe('WorkflowsController', () => {
         publish: jest.fn().mockResolvedValue({ workflowId: 'flow', status: 'published' }),
       } as unknown as jest.Mocked<WorkflowDraftsService>;
       const request = {
-        adminTokenClaims: { oid: OPERATOR },
+        adminSession: { userId: OPERATOR },
       } as unknown as AdminAuthenticatedRequest;
       const { registry } = createRegistry();
 

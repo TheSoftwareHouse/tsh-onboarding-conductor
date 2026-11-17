@@ -7,7 +7,6 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
-import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type KeyLike } from 'jose';
 import {
   MockAsyncCallback2Connector,
   MockAsyncCallbackConnector,
@@ -20,11 +19,7 @@ import { AwaitingCallbackConnectorResolver } from '../src/connectors/resolvers/a
 import { ConnectorExecutionResult } from '../src/connectors/ports/connector-execution-result';
 import { exceptionFactory } from '../src/validation/validation-exception.factory';
 import { startE2eServer } from './e2e-server';
-
-const TENANT_ID = '99999999-9999-9999-9999-999999999999';
-const AUDIENCE = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-const KEY_ID = 'admin-workflow-connector-selection-signing-key';
-const OPERATOR_OBJECT_ID = '9f3c0000-0000-0000-0000-0000000000ee';
+import { createOperator, deleteOperators, type Operator } from './admin-session.support';
 
 const SYNC_WORKFLOW_ID = 'connector-selection-e2e-sync';
 const REFUSALS_WORKFLOW_ID = 'connector-selection-e2e-refusals';
@@ -175,7 +170,7 @@ describe('Admin workflow connector selection (e2e)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
   let workflowsDir: string;
-  let token: string;
+  let operator: Operator;
 
   const createdOnboardingIds = new Set<string>();
 
@@ -184,7 +179,7 @@ describe('Admin workflow connector selection (e2e)', () => {
   const selectConnector = (workflowId: string, stepName: string, body: Record<string, unknown>) =>
     http()
       .put(`/v1/admin/workflows/${workflowId}/steps/${stepName}/connector`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .send(body);
 
   const clearConnector = (
@@ -194,14 +189,14 @@ describe('Admin workflow connector selection (e2e)', () => {
   ) =>
     http()
       .delete(`/v1/admin/workflows/${workflowId}/steps/${stepName}/connector?${query}`)
-      .set('Authorization', `Bearer ${token}`);
+      .set('Cookie', operator.cookie);
 
   const getDefinition = (workflowId: string, version?: number) =>
     http()
       .get(
         `/v1/admin/workflows/${workflowId}${version === undefined ? '' : `/versions/${version}`}`,
       )
-      .set('Authorization', `Bearer ${token}`);
+      .set('Cookie', operator.cookie);
 
   const readSlot = async (
     workflowId: string,
@@ -230,16 +225,12 @@ describe('Admin workflow connector selection (e2e)', () => {
   };
 
   const createDraft = (document: object) =>
-    http()
-      .post('/v1/admin/workflows')
-      .set('Authorization', `Bearer ${token}`)
-      .send(document)
-      .expect(201);
+    http().post('/v1/admin/workflows').set('Cookie', operator.cookie).send(document).expect(201);
 
   const publishVersion = (workflowId: string, version: number) =>
     http()
       .post(`/v1/admin/workflows/${workflowId}/versions/${version}/publish`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(200);
 
   const readSelectionRows = (workflowId: string, stepName: string) =>
@@ -301,29 +292,13 @@ describe('Admin workflow connector selection (e2e)', () => {
     workflowsDir = mkdtempSync(path.join(tmpdir(), 'engine-connector-selection-workflows-'));
     writeWorkflows(workflowsDir);
 
-    const keyPair = await generateKeyPair('RS256', { extractable: true });
-    const privateKey: KeyLike = keyPair.privateKey;
-    const publicJwk = await exportJWK(keyPair.publicKey);
-    const getKey = createLocalJWKSet({
-      keys: [{ ...publicJwk, kid: KEY_ID, alg: 'RS256', use: 'sig' }],
-    });
-
     process.env.ADMIN_AUTH_ENABLED = 'true';
-    process.env.AZURE_TENANT_ID = TENANT_ID;
-    process.env.AZURE_API_AUDIENCE = AUDIENCE;
-    process.env.ADMIN_REQUIRED_ROLES = 'admin';
     process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5173';
     process.env.CLIENT_WEBHOOK_BASE_URL = '';
     process.env.WORKFLOWS_USERS_DIR = workflowsDir;
 
     const { AppModule } = await import('../src/app.module');
-    const { ADMIN_TOKEN_VERIFIER } = await import('../src/auth/admin-token-verifier.port');
-    const { AzureTokenVerifier, buildEntraIssuer } =
-      await import('../src/auth/azure-token-verifier');
-    const moduleFixture = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(ADMIN_TOKEN_VERIFIER)
-      .useValue(new AzureTokenVerifier({ tenantId: TENANT_ID, audience: AUDIENCE, getKey }))
-      .compile();
+    const moduleFixture = await Test.createTestingModule({ imports: [AppModule] }).compile();
 
     app = moduleFixture.createNestApplication<NestExpressApplication>(undefined, {
       bodyParser: false,
@@ -339,24 +314,12 @@ describe('Admin workflow connector selection (e2e)', () => {
     dataSource = app.get(DataSource);
     await deleteWorkflowAuditRows();
 
-    token = await new SignJWT({
-      scp: 'Onboardings.Read',
-      oid: OPERATOR_OBJECT_ID,
-      preferred_username: 'connector.selection@tsh.io',
-      tid: TENANT_ID,
-      roles: ['admin'],
-    })
-      .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
-      .setSubject('operator-subject')
-      .setIssuer(buildEntraIssuer(TENANT_ID))
-      .setAudience(AUDIENCE)
-      .setIssuedAt()
-      .setExpirationTime('30m')
-      .sign(privateKey);
+    operator = await createOperator(app!, { platformRole: 'superadmin', twoFactor: true });
   });
 
   afterAll(async () => {
     if (dataSource?.isInitialized) {
+      await deleteOperators(app);
       const onboardingIds = Array.from(createdOnboardingIds);
 
       if (onboardingIds.length > 0) {
@@ -431,7 +394,7 @@ describe('Admin workflow connector selection (e2e)', () => {
       await expect(readAuditRows(SYNC_WORKFLOW_ID)).resolves.toEqual([
         {
           actor_type: 'operator',
-          actor_id: OPERATOR_OBJECT_ID,
+          actor_id: operator.userId,
           action: 'workflow.connector_selected',
           entry_type: 'success',
           resource_type: 'workflow',
@@ -457,7 +420,7 @@ describe('Admin workflow connector selection (e2e)', () => {
       expect(rows).toHaveLength(2);
       expect(rows[1]).toMatchObject({
         actor_type: 'operator',
-        actor_id: OPERATOR_OBJECT_ID,
+        actor_id: operator.userId,
         action: 'workflow.connector_selection_cleared',
         resource_type: 'workflow',
         resource_id: SYNC_WORKFLOW_ID,
@@ -740,7 +703,7 @@ describe('Admin workflow connector selection (e2e)', () => {
       try {
         const response = await http()
           .post('/v1/admin/workflows/compile')
-          .set('Authorization', `Bearer ${token}`)
+          .set('Cookie', operator.cookie)
           .send(syncWorkflow)
           .expect(200);
         const step = (

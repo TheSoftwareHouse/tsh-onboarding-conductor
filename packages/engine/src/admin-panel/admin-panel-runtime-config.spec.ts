@@ -29,7 +29,7 @@ describe('renderAdminPanelConfig', () => {
   it('omits unset, empty and blank keys so the panel falls back to its build-time value', () => {
     expect(
       parseRenderedConfig(
-        renderAdminPanelConfig({ VITE_AUTH_ENABLED: '', VITE_SSO_PROVIDER: '   ' }),
+        renderAdminPanelConfig({ VITE_AUTH_ENABLED: '', VITE_AUTH_MICROSOFT_ENABLED: '   ' }),
       ),
     ).toEqual({ VITE_ENGINE_API_BASE_URL: SAME_ORIGIN_API_BASE_URL });
   });
@@ -45,15 +45,32 @@ describe('renderAdminPanelConfig', () => {
     const value = 'a"b\\c\nd';
 
     expect(
-      parseRenderedConfig(renderAdminPanelConfig({ VITE_AZURE_CLIENT_ID: value }))
-        .VITE_AZURE_CLIENT_ID,
+      parseRenderedConfig(renderAdminPanelConfig({ VITE_AUTH_MICROSOFT_ENABLED: value }))
+        .VITE_AUTH_MICROSOFT_ENABLED,
     ).toBe(value);
   });
 
   it('escapes < so the body stays inert if it is ever inlined into HTML', () => {
-    const script = renderAdminPanelConfig({ VITE_AZURE_CLIENT_ID: '</script><script>' });
+    const script = renderAdminPanelConfig({ VITE_AUTH_MICROSOFT_ENABLED: '</script><script>' });
 
     expect(script).not.toContain('</script>');
-    expect(parseRenderedConfig(script).VITE_AZURE_CLIENT_ID).toBe('</script><script>');
+    expect(parseRenderedConfig(script).VITE_AUTH_MICROSOFT_ENABLED).toBe('</script><script>');
+  });
+
+  it('renders VITE_AUTH_MICROSOFT_ENABLED', () => {
+    expect(
+      parseRenderedConfig(renderAdminPanelConfig({ VITE_AUTH_MICROSOFT_ENABLED: 'true' }))
+        .VITE_AUTH_MICROSOFT_ENABLED,
+    ).toBe('true');
+  });
+
+  it('never renders a server-side secret, even when one is handed in', () => {
+    const script = renderAdminPanelConfig({
+      BETTER_AUTH_SECRET: 'secret-a',
+      AUTH_MICROSOFT_CLIENT_SECRET: 'secret-b',
+      AUTH_SUPERADMIN_PASSWORD: 'secret-c',
+    } as Parameters<typeof renderAdminPanelConfig>[0]);
+
+    expect(script).not.toMatch(/secret-[abc]/);
   });
 });

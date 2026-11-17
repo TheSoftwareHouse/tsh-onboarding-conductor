@@ -7,7 +7,7 @@ import type {
 } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { buildOpenApiDocument, readEngineVersion } from './openapi-document';
 import {
-  ADMIN_BEARER_AUTH,
+  ADMIN_SESSION_AUTH,
   API_TAGS,
   COMPILED_WORKFLOW_DOCUMENT_SCHEMA,
   WORKFLOW_DOCUMENT_SCHEMA,
@@ -223,14 +223,14 @@ describe('OpenAPI document', () => {
     }
   });
 
-  it('requires the bearer token on every admin operation and on nothing else', () => {
+  it('requires the session cookie on every admin operation and on nothing else', () => {
     for (const { method, path, operation } of operations) {
       const where = `${method.toUpperCase()} ${path}`;
       const admin = (operation.tags ?? []).some((tag) => tag.startsWith('Admin:'));
 
       expect([where, operation.security ?? []]).toEqual([
         where,
-        admin ? [{ [ADMIN_BEARER_AUTH]: [] }] : [],
+        admin ? [{ [ADMIN_SESSION_AUTH]: [] }] : [],
       ]);
     }
   });

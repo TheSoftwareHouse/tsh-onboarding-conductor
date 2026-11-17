@@ -76,7 +76,7 @@ export class ConnectorSettingsResponseDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    description: 'The operator who last wrote the settings, as the bearer token identified them.',
+    description: 'The operator who last wrote the settings, as the better-auth user id.',
   })
   updatedBy!: string | null;
 }

@@ -11,3 +11,10 @@ process.env.NODE_ENV = 'test';
 // The compose stack owns migrations and the outbox worker; suites that need another role, the
 // webhook outbox queue one, override MODE per test.
 process.env.MODE = 'api-only';
+
+// Test-only values for the settings ADMIN_AUTH_ENABLED=true requires, so every auth-on spec boots
+// without a developer's .env carrying real ones.
+process.env.BETTER_AUTH_SECRET = 'e2e-better-auth-secret-0123456789abcdef';
+process.env.BETTER_AUTH_URL = 'http://localhost:3000';
+process.env.AUTH_SMTP_URL = 'smtp://localhost:1025';
+process.env.AUTH_MAIL_FROM = 'no-reply@example.test';

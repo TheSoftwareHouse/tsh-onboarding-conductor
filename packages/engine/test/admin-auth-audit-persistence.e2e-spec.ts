@@ -3,21 +3,9 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
-import {
-  createLocalJWKSet,
-  exportJWK,
-  generateKeyPair,
-  SignJWT,
-  type JWTVerifyGetKey,
-  type KeyLike,
-} from 'jose';
 import { startE2eServer } from './e2e-server';
+import { createOperator, deleteOperators, type Operator } from './admin-session.support';
 
-const TENANT_ID = '33333333-3333-3333-3333-333333333333';
-const AUDIENCE = '44444444-4444-4444-4444-444444444444';
-const KEY_ID = 'persistence-signing-key';
-const OPERATOR_OBJECT_ID = '9f3c0000-0000-0000-0000-0000000000ff';
-const OPERATOR_UPN = 'audit.persistence@tsh.io';
 const PANEL_ORIGIN = 'http://localhost:5173';
 
 process.env.NODE_ENV = 'test';
@@ -35,13 +23,8 @@ process.env.STORAGE_S3_ACCESS_KEY_ID = 'onboardingdev';
 process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'onboardingdevsecret0123456789';
 process.env.ADMIN_PANEL_ORIGIN = PANEL_ORIGIN;
 process.env.ADMIN_AUTH_ENABLED = 'true';
-process.env.AZURE_TENANT_ID = TENANT_ID;
-process.env.AZURE_API_AUDIENCE = AUDIENCE;
-process.env.ADMIN_REQUIRED_ROLES = 'admin';
 
 import { AppModule } from '../src/app.module';
-import { ADMIN_TOKEN_VERIFIER } from '../src/auth/admin-token-verifier.port';
-import { AzureTokenVerifier, buildEntraIssuer } from '../src/auth/azure-token-verifier';
 
 type AuditRow = {
   action: string;
@@ -64,25 +47,11 @@ type AuditRow = {
 describe('Admin access audit persistence (e2e)', () => {
   let app: NestExpressApplication | undefined;
   let dataSource: DataSource;
-  let privateKey: KeyLike;
   let startedAt: Date;
 
-  async function signToken(claims: { roles?: string[]; audience?: string } = {}): Promise<string> {
-    return new SignJWT({
-      scp: 'Onboardings.Read',
-      oid: OPERATOR_OBJECT_ID,
-      preferred_username: OPERATOR_UPN,
-      tid: TENANT_ID,
-      ...('roles' in claims ? { roles: claims.roles } : { roles: ['admin'] }),
-    })
-      .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
-      .setSubject('operator-subject')
-      .setIssuer(buildEntraIssuer(TENANT_ID))
-      .setAudience(claims.audience ?? AUDIENCE)
-      .setIssuedAt()
-      .setExpirationTime('5m')
-      .sign(privateKey);
-  }
+  /** A TOTP-enrolled organization member: may read, may not write encryption. */
+  const memberOperator = (): Promise<Operator> =>
+    createOperator(app!, { organizationRole: 'member', twoFactor: true });
 
   /**
    * The guard records without awaiting, so the row lands shortly after the response. Polling for
@@ -109,19 +78,8 @@ describe('Admin access audit persistence (e2e)', () => {
   }
 
   beforeAll(async () => {
-    const keyPair = await generateKeyPair('RS256', { extractable: true });
-    privateKey = keyPair.privateKey;
-
-    const publicJwk = await exportJWK(keyPair.publicKey);
-    const getKey: JWTVerifyGetKey = createLocalJWKSet({
-      keys: [{ ...publicJwk, kid: KEY_ID, alg: 'RS256', use: 'sig' }],
-    });
-
-    // The real engine, wired end to end, with only the network call to Entra's JWKS replaced.
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(ADMIN_TOKEN_VERIFIER)
-      .useValue(new AzureTokenVerifier({ tenantId: TENANT_ID, audience: AUDIENCE, getKey }))
-      .compile();
+    // The real engine, wired end to end; operators sign in through real better-auth sessions.
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
 
     app = moduleRef.createNestApplication<NestExpressApplication>();
     await startE2eServer(app);
@@ -129,6 +87,7 @@ describe('Admin access audit persistence (e2e)', () => {
   }, 60000);
 
   afterAll(async () => {
+    await deleteOperators(app!);
     if (dataSource?.isInitialized && startedAt) {
       await dataSource.query(
         `DELETE FROM audit_log WHERE resource_type = 'admin_endpoint' AND occurred_at >= $1`,
@@ -149,11 +108,11 @@ describe('Admin access audit persistence (e2e)', () => {
   });
 
   it('persists a granted read to the database with the operator attached', async () => {
-    const token = await signToken();
+    const operator = await memberOperator();
 
     await request(app!.getHttpServer())
       .get('/v1/onboardings')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(200);
 
     const [row] = await waitForRows(1);
@@ -161,15 +120,14 @@ describe('Admin access audit persistence (e2e)', () => {
     expect(row).toMatchObject({
       action: 'auth.access_granted',
       actor_type: 'operator',
-      actor_id: OPERATOR_OBJECT_ID,
+      actor_id: operator.userId,
       resource_type: 'admin_endpoint',
       resource_id: '/v1/onboardings',
     });
-    expect(row.metadata).toEqual({
+    expect(row.metadata).toMatchObject({
       method: 'GET',
-      tenantId: TENANT_ID,
-      userPrincipalName: OPERATOR_UPN,
-      grantedRoles: ['admin'],
+      email: operator.email,
+      organizationId: operator.organizationId,
     });
   });
 
@@ -179,18 +137,17 @@ describe('Admin access audit persistence (e2e)', () => {
     const [row] = await waitForRows(1);
 
     expect(row).toMatchObject({
-      action: 'auth.token_rejected',
+      action: 'auth.session_missing',
       actor_type: 'anonymous',
       actor_id: 'unknown',
       resource_id: '/v1/onboardings',
     });
-    expect(row.metadata).toEqual({ method: 'GET', reason: 'Missing bearer access token' });
+    expect(row.metadata).toEqual({ method: 'GET', reason: 'No valid admin session' });
   });
 
-  it('refuses a token-less manual review decision before the onboarding is looked up', async () => {
-    // The one operator write that predated admin sign-in: the guard now runs ahead of the action
-    // pipe and the lookup, so an anonymous caller gets 401 and an audit row, never a 400 or 404
-    // that would reveal whether the id exists.
+  it('refuses a session-less manual review decision before the onboarding is looked up', async () => {
+    // The guard runs ahead of the action pipe and the lookup, so an anonymous caller gets 401 and
+    // an audit row, never a 400 or 404 that would reveal whether the id exists.
     await request(app!.getHttpServer())
       .post('/v1/onboardings/01912345-6789-7abc-8def-0123456789aa/review/approve')
       .expect(401);
@@ -198,54 +155,69 @@ describe('Admin access audit persistence (e2e)', () => {
     const [row] = await waitForRows(1);
 
     expect(row).toMatchObject({
-      action: 'auth.token_rejected',
+      action: 'auth.session_missing',
       actor_type: 'anonymous',
       actor_id: 'unknown',
       // The registered pattern, not the concrete path, so one route stays one auditable resource.
       resource_id: '/v1/onboardings/:id/review/:action',
     });
-    expect(row.metadata).toEqual({ method: 'POST', reason: 'Missing bearer access token' });
+    expect(row.metadata).toEqual({ method: 'POST', reason: 'No valid admin session' });
   });
 
-  it('persists a role refusal against the operator who was turned away', async () => {
-    const token = await signToken({ roles: ['auditor'] });
+  it('persists a TOTP refusal against the operator who was turned away', async () => {
+    const operator = await createOperator(app!, { platformRole: 'superadmin' });
 
     await request(app!.getHttpServer())
       .get('/v1/onboardings')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(403);
 
-    const [row] = await waitForRows(1);
+    const rows = await waitForRows(1);
+    const row = rows.find((candidate) => candidate.action === 'auth.two_factor_required');
 
-    expect(row).toMatchObject({
-      action: 'auth.role_missing',
-      actor_type: 'operator',
-      actor_id: OPERATOR_OBJECT_ID,
-    });
-    expect(row.metadata).toEqual({
+    expect(row).toMatchObject({ actor_type: 'operator', actor_id: operator.userId });
+    expect(row?.metadata).toMatchObject({
       method: 'GET',
-      tenantId: TENANT_ID,
-      userPrincipalName: OPERATOR_UPN,
-      grantedRoles: ['auditor'],
-      requiredRoles: ['admin'],
+      email: operator.email,
+      platformRole: 'superadmin',
+    });
+  });
+
+  it('persists a permission refusal against the operator, naming the permission', async () => {
+    const operator = await memberOperator();
+
+    await request(app!.getHttpServer())
+      .post('/v1/admin/encryption/keys')
+      .set('Cookie', operator.cookie)
+      .expect(403);
+
+    const rows = await waitForRows(1);
+    const row = rows.find((candidate) => candidate.action === 'auth.permission_missing');
+
+    expect(row).toMatchObject({ actor_type: 'operator', actor_id: operator.userId });
+    expect(row?.metadata).toMatchObject({
+      method: 'POST',
+      email: operator.email,
+      organizationId: operator.organizationId,
+      requiredPermission: 'encryption:write',
     });
   });
 
   it('reads the trail back through the admin API with its metadata intact', async () => {
     // The read path filters metadata through its own allowlist, so a row can persist correctly and
     // still reach the operator stripped. This is the only assertion that covers both directions.
-    const token = await signToken();
+    const operator = await memberOperator();
 
     await request(app!.getHttpServer())
       .get('/v1/onboardings')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(200);
     await waitForRows(1);
 
     const response = await request(app!.getHttpServer())
       .get('/v1/admin/audit')
       .query({ resourceType: 'admin_endpoint', action: 'auth.access_granted' })
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(200);
 
     const items = response.body.items as Array<Record<string, unknown>>;
@@ -253,23 +225,18 @@ describe('Admin access audit persistence (e2e)', () => {
     expect(items[0]).toMatchObject({
       action: 'auth.access_granted',
       actorType: 'operator',
-      actorId: OPERATOR_OBJECT_ID,
+      actorId: operator.userId,
       resourceType: 'admin_endpoint',
-      metadata: {
-        method: 'GET',
-        tenantId: TENANT_ID,
-        userPrincipalName: OPERATOR_UPN,
-        grantedRoles: ['admin'],
-      },
+      metadata: { method: 'GET', email: operator.email, organizationId: operator.organizationId },
     });
   });
 
   it('audits the audit endpoint itself, leaving no unrecorded way to read the trail', async () => {
-    const token = await signToken();
+    const operator = await createOperator(app!, { platformRole: 'superadmin', twoFactor: true });
 
     await request(app!.getHttpServer())
       .get('/v1/admin/audit')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(200);
 
     const rows = await waitForRows(1);
@@ -281,12 +248,12 @@ describe('Admin access audit persistence (e2e)', () => {
   });
 
   it('records one row per request rather than collapsing repeated reads', async () => {
-    const token = await signToken();
+    const operator = await memberOperator();
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await request(app!.getHttpServer())
         .get('/v1/onboardings')
-        .set('Authorization', `Bearer ${token}`)
+        .set('Cookie', operator.cookie)
         .expect(200);
     }
 

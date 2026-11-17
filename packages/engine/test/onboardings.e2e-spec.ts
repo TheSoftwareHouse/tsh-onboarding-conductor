@@ -268,7 +268,7 @@ describe('OnboardingsController (e2e)', () => {
       ),
     );
 
-    // This suite sends no Entra ID token; admin auth has its own e2e spec.
+    // This suite sends no admin session; admin auth has its own e2e spec.
     process.env.ADMIN_AUTH_ENABLED = 'false';
     process.env.CLIENT_WEBHOOK_BASE_URL = clientWebhookTestUrl;
     process.env.WORKFLOWS_USERS_DIR = workflowsDir;
@@ -3818,6 +3818,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(migrations).toEqual([
       { name: '0001_initial_schema_1735689600000' },
       { name: '0002_create_otp_challenges_2053382400000' },
+      { name: '0003_better_auth_schema_2056060800000' },
     ]);
 
     const tables = await dataSource.query(

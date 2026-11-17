@@ -412,7 +412,7 @@ describe('Webhook outbox queue integration', () => {
 
   beforeAll(async () => {
     localServerUrl = await startLocalServer();
-    // This suite sends no Entra ID token; admin auth has its own e2e spec.
+    // This suite sends no admin session; admin auth has its own e2e spec.
     process.env.ADMIN_AUTH_ENABLED = 'false';
     // Pinned because the CORS suites in this process set an origin of their own.
     process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5173';
