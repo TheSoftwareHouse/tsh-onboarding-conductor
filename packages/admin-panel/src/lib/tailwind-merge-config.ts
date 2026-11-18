@@ -34,7 +34,7 @@ export const TAILWIND_MERGE_CONFIG = {
       radius: ['0', 'xs', 'sm', 'chip'],
       tracking: ['caps', 'brand'],
       leading: ['natural'],
-      animate: ['node-pulse'],
+      animate: ['node-pulse', 'loader-reveal'],
     },
     /* `duration` has no theme key, so the named values go on the class group itself; the id must
        stay `duration` or they never conflict with Tailwind's numeric `duration-200`. */

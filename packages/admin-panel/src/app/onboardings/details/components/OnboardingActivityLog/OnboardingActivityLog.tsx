@@ -1,5 +1,8 @@
 import type { ReactElement } from 'react';
 import { Link } from 'react-router';
+import { LoadFailure } from '@/components/ui/LoadFailure/LoadFailure';
+import { EmptyState } from '@/components/ui/EmptyState/EmptyState';
+import { Loader } from '@/components/ui/Loader/Loader';
 import { SectionHeader } from '@/components/ui/SectionHeader/SectionHeader';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { ADMIN_ROUTES } from '@/constants/routes';
@@ -33,6 +36,7 @@ const ACTIVITY_TIME_FORMATTER = new Intl.DateTimeFormat('en-GB', {
 
 const ACTIVITY_METADATA_MAX_PAIRS = 3;
 const ACTIVITY_METADATA_MAX_VALUE_LENGTH = 40;
+const ACTIVITY_FAILURE_SUFFIX = ' The rest of this onboarding is up to date.';
 const NO_METADATA_TEXT = 'No further detail recorded.';
 
 /** Clips a rendered value so one long pair cannot dominate the row's single line. */
@@ -124,25 +128,36 @@ function SeeInLogsLink({ href, children }: { href: string; children: string }): 
 interface ActivityLogBodyProps {
   activity: UseOnboardingActivityResult;
   logsHref: string;
+  onRetry: () => void;
 }
 
 /** The band's content for exactly one state: loading, failed, empty or entries. */
-function ActivityLogBody({ activity, logsHref }: ActivityLogBodyProps): ReactElement {
+function ActivityLogBody({ activity, logsHref, onRetry }: ActivityLogBodyProps): ReactElement {
   const { phase, entries, total, error } = activity;
 
   if (phase === 'loading') {
-    return <Typography variant="body-sm">Loading activity…</Typography>;
+    return <Loader layout="inline" label="Loading activity…" />;
   }
 
   if (phase === 'error') {
-    return <Typography variant="body-sm">Unable to load activity: {error}</Typography>;
+    return (
+      <LoadFailure
+        layout="section"
+        error={error}
+        subject="activity"
+        bodySuffix={ACTIVITY_FAILURE_SUFFIX}
+        onRetry={onRetry}
+      />
+    );
   }
 
   if (entries.length === 0) {
     return (
-      <Typography variant="body-sm">
-        No activity has been recorded for this onboarding yet.
-      </Typography>
+      <EmptyState
+        layout="section"
+        title="No activity yet"
+        body="No activity has been recorded for this onboarding yet."
+      />
     );
   }
 
@@ -163,7 +178,7 @@ function ActivityLogBody({ activity, logsHref }: ActivityLogBodyProps): ReactEle
 /** The History tab's second band: the audit trail filed against this onboarding, newest first. */
 export function OnboardingActivityLog({ onboardingId }: OnboardingActivityLogProps): ReactElement {
   const activity = useOnboardingActivity(onboardingId);
-  const { phase, entries, total } = activity;
+  const { phase, entries, total, refetch } = activity;
   const logsHref = buildAuditLogHref(onboardingId);
 
   return (
@@ -174,7 +189,7 @@ export function OnboardingActivityLog({ onboardingId }: OnboardingActivityLogPro
         trailing={<SeeInLogsLink href={logsHref}>→ See in Logs</SeeInLogsLink>}
       />
       <div className="px-8 py-4">
-        <ActivityLogBody activity={activity} logsHref={logsHref} />
+        <ActivityLogBody activity={activity} logsHref={logsHref} onRetry={refetch} />
       </div>
     </section>
   );

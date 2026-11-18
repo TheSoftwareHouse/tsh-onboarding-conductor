@@ -275,7 +275,10 @@ describe('DraftEditor', () => {
       type(await editorText(), '{"steps":');
       await userEvent.click(screen.getByRole('tab', { name: 'Authored graph' }));
 
-      expect(await screen.findByText(/Fix the JSON to see the canvas/)).toBeInTheDocument();
+      expect(
+        await screen.findByRole('heading', { name: 'The canvas cannot draw this document' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Fix it in the JSON tab\./)).toBeInTheDocument();
       expect(screen.queryByText(/No steps yet/)).not.toBeInTheDocument();
     });
   });
@@ -419,14 +422,14 @@ describe('DraftEditor', () => {
       await openGraph();
 
       expect(
-        await screen.findByText('This draft does not compile. Fix it on the JSON tab.'),
+        await screen.findByText('This draft does not compile. Fix it in the JSON tab.'),
       ).toBeInTheDocument();
       const details = screen.getByText('DUPLICATE_STEP');
       expect(details.compareDocumentPosition(screen.getByRole('tablist'))).toBe(
         Node.DOCUMENT_POSITION_FOLLOWING,
       );
 
-      await userEvent.click(screen.getByRole('button', { name: 'Show JSON' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Open JSON tab' }));
 
       expect(screen.getByRole('tab', { name: 'JSON' })).toHaveAttribute('aria-selected', 'true');
     });
@@ -437,9 +440,12 @@ describe('DraftEditor', () => {
       await editorText();
       await openGraph();
 
-      expect(await screen.findByText('Unable to compile this draft: boom')).toBeInTheDocument();
       expect(
-        screen.queryByText('This draft does not compile. Fix it on the JSON tab.'),
+        await screen.findByRole('heading', { name: 'Unable to compile this draft' }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('boom');
+      expect(
+        screen.queryByText('This draft does not compile. Fix it in the JSON tab.'),
       ).not.toBeInTheDocument();
 
       await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
@@ -454,7 +460,7 @@ describe('DraftEditor', () => {
       await openGraph();
 
       expect(
-        await screen.findByText('This draft does not compile. Fix it on the JSON tab.'),
+        await screen.findByText('This draft does not compile. Fix it in the JSON tab.'),
       ).toBeInTheDocument();
       expect(screen.getByText(/Invalid JSON:/)).toBeInTheDocument();
       expect(mockedCompile).not.toHaveBeenCalled();
@@ -988,7 +994,10 @@ describe('DraftEditor', () => {
       );
       renderEditor();
 
-      expect(await screen.findByText('This draft no longer exists.')).toBeInTheDocument();
+      expect(
+        await screen.findByRole('heading', { name: 'This draft no longer exists' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Choose a version from the list\./)).toBeInTheDocument();
     });
 
     it('refetches the versions instead of opening the editor when the version is no longer a draft', async () => {
@@ -1009,7 +1018,10 @@ describe('DraftEditor', () => {
       mockedFetch.mockRejectedValueOnce(new ApiError('boom', { status: 500 }));
       renderEditor();
 
-      expect(await screen.findByText(/Unable to load this draft: boom/)).toBeInTheDocument();
+      expect(
+        await screen.findByRole('heading', { name: 'Unable to load this draft' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('boom')).toBeInTheDocument();
       await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
       expect((await editorText()).value).toBe(SAVED_TEXT);

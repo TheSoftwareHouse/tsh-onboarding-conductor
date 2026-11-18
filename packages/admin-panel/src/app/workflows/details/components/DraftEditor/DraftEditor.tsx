@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HttpStatusCode } from 'axios';
-import type { ApiError } from '@/services/api/api-error';
 import { readDraftError } from '@/api/workflows/workflow-drafts';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
 import { WORKFLOW_VERSION_STATUS } from '@/api/workflows/workflow-versions';
+import { LoadFailure } from '@/components/ui/LoadFailure/LoadFailure';
 import { Button } from '@/components/ui/Button/Button';
-import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
+import { ErrorState } from '@/components/ui/ErrorState/ErrorState';
+import { Loader } from '@/components/ui/Loader/Loader';
 import { formatDateTime } from '@/lib/format-date-time';
 import { useEditHistory } from '../../hooks/useEditHistory';
 import { useDeleteDraft } from '../../hooks/useDeleteDraft';
@@ -40,11 +41,6 @@ export interface DraftEditorProps {
   version: number;
   /** The page's header, handed the editor's actions and note: they live with the editor's state. */
   renderHeader: (slots: DraftHeaderSlots) => ReactElement;
-}
-
-/** The refusal on a draft read that has its own wording instead of the generic load failure. */
-function readFailureMessage(error: ApiError): string | null {
-  return error.status === HttpStatusCode.NotFound ? 'This draft no longer exists.' : null;
 }
 
 /** `/workflows/:workflowId?version=N` for a draft: the stored document as JSON or as a graph, with its write actions. */
@@ -96,28 +92,25 @@ export function DraftEditor({ workflowId, version, renderHeader }: DraftEditorPr
     return (
       <>
         {renderHeader({})}
-        <StatusRegion className="px-8 py-6">
-          This version is no longer a draft. Opening it…
-        </StatusRegion>
+        <Loader label="This version is no longer a draft. Opening it…" />
       </>
     );
   }
 
   if (draft === undefined) {
-    const failure = isError ? readFailureMessage(error) : null;
-
     return (
       <>
         {renderHeader({})}
-        {isError && failure === null ? (
-          <div className="flex flex-col items-start gap-4 p-8">
-            <StatusRegion>{`Unable to load this draft: ${error.message}`}</StatusRegion>
-            <Button variant="secondary" size="md" onClick={() => void refetch()}>
-              Retry
-            </Button>
-          </div>
+        {!isError ? (
+          <Loader label="Loading draft…" />
+        ) : error.status === HttpStatusCode.NotFound ? (
+          <ErrorState
+            kind="notFound"
+            title="This draft no longer exists"
+            body="It was deleted or published from another tab. Choose a version from the list."
+          />
         ) : (
-          <StatusRegion className="px-8 py-6">{failure ?? 'Loading draft…'}</StatusRegion>
+          <LoadFailure subject="this draft" error={error} onRetry={() => void refetch()} />
         )}
       </>
     );

@@ -133,6 +133,7 @@ A domain is one or more fetch/write modules plus exactly one `<domain>Queries` f
   the write deleted, once the editor unmounts (`useRemoveVersionOnUnmount`), never while it is
   still mounted.
 - This tier never imports from `src/app/` (ADR 0022).
+- A read's loading, failure and empty states go through `Loader` / `EmptyState` / `ErrorState` / `LoadFailure` (ADR 0052), never a bare `StatusRegion`.
 
 ## Structure
 

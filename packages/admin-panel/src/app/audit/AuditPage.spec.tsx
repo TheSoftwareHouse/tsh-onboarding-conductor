@@ -148,7 +148,9 @@ async function renderReady(result: { data: unknown }): Promise<void> {
   await waitFor(() => {
     expect(mockedGet).toHaveBeenCalledTimes(1);
   });
-  await screen.findByRole('status');
+  await waitFor(() => {
+    expect(screen.queryByText('Loading audit events…')).not.toBeInTheDocument();
+  });
 }
 
 /**
@@ -206,7 +208,7 @@ describe('AuditPage', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Loading audit events…');
     expect(screen.getByRole('button', { name: 'Apply filters' })).toBeDisabled();
-    expect(screen.queryByRole('region', { name: 'Audit events results' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('columnheader')).toHaveLength(6);
   });
 
   it('renders every displayed column, including the invalid-date and empty-metadata fallbacks', async () => {
@@ -256,9 +258,15 @@ describe('AuditPage', () => {
     await pickDayOfThisMonth('To', 10);
 
     // Reported before Apply is reached, so the window is corrected where it was entered.
-    expect(screen.getByRole('status')).toHaveTextContent(
+    const results = screen.getByRole('region', { name: 'Audit events results' });
+    expect(within(results).getByRole('status')).toHaveTextContent(
+      'Correct the refused filter to see results',
+    );
+    expect(within(results).getByRole('status')).toHaveTextContent(
       '"Occurred from" must not be later than "Occurred to".',
     );
+    expect(within(results).queryAllByRole('row')).toHaveLength(1);
+    expect(screen.queryByRole('navigation', { name: 'Audit pages' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('From')).toHaveAttribute('aria-invalid', 'true');
 
     await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
@@ -396,29 +404,68 @@ describe('AuditPage', () => {
 
     renderPage();
 
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load audit events: Request failed with status 500.',
-      );
-    });
-    expect(screen.queryByRole('region', { name: 'Audit events results' })).not.toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Unable to load audit events');
+    expect(alert).toHaveTextContent('Request failed with status 500.');
+    expect(screen.getAllByRole('columnheader')).toHaveLength(6);
     expect(screen.queryByRole('navigation', { name: 'Audit pages' })).not.toBeInTheDocument();
+  });
+
+  it('names the audit log when access is denied', async () => {
+    const axiosError = new AxiosError('Request failed with status code 403');
+    axiosError.response = { status: 403 } as AxiosError['response'];
+    mockedGet.mockRejectedValueOnce(axiosError);
+
+    renderPage();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No access to the audit log');
+  });
+
+  it('refetches when Retry is activated on a failure', async () => {
+    const axiosError = new AxiosError('Request failed with status code 500');
+    axiosError.response = { status: 500 } as AxiosError['response'];
+    mockedGet.mockRejectedValueOnce(axiosError);
+    renderPage();
+    await screen.findByRole('alert');
+
+    mockedGet.mockResolvedValueOnce(page([EVENT_ONE]));
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => {
+      expect(mockedGet).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText('Showing 1 of 1 audit events (page 1 of 1).')).toBeVisible();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('distinguishes an empty trail from one narrowed away by the criteria', async () => {
     await renderReady(page([]));
 
-    expect(screen.getByRole('status')).toHaveTextContent('No audit events were returned.');
+    expect(screen.getByRole('status')).toHaveTextContent('No audit events yet');
+    expect(screen.getAllByRole('columnheader')).toHaveLength(6);
 
     mockedGet.mockResolvedValueOnce(page([]));
     await userEvent.type(screen.getByLabelText('Actor ID'), 'nobody');
     await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
 
+    expect(await screen.findByText('No audit events match the current filters')).toBeVisible();
+  });
+
+  it('resets the filters through the no-match state', async () => {
+    mockedGet.mockResolvedValueOnce(page([]));
+    renderPage('/audit?actorId=nobody');
+    const results = screen.getByRole('region', { name: 'Audit events results' });
+    await within(results).findByText('No audit events match the current filters');
+
+    mockedGet.mockResolvedValueOnce(page([EVENT_ONE]));
+    await userEvent.click(within(results).getByRole('button', { name: 'Reset filters' }));
+
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'No audit events match the current filters.',
-      );
+      expect(mockedGet).toHaveBeenNthCalledWith(2, ADMIN_AUDIT_ENDPOINT, {
+        params: expectedParams(),
+      });
     });
+    expect(await screen.findByRole('status')).toHaveTextContent('Showing 1 of 1');
   });
 
   it("keeps the selected tab's resourceType when Apply filters is pressed", async () => {
