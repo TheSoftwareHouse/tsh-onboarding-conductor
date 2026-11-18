@@ -42,6 +42,8 @@ export const platformMutations = {
   createOrganization: () =>
     mutationOptions({
       mutationFn: (name: string) => createOrganization(name),
-      meta: { awaits: () => [platformQueries.organizations().queryKey] as const },
+      // better-auth makes the new organization the session's active one, and every admin read is
+      // scoped to it, so the whole cache is stale: the empty key matches every query.
+      meta: { awaits: () => [[]] as const },
     }),
 };

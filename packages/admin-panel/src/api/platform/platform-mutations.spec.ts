@@ -1,4 +1,6 @@
+import { QueryClient, type QueryKey } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { organizationQueries } from '@/api/organization/organization-queries';
 import {
   banUser,
   createOrganization,
@@ -41,10 +43,20 @@ describe('platformMutations', () => {
     }
   });
 
-  it('refreshes the organizations after one is created', () => {
-    expect(keysOf(platformMutations.createOrganization().meta?.awaits)).toEqual([
-      platformQueries.organizations().queryKey,
-    ]);
+  it('refreshes every query after an organization is created, since it becomes the active one', async () => {
+    const keys = keysOf(platformMutations.createOrganization().meta?.awaits) as QueryKey[];
+    const client = new QueryClient();
+    // Widened to a plain key: the seeded value only has to exist, not match the response type.
+    const activeKey: QueryKey = organizationQueries.active().queryKey;
+    client.setQueryData(activeKey, { name: 'old' });
+    client.setQueryData(platformQueries.organizations().queryKey, []);
+
+    await Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey })));
+
+    expect(client.getQueryState(activeKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(platformQueries.organizations().queryKey)?.isInvalidated).toBe(
+      true,
+    );
   });
 
   it('declares no meta on the session and password writes', () => {

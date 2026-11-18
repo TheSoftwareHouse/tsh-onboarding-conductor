@@ -9,7 +9,8 @@ import {
   slugify,
 } from './platform';
 
-const { mockedListUsers, mockedSetRole, mockedCreate } = vi.hoisted(() => ({
+const { mockedListUsers, mockedSetRole, mockedCreate, mockedNotify } = vi.hoisted(() => ({
+  mockedNotify: vi.fn(),
   mockedListUsers: vi.fn(),
   mockedSetRole: vi.fn(),
   mockedCreate: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('@/services/auth/auth-client', () => ({
   authClient: {
     admin: { listUsers: mockedListUsers, setRole: mockedSetRole },
     organization: { create: mockedCreate },
+    $store: { notify: mockedNotify },
   },
 }));
 
@@ -57,6 +59,14 @@ describe('platform', () => {
     });
   });
 
+  it('refreshes the session after a role change, which may be the operator own', async () => {
+    mockedSetRole.mockResolvedValue({ data: { user: { id: 'u-1' } }, error: null });
+
+    await setUserRole('u-1', 'user');
+
+    expect(mockedNotify).toHaveBeenCalledWith('$sessionSignal');
+  });
+
   it('turns a refusal into an ApiError carrying its status', async () => {
     mockedSetRole.mockResolvedValue({
       data: null,
@@ -66,6 +76,7 @@ describe('platform', () => {
     const failure = await setUserRole('u-1', 'user').catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(ApiError);
+    expect(mockedNotify).not.toHaveBeenCalled();
     expect(failure).toMatchObject({
       message: 'At least one active superadmin must remain.',
       status: 403,
