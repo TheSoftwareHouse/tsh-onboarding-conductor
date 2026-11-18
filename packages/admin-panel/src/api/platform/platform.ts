@@ -56,10 +56,14 @@ export function isSuperadmin(user: { role?: string | null }): boolean {
   return user.role?.split(',').includes(SUPERADMIN_ROLE) ?? false;
 }
 
-export function setUserRole(userId: string, role: PlatformRole) {
+export async function setUserRole(userId: string, role: PlatformRole) {
   // The client's role union is the plugin default (`user` | `admin`); the engine declares `superadmin` too.
   const body = { userId, role } as Parameters<typeof authClient.admin.setRole>[0];
-  return unwrap(authClient.admin.setRole(body), 'Unable to change the role.');
+  const result = await unwrap(authClient.admin.setRole(body), 'Unable to change the role.');
+  // The admin plugin refreshes no session on a role change, so an operator who changed their own
+  // role would keep the old one in the panel (the platform links) until the next sign-in.
+  authClient.$store.notify('$sessionSignal');
+  return result;
 }
 
 export function banUser(userId: string) {
