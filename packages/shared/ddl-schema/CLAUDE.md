@@ -10,6 +10,16 @@ the package.
 
 ## Package-specific pitfalls
 
+- Two subpaths serve the admin panel's browser bundle (ADR 0051): `@tsh/ddl-schema/step-types`
+  (`src/step-types.ts`: the registry, ports, `STEP_TYPE`, step naming and the per-step compile) and
+  `@tsh/ddl-schema/workflow-schema` (`src/workflow-schema.ts`: `getWorkflowJsonSchema`). The panel may
+  import these and `workflow-contract`, nothing else here; its ESLint config enforces that.
+- `src/step-types/step-compile.ts` is the compiler's ajv-free per-step part. `workflow.compiler.ts`
+  and the panel both call it, so a change there changes the engine's compile and the panel's preview.
+  `workflow.compiler.spec.ts` guards the engine side.
+- Every subpath in `package.json` `exports` except the root and `./workflow-validator` must reach no
+  `ajv`. `src/runtime-free-subpaths.spec.ts` walks each one's imports and fails otherwise; a new
+  subpath is covered automatically, so keep it free of runtime dependencies.
 - There is no checked-in schema file. Both JSON Schemas are derived **in memory**: the compiled
   form's from `src/fields/field-type.registry.ts` and `src/formats/field-format.registry.ts`, the
   authored workflow's from those plus `src/step-types/step-type.registry.ts`. Adding a field type

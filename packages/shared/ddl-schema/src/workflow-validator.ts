@@ -35,6 +35,7 @@ import type {
 } from './workflow-contract';
 import {
   failWorkflow,
+  locateWorkflowFailure,
   WorkflowInvalidError,
   type WorkflowInvalidPath,
 } from './workflow-invalid.error';
@@ -131,12 +132,15 @@ const normalizeStepDefinition = (
     ),
   }));
 
+  // A step-level check that cannot say where it failed is located at its step, so the author sees which one.
   const steps: NormalizedWorkflowStep[] = normalizedStepEntries.map(
-    ({ rawStep, normalizedData }) => ({
+    ({ rawStep, normalizedData }, index) => ({
       name: rawStep.name,
       status: rawStep.status as WorkflowStatus,
       data: normalizedData,
-      connectors: normalizeConnectors(rawStep, workflowFieldNames, connectorMappingContext),
+      connectors: locateWorkflowFailure(`steps[${index}]`, () =>
+        normalizeConnectors(rawStep, workflowFieldNames, connectorMappingContext),
+      ),
       transitions: [],
       terminal: isTerminalStatus(rawStep.status),
       scoring: [],
@@ -149,33 +153,35 @@ const normalizeStepDefinition = (
   }
 
   // Conditions are normalized in a second pass, once every root field is known.
-  for (const { rawStep, normalizedData } of normalizedStepEntries) {
-    const step = stepsByName[rawStep.name];
-    if (!step) {
-      failWorkflow('INVALID_VALUE');
-    }
-
-    for (const [fieldName, normalizedField] of Object.entries(normalizedData)) {
-      const rawField = rawStep.data[fieldName];
-      if (rawField === undefined || !Object.prototype.hasOwnProperty.call(rawField, 'when')) {
-        continue;
+  for (const [index, { rawStep, normalizedData }] of normalizedStepEntries.entries()) {
+    locateWorkflowFailure(`steps[${index}]`, () => {
+      const step = stepsByName[rawStep.name];
+      if (!step) {
+        failWorkflow('INVALID_VALUE');
       }
 
-      normalizedField.when = normalizeCondition(rawField.when, {
-        ...conditionContext,
-        currentFieldName: fieldName,
-      });
-    }
+      for (const [fieldName, normalizedField] of Object.entries(normalizedData)) {
+        const rawField = rawStep.data[fieldName];
+        if (rawField === undefined || !Object.prototype.hasOwnProperty.call(rawField, 'when')) {
+          continue;
+        }
 
-    step.data = normalizedData;
-    step.scoring = normalizeScoringRules(rawStep, conditionContext, declaredScoreNames);
-    step.transitions = rawStep.transitions.map((transition) =>
-      normalizeTransition(
-        transition,
-        { ...conditionContext, currentFieldName: undefined },
-        declaredScoreNames,
-      ),
-    );
+        normalizedField.when = normalizeCondition(rawField.when, {
+          ...conditionContext,
+          currentFieldName: fieldName,
+        });
+      }
+
+      step.data = normalizedData;
+      step.scoring = normalizeScoringRules(rawStep, conditionContext, declaredScoreNames);
+      step.transitions = rawStep.transitions.map((transition) =>
+        normalizeTransition(
+          transition,
+          { ...conditionContext, currentFieldName: undefined },
+          declaredScoreNames,
+        ),
+      );
+    });
   }
 
   validateTransitionGroups(steps, stepsByName);
