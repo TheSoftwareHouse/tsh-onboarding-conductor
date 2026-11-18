@@ -164,25 +164,6 @@ describe('Admin access audit persistence (e2e)', () => {
     expect(row.metadata).toEqual({ method: 'POST', reason: 'No valid admin session' });
   });
 
-  it('persists a TOTP refusal against the operator who was turned away', async () => {
-    const operator = await createOperator(app!, { platformRole: 'superadmin' });
-
-    await request(app!.getHttpServer())
-      .get('/v1/onboardings')
-      .set('Cookie', operator.cookie)
-      .expect(403);
-
-    const rows = await waitForRows(1);
-    const row = rows.find((candidate) => candidate.action === 'auth.two_factor_required');
-
-    expect(row).toMatchObject({ actor_type: 'operator', actor_id: operator.userId });
-    expect(row?.metadata).toMatchObject({
-      method: 'GET',
-      email: operator.email,
-      platformRole: 'superadmin',
-    });
-  });
-
   it('persists a permission refusal against the operator, naming the permission', async () => {
     const operator = await memberOperator();
 

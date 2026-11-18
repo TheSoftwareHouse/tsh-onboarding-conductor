@@ -61,9 +61,6 @@ function readRuntimeConfig(configService: ConfigService): AdminPanelRuntimeConfi
     VITE_AUTH_MICROSOFT_ENABLED: String(
       Boolean(configService.get<string>('AUTH_MICROSOFT_CLIENT_ID')),
     ),
-    VITE_AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED: String(
-      configService.getOrThrow<boolean>('AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED'),
-    ),
     VITE_NODE_ENV: configService.getOrThrow<string>('NODE_ENV'),
     VITE_ENVIRONMENT_NAME: configService.getOrThrow<string>('ENVIRONMENT_NAME'),
   };

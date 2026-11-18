@@ -1,30 +1,15 @@
-import { hasSuperadminRole, isTwoFactorWaived } from '../domain/admin-permissions';
+import { hasSuperadminRole } from '../domain/admin-permissions';
 
 export enum EndpointGuardRefusal {
-  TWO_FACTOR_REQUIRED = 'TWO_FACTOR_REQUIRED',
   LAST_SUPERADMIN = 'LAST_SUPERADMIN',
 }
 
 export interface EndpointGuardLookups {
-  /** The signed-in user, or null when unauthenticated or server-side; read only for guarded paths. */
-  findSessionUser(): Promise<EndpointGuardSessionUser | null>;
-  hasCredentialAccount(userId: string): Promise<boolean>;
   findUser(userId: string): Promise<{ role: string | null; banned: boolean } | null>;
   /** Non-banned superadmins other than the given user. */
   countActiveSuperadminsExcept(userId: string): Promise<number>;
-  /** `AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED`: `false` exempts a superadmin from the 2FA rule. */
-  superadminTwoFactorRequired: boolean;
 }
 
-export interface EndpointGuardSessionUser {
-  id: string;
-  role?: string | null;
-  twoFactorEnabled?: boolean | null;
-}
-
-const TWO_FACTOR_GUARDED_PREFIXES = ['/admin/', '/organization/'];
-/** The invitee opens these before they can have enrolled TOTP, so the rule cannot apply to them. */
-const TWO_FACTOR_EXEMPT_PATHS = ['/organization/get-invitation', '/organization/accept-invitation'];
 const SET_ROLE_PATH = '/admin/set-role';
 const UPDATE_USER_PATH = '/admin/update-user';
 const SUPERADMIN_LOSING_PATHS = [
@@ -35,11 +20,8 @@ const SUPERADMIN_LOSING_PATHS = [
 ];
 
 /**
- * The refusal better-auth's own `/admin/*` and `/organization/*` endpoints owe, or null to let the
- * request through. They never pass `AdminSessionGuard`, so this re-applies its 2FA rule (a user
- * with a credential account needs `twoFactorEnabled`; a Microsoft-only user is exempt, and so is a
- * superadmin when `AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED` is false) and keeps at
- * least one non-banned superadmin.
+ * The refusal better-auth's own `/admin/*` endpoints owe, or null to let the request through. They
+ * never pass `AdminSessionGuard`, so this keeps at least one non-banned superadmin.
  */
 export async function findEndpointGuardRefusal(
   path: string,
@@ -52,23 +34,6 @@ export async function findEndpointGuardRefusal(
     | undefined,
   lookups: EndpointGuardLookups,
 ): Promise<EndpointGuardRefusal | null> {
-  const isTwoFactorGuarded =
-    TWO_FACTOR_GUARDED_PREFIXES.some((prefix) => path.startsWith(prefix)) &&
-    !TWO_FACTOR_EXEMPT_PATHS.includes(path);
-
-  if (isTwoFactorGuarded) {
-    const sessionUser = await lookups.findSessionUser();
-
-    if (
-      sessionUser &&
-      sessionUser.twoFactorEnabled !== true &&
-      !isTwoFactorWaived(sessionUser.role, lookups.superadminTwoFactorRequired) &&
-      (await lookups.hasCredentialAccount(sessionUser.id))
-    ) {
-      return EndpointGuardRefusal.TWO_FACTOR_REQUIRED;
-    }
-  }
-
   if (!SUPERADMIN_LOSING_PATHS.includes(path) || !body?.userId) {
     return null;
   }

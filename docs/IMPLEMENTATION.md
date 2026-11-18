@@ -2980,7 +2980,7 @@ enum:
 | `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 401 / 503 |
 | `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 410       |
 | `ADMIN_SESSION_REQUIRED` — an admin route with no valid session (Authentication, below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | 401       |
-| `TWO_FACTOR_REQUIRED`, `ADMIN_PERMISSION_MISSING` — an admin route for a credential user without TOTP, or whose role lacks the route's permission                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 403       |
+| `ADMIN_PERMISSION_MISSING` — an admin route for an operator whose role lacks the route's permission                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 403       |
 | `AUTH_UNAVAILABLE` — the `auth` schema could not be reached                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | 503       |
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                                                                                                                                                                                                                                                                                    | 503       |
 | `OTP_DELIVERY_FAILED`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 500       |
@@ -3005,7 +3005,7 @@ to callers, so the error-code table above gains no `VALIDATION_FAILED` entry.
 
 Operators sign in through better-auth, mounted in the engine
 ([0050](decisions/0050-better-auth-for-admin-authentication.md)). The panel signs in with email and
-password plus a mandatory TOTP code, or with Microsoft when it is configured. The session is an
+password, plus a TOTP code for an operator who turned two-factor on, or with Microsoft when it is configured. The session is an
 httpOnly cookie (`better-auth.session_token`, `SameSite=Lax`, `Secure` when `NODE_ENV=production`),
 not a bearer token. Every route under `/v1/admin/`, the operator routes on onboardings (the reads,
 the export, the agreement link, the pending-connector reconcile) and the manual review decision
@@ -3044,23 +3044,24 @@ organization groups operators and grants permissions, and nothing in a query fil
 
 **Guard.** `@AdminRoute(permission)` (`src/auth/admin-route.decorator.ts`) applies
 `AdminSessionGuard` (`src/auth/admin-session.guard.ts`), stores the permission as metadata and writes
-the cookie security scheme and the four refusals into the OpenAPI document in one step, so the two
+the cookie security scheme and the three refusals into the OpenAPI document in one step, so the two
 cannot disagree. The guard decides in this order:
 
 1. `ADMIN_AUTH_ENABLED=false`: record `unauthenticated` and let the request through.
 2. No valid session: `401 ADMIN_SESSION_REQUIRED`.
-3. A user with a password (`credential`) account whose `twoFactorEnabled` is false:
-   `403 TWO_FACTOR_REQUIRED`.
-4. Platform role `superadmin`: granted. Otherwise the member's role in the session's active
+3. Platform role `superadmin`: granted. Otherwise the member's role in the session's active
    organization must hold the route's permission; no active organization, or a role without the
    permission, is `403 ADMIN_PERMISSION_MISSING`.
-5. The `auth` schema unreachable at any step: `503 AUTH_UNAVAILABLE`, so an engine-side fault never
+4. The `auth` schema unreachable at any step: `503 AUTH_UNAVAILABLE`, so an engine-side fault never
    sends operators off to sign in again.
 
-**2FA rule (decision 5).** A user with a `credential` account must have enrolled TOTP; a user whose
-only account is `microsoft` is exempt. That exemption is a trust boundary: for Microsoft users the
-tenant's Conditional Access is the only MFA, and the engine neither sees nor checks it. A
-deployment that enables Microsoft sign-in must require MFA in that tenant. The tenant id is a
+**2FA (decision 5).** TOTP is opt-in: each operator turns it on or off for their own account
+(better-auth's `/two-factor/enable`, `/verify-totp` and `/disable`, all behind the password), and no
+route refuses an operator without it. Once it is on, a password sign-in answers `twoFactorRedirect`
+and the session starts only after the code. A user whose only account is `microsoft` has no
+password, so cannot turn it on: the tenant's Conditional Access is their only MFA, and the engine
+neither sees nor checks it. A deployment that enables Microsoft sign-in must require MFA in that
+tenant. The tenant id is a
 concrete GUID, never `common`, `organizations` or `consumers`, and the invitation match uses the
 Microsoft email claim, which is only safe inside one tenant.
 
@@ -3129,10 +3130,7 @@ a user in two or more organizations.
 
 **Endpoints outside the guard.** better-auth's own `/v1/auth/admin/*` and `/v1/auth/organization/*`
 endpoints never pass `AdminSessionGuard`. A `hooks.before`
-(`auth-endpoint-guards.hook.ts`) re-applies the 2FA rule there: a credential user without TOTP gets
-`403 TWO_FACTOR_REQUIRED`, except on `/organization/get-invitation` and
-`/organization/accept-invitation`, which an invitee opens before they can have enrolled. The same
-hook refuses `/admin/set-role`, `/admin/ban-user` and `/admin/remove-user` when the change would
+(`auth-endpoint-guards.hook.ts`) refuses `/admin/set-role`, `/admin/ban-user` and `/admin/remove-user` when the change would
 leave no non-banned superadmin: `403 LAST_SUPERADMIN`. Role changes, bans and invitations made
 through these endpoints are not written to the audit trail; they are visible only in the `auth`
 schema.
@@ -3141,11 +3139,7 @@ schema.
 bootstrap. With `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD` set and no user holding the
 `superadmin` role, it creates one through the admin plugin's `createUser` and logs the email, never
 the password. A second boot finds the superadmin and does nothing. The seeded user is an ordinary
-credential user: it must enroll TOTP before any admin route answers it, unless
-`AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED=false`. That flag (default `true`) waives the TOTP rule for a
-user holding the `superadmin` role only, in both `BetterAuthSessionVerifier` and the endpoint-guard
-hook; the engine renders it into `/config.js` as `VITE_AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED`, and the
-panel then offers the setup screen with a "Skip for now" button instead of forcing it.
+credential user, with two-factor off until it turns it on.
 
 **Mail.** `AuthMailer` (`src/auth/auth-mailer.ts`) sends the invitation
 (`<BETTER_AUTH_URL>/accept-invitation/<invitation id>`) and the password-reset link through
@@ -3161,8 +3155,7 @@ neither. `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET` and `AUTH_MI
 are optional, all or none, and the tenant must be a GUID; the redirect URI to register is
 `<BETTER_AUTH_URL>/v1/auth/callback/microsoft`. The pair and the triple are validated even while
 auth is off. The secrets never reach the panel: `/config.js` carries only
-`VITE_AUTH_MICROSOFT_ENABLED`, derived from the triple, and
-`VITE_AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED`, beside `VITE_AUTH_ENABLED`. The Entra-era
+`VITE_AUTH_MICROSOFT_ENABLED`, derived from the triple, beside `VITE_AUTH_ENABLED`. The Entra-era
 variables — the SSO provider switch, the Azure tenant and audience pair, the required-roles
 allowlist and the panel's `VITE_AZURE_*` family — no longer exist.
 
@@ -3177,7 +3170,6 @@ A request to a guarded route is refused as:
 | Status                  | Code                       | When                                                                                                         |
 | ----------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | 401 Unauthorized        | `ADMIN_SESSION_REQUIRED`   | No cookie, or the session is expired or revoked                                                              |
-| 403 Forbidden           | `TWO_FACTOR_REQUIRED`      | A credential user has not enrolled TOTP; enrolling fixes it                                                  |
 | 403 Forbidden           | `ADMIN_PERMISSION_MISSING` | The role holds no such permission, or the session has no active organization; signing in again cannot fix it |
 | 503 Service Unavailable | `AUTH_UNAVAILABLE`         | The `auth` schema could not be reached, so the session was never judged                                      |
 
@@ -3189,7 +3181,7 @@ who was turned away:
 | ------------------------------- | ------------------------------------------------------------ |
 | `auth.access_granted`           | The route was allowed                                        |
 | `auth.session_missing`          | No valid session (replaces `auth.token_rejected`)            |
-| `auth.two_factor_required`      | The user has not enrolled TOTP                               |
+| `auth.two_factor_required`      | Legacy: written while TOTP was mandatory, no longer written  |
 | `auth.permission_missing`       | The role lacks the permission (replaces `auth.role_missing`) |
 | `auth.verification_unavailable` | The auth store was unreachable                               |
 | `auth.access_unauthenticated`   | `ADMIN_AUTH_ENABLED=false` let the request through           |
@@ -3210,11 +3202,13 @@ them.
 plugins); `src/services/api/http-client.ts` sends the cookie and no `Authorization` header.
 `AuthGate` renders the sign-in screen (`SignInPage`: email and password, "Sign in with Microsoft"
 only when `VITE_AUTH_MICROSOFT_ENABLED` is true, a forgot-password request), the TOTP challenge
-(`TwoFactorChallenge`, with a backup-code fallback and "trust this device"), and the enrollment
-screen (`TwoFactorSetup`: password, QR code plus the secret as text, first code, backup codes shown
-once). Any request answered `403 TWO_FACTOR_REQUIRED` sends a signed-in operator to enrollment.
+(`TwoFactorChallenge`, with a backup-code fallback and "trust this device") for an operator who
+turned two-factor on. `/account` (the `Account` sidebar group) shows the signed-in operator's
+two-factor state and turns it on (`TwoFactorSetup`: password, QR code plus the secret as text,
+first code, backup codes shown once) or off (`DisableTwoFactorForm`: password). An operator without a
+password account (Microsoft only) sees why the setting is not theirs to change.
 `/reset-password` takes the mailed link and `/accept-invitation/:id` (outside the gate) lets an
-invitee sign up with a name and password, accept, and continue to enrollment. The `Admin` sidebar
+invitee sign up with a name and password, accept, and continue to the panel. The `Admin` sidebar
 group holds `/organization` (members, role changes, removal, pending invitations, invite form) for
 the active organization, and, for `platformRole === 'superadmin'` only, `/platform/users` (search,
 platform role, ban and unban, revoke sessions, temporary password) and `/platform/organizations`

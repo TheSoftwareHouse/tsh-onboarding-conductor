@@ -18,22 +18,20 @@ One product version covers the whole monorepo. Every pull request adds its line 
   and a caller that sends only a token gets `401 ADMIN_SESSION_REQUIRED`. Each route also needs a
   permission (`onboarding:read`, `workflow:publish`, `connector:write` and so on) held by the
   operator's role in their active organization, or the platform `superadmin` role; a role without
-  it gets `403 ADMIN_PERMISSION_MISSING`, and an operator who signs in with a password and has not
-  enrolled TOTP gets `403 TWO_FACTOR_REQUIRED`. Accounts are by invitation only, and the first
+  it gets `403 ADMIN_PERMISSION_MISSING`. Two-factor authentication (TOTP) is optional: each
+  operator turns it on or off on the panel's new Account page, and an operator who has it is asked
+  for a code at sign-in. Accounts are by invitation only, and the first
   superadmin is seeded from `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD`. A BFF or script
   that used an Entra client-credentials token needs an operator account instead; there is no API
   key. Removed: `ADMIN_SSO_PROVIDER`, `AZURE_TENANT_ID`, `AZURE_API_AUDIENCE`,
   `ADMIN_REQUIRED_ROLES`, `VITE_SSO_PROVIDER`, `VITE_AZURE_CLIENT_ID`, `VITE_AZURE_TENANT_ID`,
   `VITE_AZURE_API_SCOPE` and `VITE_AZURE_REDIRECT_URI`. Added, required while
   `ADMIN_AUTH_ENABLED=true`: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `AUTH_SMTP_URL` and
-  `AUTH_MAIL_FROM`; optional: `AUTH_SUPERADMIN_EMAIL`, `AUTH_SUPERADMIN_PASSWORD`,
-  `AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED` (default `true`; `false` makes TOTP optional for superadmins
-  only) and the Microsoft
+  `AUTH_MAIL_FROM`; optional: `AUTH_SUPERADMIN_EMAIL`, `AUTH_SUPERADMIN_PASSWORD` and the Microsoft
   triple `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET`, `AUTH_MICROSOFT_TENANT_ID`.
   Microsoft sign-in is now optional and skips the engine's TOTP step, so require MFA in the tenant.
   Migration `0003` creates the `auth` schema; the audit actions `auth.token_rejected` and
-  `auth.role_missing` are replaced by `auth.session_missing`, `auth.two_factor_required` and
-  `auth.permission_missing`, and the audit identity is now `userId`, `email`, `platformRole` and
+  `auth.role_missing` are replaced by `auth.session_missing` and `auth.permission_missing`, and the audit identity is now `userId`, `email`, `platformRole` and
   `organizationId`. The manual review route, which was open until 2026-11-01, is part of this
   surface. CORS now allows credentials and `POST`, and no longer allows `Authorization`.
 - Fonts — The commercial TWK Everett files are no longer in the repository and the typeface is no

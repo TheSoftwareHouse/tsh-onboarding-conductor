@@ -36,11 +36,6 @@ export type AdminAccessAuditEvent =
       reason: string;
     }
   | {
-      outcome: 'two_factor_required';
-      endpoint: AdminAccessEndpoint;
-      operator: AdminOperatorIdentity;
-    }
-  | {
       outcome: 'permission_missing';
       endpoint: AdminAccessEndpoint;
       operator: AdminOperatorIdentity;

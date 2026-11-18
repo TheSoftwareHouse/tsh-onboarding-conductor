@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  isAuthEnabled,
-  isMicrosoftSignInEnabled,
-  isSuperadminTwoFactorRequired,
-} from './auth-config';
+import { isAuthEnabled, isMicrosoftSignInEnabled } from './auth-config';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -61,19 +57,5 @@ describe('isMicrosoftSignInEnabled', () => {
     window.__ENV__ = { VITE_AUTH_MICROSOFT_ENABLED: 'true' };
 
     expect(isMicrosoftSignInEnabled()).toBe(true);
-  });
-});
-
-describe('isSuperadminTwoFactorRequired', () => {
-  it('is required when the engine did not render the flag', () => {
-    vi.stubEnv('VITE_AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED', undefined);
-
-    expect(isSuperadminTwoFactorRequired()).toBe(true);
-  });
-
-  it('is optional only for an explicit false', () => {
-    vi.stubEnv('VITE_AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED', ' False ');
-
-    expect(isSuperadminTwoFactorRequired()).toBe(false);
   });
 });

@@ -50,9 +50,3 @@ export const SUPERADMIN_ROLE = 'superadmin';
 /** better-auth stores several roles as one comma-separated string (`user,superadmin`). */
 export const hasSuperadminRole = (role: string | string[] | null | undefined): boolean =>
   (Array.isArray(role) ? role : (role ?? '').split(',')).includes(SUPERADMIN_ROLE);
-
-/** True when the deployment made TOTP optional for superadmins and this role is one. */
-export const isTwoFactorWaived = (
-  role: string | string[] | null | undefined,
-  superadminTwoFactorRequired: boolean,
-): boolean => !superadminTwoFactorRequired && hasSuperadminRole(role);

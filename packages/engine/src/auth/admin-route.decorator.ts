@@ -7,7 +7,6 @@ import type { AdminPermission } from './domain/admin-permissions';
 import { AdminPermissionMissingException } from './errors/admin-permission-missing.exception';
 import { AdminSessionRequiredException } from './errors/admin-session-required.exception';
 import { AuthUnavailableException } from './errors/auth-unavailable.exception';
-import { TwoFactorRequiredException } from './errors/two-factor-required.exception';
 
 /**
  * Marks a handler as part of the admin surface: guards it with `AdminSessionGuard`, records the
@@ -23,7 +22,6 @@ export function AdminRoute(permission: AdminPermission): MethodDecorator {
     ApiCookieAuth(ADMIN_SESSION_AUTH),
     ApiErrorResponses(
       AdminSessionRequiredException,
-      TwoFactorRequiredException,
       AdminPermissionMissingException,
       AuthUnavailableException,
     ),

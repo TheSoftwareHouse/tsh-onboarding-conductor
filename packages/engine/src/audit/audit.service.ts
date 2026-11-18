@@ -141,8 +141,8 @@ const WEBHOOK_RESOURCE_ALLOWLIST: Record<WebhookAction, readonly WebhookResource
 };
 
 /**
- * Which actor type each admin access outcome may claim. An `access_granted`, `two_factor_required`
- * or `permission_missing` row means the session was verified and therefore names a real operator; the rest never got that far
+ * Which actor type each admin access outcome may claim. An `access_granted` or `permission_missing` row
+ * (or the legacy `role_missing` and `two_factor_required`) means the session was verified and therefore names a real operator; the rest never got that far
  * and must stay anonymous. Asserting the pairing keeps a coding mistake from attributing an
  * unverified request to a named person.
  */

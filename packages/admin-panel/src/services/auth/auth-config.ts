@@ -26,13 +26,3 @@ export function isAuthEnabled(): boolean {
 export function isMicrosoftSignInEnabled(): boolean {
   return readValue(readRuntimeEnv().VITE_AUTH_MICROSOFT_ENABLED)?.toLowerCase() === 'true';
 }
-
-/**
- * Whether a superadmin must enroll TOTP. Required unless the engine explicitly renders `false`;
- * the engine enforces the same rule, so this only decides whether the setup screen can be skipped.
- */
-export function isSuperadminTwoFactorRequired(): boolean {
-  return (
-    readValue(readRuntimeEnv().VITE_AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED)?.toLowerCase() !== 'false'
-  );
-}

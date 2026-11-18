@@ -97,18 +97,17 @@ test.describe('admin panel sign-in gate @auth-enabled', () => {
     await expect(page.getByRole('table')).toHaveCount(0);
   });
 
-  test('should enroll an account without a second factor before it reaches the panel', async ({
+  test('should let an account without a second factor in, and turn it on and off from Account', async ({
     page,
   }) => {
     await page.goto(APP_URL);
 
     await submitCredentials(page, ENROLLING_EMAIL, PASSWORD);
 
-    await expect(
-      page.getByRole('heading', { name: 'Set up two-factor authentication' }),
-    ).toBeVisible();
-    await expect(page.getByRole('table')).toHaveCount(0);
+    await expect(page.getByRole('table')).toBeVisible();
 
+    await page.getByRole('link', { name: 'Account' }).click();
+    await page.getByRole('button', { name: 'Turn on' }).click();
     await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
     await page.getByRole('button', { name: 'Continue' }).click();
 
@@ -122,6 +121,12 @@ test.describe('admin panel sign-in gate @auth-enabled', () => {
     ).toHaveCount(4);
     await page.getByRole('button', { name: 'I have saved my backup codes' }).click();
 
-    await expect(page.getByRole('table')).toBeVisible();
+    await expect(page.getByText(/^On\./)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Turn off' }).click();
+    await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
+    await page.getByRole('button', { name: 'Turn off' }).click();
+
+    await expect(page.getByText(/^Off\./)).toBeVisible();
   });
 });

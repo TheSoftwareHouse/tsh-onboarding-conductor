@@ -53,8 +53,6 @@ const PASSWORD = 'correct-horse-battery';
 const TOTP_CODE = '123456';
 const TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
 const BACKUP_CODES = ['aaaa-1111', 'bbbb-2222', 'cccc-3333', 'dddd-4444'];
-/** A session cookie value a spec can plant to start signed in without an enrolled second factor. */
-const SEEDED_UNENROLLED_TOKEN = 'seeded-unenrolled-session';
 
 const ACCOUNTS = {
   'operator@example.com': { id: 'user-operator', twoFactorEnabled: true, hasPermission: true },
@@ -62,9 +60,7 @@ const ACCOUNTS = {
   'viewer@example.com': { id: 'user-viewer', twoFactorEnabled: true, hasPermission: false },
 };
 
-const sessions = new Map([
-  [SEEDED_UNENROLLED_TOKEN, createSession('enrolling@example.com', false)],
-]);
+const sessions = new Map();
 const pendingChallenges = new Map();
 /** Whether admin routes demand a session; off for the passes that run with the gate disabled. */
 let enforceAuth = false;
@@ -170,6 +166,25 @@ async function respondToAuth(request, response, pathname) {
     case 'GET /organization/list':
       sendJson(response, 200, []);
       return true;
+
+    case 'GET /list-accounts':
+      sendJson(response, 200, session ? [{ id: 'account-1', providerId: 'credential' }] : []);
+      return true;
+
+    case 'POST /two-factor/disable': {
+      const { password } = await readJsonBody(request);
+
+      if (!session) {
+        sendAuthError(response, 401, 'UNAUTHORIZED', 'Unauthorized');
+      } else if (password !== PASSWORD) {
+        sendAuthError(response, 400, 'INVALID_PASSWORD', 'Invalid password');
+      } else {
+        session.twoFactorEnabled = false;
+        sendJson(response, 200, { status: true });
+      }
+
+      return true;
+    }
 
     case 'POST /sign-in/email': {
       const { email, password } = await readJsonBody(request);
@@ -283,15 +298,6 @@ function refuseAdminRequest(request, response) {
       statusCode: 401,
       code: 'ADMIN_SESSION_REQUIRED',
       message: 'An admin session is required.',
-    });
-    return true;
-  }
-
-  if (!session.twoFactorEnabled) {
-    sendJson(response, 403, {
-      statusCode: 403,
-      code: 'TWO_FACTOR_REQUIRED',
-      message: 'Two-factor authentication is required.',
     });
     return true;
   }

@@ -9,12 +9,7 @@ import {
 } from '../domain/admin-permissions';
 import type { AuthMailer } from '../auth-mailer';
 import { findActiveOrganizationId } from './active-organization.hook';
-import {
-  EndpointGuardRefusal,
-  findEndpointGuardRefusal,
-  type EndpointGuardLookups,
-} from './auth-endpoint-guards.hook';
-import { hasCredentialAccount } from './better-auth-session.verifier';
+import { EndpointGuardRefusal, findEndpointGuardRefusal } from './auth-endpoint-guards.hook';
 import { INVITE_ONLY_REFUSAL_MESSAGE, isUserCreationAllowed } from './invite-only.hook';
 import {
   loadBetterAuth,
@@ -60,7 +55,6 @@ function createStoreLookups(pool: Pool) {
 
       return (rows[0]?.organizationId as string | undefined) ?? null;
     },
-    hasCredentialAccount: (userId: string) => hasCredentialAccount(pool, userId),
     async findUser(userId: string) {
       const { rows } = await pool.query('SELECT "role", "banned" FROM "user" WHERE "id" = $1', [
         userId,
@@ -82,7 +76,6 @@ function createStoreLookups(pool: Pool) {
 }
 
 const ENDPOINT_GUARD_MESSAGES: Record<EndpointGuardRefusal, string> = {
-  [EndpointGuardRefusal.TWO_FACTOR_REQUIRED]: 'Set up two-factor authentication to continue.',
   [EndpointGuardRefusal.LAST_SUPERADMIN]: 'At least one active superadmin must remain.',
 };
 
@@ -168,14 +161,7 @@ export async function createBetterAuth(
     },
     hooks: {
       before: api.createAuthMiddleware(async (ctx) => {
-        const lookups: EndpointGuardLookups = {
-          ...store,
-          superadminTwoFactorRequired: configService.getOrThrow<boolean>(
-            'AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED',
-          ),
-          findSessionUser: async () => (await api.getSessionFromCtx(ctx as never))?.user ?? null,
-        };
-        const refusal = await findEndpointGuardRefusal(ctx.path, ctx.body, lookups);
+        const refusal = await findEndpointGuardRefusal(ctx.path, ctx.body, store);
 
         if (refusal) {
           throw new api.APIError('FORBIDDEN', {

@@ -7,11 +7,13 @@ import {
   Cable,
   CorporateFare,
   Group,
+  Lock,
   ManageAccounts,
   ReceiptLong,
   VpnKey,
   type IconComponent,
 } from '@/components/ui/icons';
+import { AccountPage } from './account/AccountPage';
 import { AuditPage } from './audit/AuditPage';
 import { ConnectorsPage } from './connectors/ConnectorsPage';
 import { EncryptionPage } from './encryption/EncryptionPage';
@@ -100,6 +102,13 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     icon: CorporateFare,
     Component: OrganizationsPage,
     superadminOnly: true,
+  },
+  {
+    path: ADMIN_ROUTES.account.root,
+    label: 'Account',
+    group: 'Account',
+    icon: Lock,
+    Component: AccountPage,
   },
 ];
 

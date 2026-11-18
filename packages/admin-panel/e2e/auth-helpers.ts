@@ -13,7 +13,6 @@ export const VIEWER_EMAIL = 'viewer@example.com';
 export const PASSWORD = 'correct-horse-battery';
 export const TOTP_CODE = '123456';
 export const TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
-export const SEEDED_UNENROLLED_TOKEN = 'seeded-unenrolled-session';
 
 export async function submitCredentials(page: Page, email: string, password: string) {
   await page.getByLabel('Email').fill(email);

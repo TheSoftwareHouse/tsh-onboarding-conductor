@@ -43,6 +43,10 @@ export const ADMIN_ROUTES = {
   organization: {
     root: '/organization',
   },
+  /** The signed-in operator's own settings. */
+  account: {
+    root: '/account',
+  },
   /** Superadmin-only pages. */
   platform: {
     users: `${PLATFORM_ROOT}/users`,

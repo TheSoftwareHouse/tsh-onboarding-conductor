@@ -33,9 +33,9 @@ The first account, a superadmin, is created from `AUTH_SUPERADMIN_EMAIL` and `AU
 
 ### Two-factor authentication
 
-An operator who signs in with a password must enroll an authenticator app (TOTP) before any admin route answers them; until then every one returns `403 TWO_FACTOR_REQUIRED`. A Microsoft sign-in is exempt, because the engine relies on the Microsoft tenant's own multi-factor policy.
+Two-factor authentication (an authenticator app, TOTP) is optional: each operator turns it on or off for their own account, in the admin panel's Account page or through the calls below. No admin route refuses an operator for not having it. A Microsoft sign-in never asks for an engine code; require multi-factor authentication in the Microsoft tenant instead.
 
-These calls are the whole sequence for an account that has no TOTP yet. The first request's response carries the session cookie, and every later request sends it back.
+These calls turn it on for an account that has no TOTP yet. The first request's response carries the session cookie, and every later request sends it back.
 
 ```bash
 $ curl -i -c cookies.txt -X POST http://localhost:3000/v1/auth/sign-in/email \
@@ -45,11 +45,6 @@ HTTP/1.1 200 OK
 set-cookie: better-auth.session_token=<session cookie>; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax
 
 {"redirect":false,"token":"<session token>","user":{"name":"Superadmin","email":"root@example.com","emailVerified":false,"image":null,"createdAt":"2026-11-16T11:21:32.636Z","updatedAt":"2026-11-16T11:21:32.636Z","twoFactorEnabled":false,"role":"superadmin","banned":false,"banReason":null,"banExpires":null,"id":"XzyBG9xz0rFya8U8qU0GXtdpXt2vrcxn"}}
-
-$ curl -i -b cookies.txt http://localhost:3000/v1/admin/connectors
-HTTP/1.1 403 Forbidden
-
-{"code":"TWO_FACTOR_REQUIRED","message":"Set up two-factor authentication to continue."}
 
 $ curl -b cookies.txt -c cookies.txt -X POST http://localhost:3000/v1/auth/two-factor/enable \
     -H 'Content-Type: application/json' -H 'Origin: http://localhost:5173' \
@@ -61,7 +56,7 @@ $ curl -b cookies.txt -c cookies.txt -X POST http://localhost:3000/v1/auth/two-f
     -d '{"code":"<six digits from the authenticator>"}'
 ```
 
-`totpURI` is what an authenticator app scans as a QR code, and `backupCodes` are shown once. The `issuer` is the deployment's `ENVIRONMENT_NAME`. The verify call returns `200` and a fresh session cookie, after which admin routes answer. From then on a password sign-in no longer returns a session directly; it asks for a code:
+`totpURI` is what an authenticator app scans as a QR code, and `backupCodes` are shown once. The `issuer` is the deployment's `ENVIRONMENT_NAME`. The verify call returns `200` and a fresh session cookie. From then on a password sign-in no longer returns a session directly; it asks for a code:
 
 ```bash
 $ curl -i -c cookies.txt -X POST http://localhost:3000/v1/auth/sign-in/email \
@@ -74,7 +69,7 @@ set-cookie: better-auth.two_factor=<challenge cookie>; Max-Age=600; Path=/; Http
 {"twoFactorRedirect":true,"twoFactorMethods":["totp"]}
 ```
 
-Send the code to `POST /v1/auth/two-factor/verify-totp` with that challenge cookie, within ten minutes, to receive the session. Repeated wrong codes lock the account temporarily; that lockout is better-auth's own.
+Send the code to `POST /v1/auth/two-factor/verify-totp` with that challenge cookie, within ten minutes, to receive the session. Repeated wrong codes lock the account temporarily; that lockout is better-auth's own. `POST /v1/auth/two-factor/disable` with `{"password":"<password>"}` turns it off again.
 
 ### Permissions
 
@@ -109,7 +104,6 @@ A refused request carries a `code` and a `message`:
 | Status                    | `code`                     | When                                                                                                                          |
 | ------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `401 Unauthorized`        | `ADMIN_SESSION_REQUIRED`   | No session cookie, or it is expired or revoked. Sign in again.                                                                |
-| `403 Forbidden`           | `TWO_FACTOR_REQUIRED`      | The operator signs in with a password and has not enrolled TOTP. Enroll, then retry.                                          |
 | `403 Forbidden`           | `ADMIN_PERMISSION_MISSING` | The role holds no such permission, or the session has no active organization. Signing in again cannot fix this; ask an admin. |
 | `503 Service Unavailable` | `AUTH_UNAVAILABLE`         | The engine could not reach its authentication store, so the session was never judged. Retry.                                  |
 

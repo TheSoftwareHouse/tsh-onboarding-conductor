@@ -208,13 +208,6 @@ export class AppConfig {
   @TransformTrimString()
   AUTH_SUPERADMIN_PASSWORD?: string;
 
-  /** Whether a superadmin with a password must enroll TOTP; `false` makes it optional for them only. */
-  @IsBoolean()
-  @IsOptional()
-  @Type(() => String)
-  @TransformBooleanString()
-  AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED: boolean = true;
-
   /** The Microsoft sign-in triple; set all three or none. The secret never reaches the panel. */
   @IsString()
   @IsOptional()

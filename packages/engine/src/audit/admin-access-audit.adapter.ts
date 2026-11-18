@@ -53,15 +53,6 @@ export function toAdminAccessAuditInput(event: AdminAccessAuditEvent): AdminAcce
         metadata: { method: event.endpoint.method, reason: event.reason },
       };
 
-    case 'two_factor_required':
-      return {
-        ...base,
-        action: 'auth.two_factor_required',
-        actorType: 'operator',
-        actorId: event.operator.userId,
-        metadata: operatorMetadata(event.endpoint.method, event.operator),
-      };
-
     case 'permission_missing':
       return {
         ...base,

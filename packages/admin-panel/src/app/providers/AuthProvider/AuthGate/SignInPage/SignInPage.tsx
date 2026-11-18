@@ -4,11 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { authClient } from '@/services/auth/auth-client';
-import {
-  isMicrosoftSignInEnabled,
-  isSuperadminTwoFactorRequired,
-} from '@/services/auth/auth-config';
-import { isSuperadmin } from '@/api/platform/platform';
+import { isMicrosoftSignInEnabled } from '@/services/auth/auth-config';
 import { Button } from '@/components/ui/Button/Button';
 import { SecretFormField } from '@/components/ui/form/SecretFormField/SecretFormField';
 import { TextFormField } from '@/components/ui/form/TextFormField/TextFormField';
@@ -23,10 +19,6 @@ export interface SignInPageProps {
   error?: string | null;
   /** The password was right and a second factor is required. */
   onTwoFactorRequired?: () => void;
-  /** A credential sign-in finished without a second factor, so the account still has to enroll. */
-  onTwoFactorSetupRequired?: () => void;
-  /** A superadmin signed in without a second factor while the deployment makes it optional. */
-  onTwoFactorSetupOffered?: () => void;
 }
 
 const signInSchema = z.object({
@@ -41,14 +33,10 @@ type ForgotValues = z.infer<typeof forgotSchema>;
 function SignInForm({
   onForgot,
   onTwoFactorRequired,
-  onTwoFactorSetupRequired,
-  onTwoFactorSetupOffered,
   onFailure,
 }: {
   onForgot: () => void;
   onTwoFactorRequired?: () => void;
-  onTwoFactorSetupRequired?: () => void;
-  onTwoFactorSetupOffered?: () => void;
   onFailure: (message: string | null) => void;
 }): ReactElement {
   const {
@@ -69,16 +57,6 @@ function SignInForm({
     }
     if (data && 'twoFactorRedirect' in data && data.twoFactorRedirect) {
       onTwoFactorRequired?.();
-      return;
-    }
-    // An email sign-in is always a credential account, which must carry 2FA unless the
-    // deployment made it optional for superadmins.
-    if (!data?.user.twoFactorEnabled) {
-      if (isSuperadmin(data.user) && !isSuperadminTwoFactorRequired()) {
-        onTwoFactorSetupOffered?.();
-      } else {
-        onTwoFactorSetupRequired?.();
-      }
     }
   });
 
@@ -162,12 +140,7 @@ function ForgotPasswordForm({
 }
 
 /** Sign-in screen shown in place of the panel until a session is present. */
-export function SignInPage({
-  error = null,
-  onTwoFactorRequired,
-  onTwoFactorSetupRequired,
-  onTwoFactorSetupOffered,
-}: SignInPageProps): ReactElement {
+export function SignInPage({ error = null, onTwoFactorRequired }: SignInPageProps): ReactElement {
   const [isForgotten, setIsForgotten] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const visibleError = failure ?? error;
@@ -206,8 +179,6 @@ export function SignInPage({
           <SignInForm
             onForgot={toggleForgotten}
             onTwoFactorRequired={onTwoFactorRequired}
-            onTwoFactorSetupRequired={onTwoFactorSetupRequired}
-            onTwoFactorSetupOffered={onTwoFactorSetupOffered}
             onFailure={setFailure}
           />
         )}
