@@ -42,8 +42,7 @@ onboardings against them and drives connectors, provider callbacks and client we
 
 Admin operations carry the \`${ADMIN_SESSION_AUTH}\` security requirement: the httpOnly session
 cookie better-auth sets when an operator signs in under \`/v1/auth\`. A missing or expired session is
-answered with \`401\` \`ADMIN_SESSION_REQUIRED\`; a password account that has not enrolled TOTP with
-\`403\` \`TWO_FACTOR_REQUIRED\`; a session whose platform role and active organization role lack the
+answered with \`401\` \`ADMIN_SESSION_REQUIRED\`; a session whose platform role and active organization role lack the
 permission the route needs with \`403\` \`ADMIN_PERMISSION_MISSING\`; and \`503\` \`AUTH_UNAVAILABLE\` says the
 session could not be judged because the auth store was unreachable. Every decision, granted or
 refused, is written to the audit log.

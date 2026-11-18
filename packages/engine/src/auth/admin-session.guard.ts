@@ -27,7 +27,6 @@ import { hasSuperadminRole, type AdminPermission } from './domain/admin-permissi
 import { AdminPermissionMissingException } from './errors/admin-permission-missing.exception';
 import { AdminSessionRequiredException } from './errors/admin-session-required.exception';
 import { AuthUnavailableException } from './errors/auth-unavailable.exception';
-import { TwoFactorRequiredException } from './errors/two-factor-required.exception';
 
 /** Metadata key `AdminRoute(permission)` writes on a handler and this guard reads. */
 export const ADMIN_PERMISSION_METADATA = 'admin:permission';
@@ -94,11 +93,10 @@ function toOperator(session: AdminSession): AdminOperatorIdentity {
  *
  * 1. `ADMIN_AUTH_ENABLED` off: record `unauthenticated` and let the request through.
  * 2. No valid session: 401 `ADMIN_SESSION_REQUIRED`.
- * 3. A credential user without TOTP: 403 `TWO_FACTOR_REQUIRED`.
- * 4. A `superadmin` platform role is granted; otherwise the member's role in the active
+ * 3. A `superadmin` platform role is granted; otherwise the member's role in the active
  *    organization must hold the route's permission, else 403 `ADMIN_PERMISSION_MISSING`
  *    (also when there is no active organization, or the route declares no permission).
- * 5. The auth store unreachable at any step: 503 `AUTH_UNAVAILABLE`.
+ * 4. The auth store unreachable at any step: 503 `AUTH_UNAVAILABLE`.
  *
  * Every decision — including the successful ones — is written to the audit log. Where a decision
  * is logged as well as audited, the log event is the upper-snake form of the audit action —
@@ -192,13 +190,6 @@ export class AdminSessionGuard implements CanActivate, OnModuleDestroy {
     request.adminSession = session;
 
     const operator = toOperator(session);
-
-    if (!session.twoFactorSatisfied) {
-      this.logger.warn(`AUTH_TWO_FACTOR_REQUIRED userId=${quoteForLog(session.userId)}`);
-      this.recordAccess({ outcome: 'two_factor_required', endpoint, operator });
-
-      throw new TwoFactorRequiredException();
-    }
 
     const permitted =
       hasSuperadminRole(session.platformRole) ||

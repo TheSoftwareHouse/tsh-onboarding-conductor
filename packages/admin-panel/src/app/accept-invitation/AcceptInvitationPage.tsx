@@ -26,8 +26,7 @@ type SignUpValues = z.infer<typeof signUpSchema>;
 
 /**
  * A full load of the panel, not a client-side navigation: the session now belongs to a new
- * organization, so every cached read is stale. The panel's gate then sends an account without
- * two-factor authentication to enrollment on its first request.
+ * organization, so every cached read is stale.
  */
 function continueToPanel(): void {
   window.location.assign(ADMIN_ROUTES.organization.root);

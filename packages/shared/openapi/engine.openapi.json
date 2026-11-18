@@ -43,7 +43,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -57,7 +57,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -165,7 +164,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -179,7 +178,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -289,7 +287,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -303,7 +301,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -418,7 +415,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -432,7 +429,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -548,7 +544,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -562,7 +558,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -781,7 +776,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -795,7 +790,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -950,7 +944,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -964,7 +958,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1132,7 +1125,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1146,7 +1139,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1273,7 +1265,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1287,7 +1279,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1438,7 +1429,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1452,7 +1443,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1629,7 +1619,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1643,7 +1633,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1744,7 +1733,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1758,7 +1747,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1884,7 +1872,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1898,7 +1886,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -2069,7 +2056,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2083,7 +2070,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -2262,7 +2248,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2276,7 +2262,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -2444,7 +2429,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2458,7 +2443,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -2632,7 +2616,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2646,7 +2630,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -2817,7 +2800,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2831,7 +2814,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3037,7 +3019,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3051,7 +3033,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3265,7 +3246,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3279,7 +3260,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3445,7 +3425,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3459,7 +3439,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3550,7 +3529,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3564,7 +3543,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3654,7 +3632,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3668,7 +3646,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3768,7 +3745,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3782,7 +3759,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3961,7 +3937,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3975,7 +3951,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -4141,7 +4116,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4155,7 +4130,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -4272,7 +4246,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4286,7 +4260,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -4843,7 +4816,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4857,7 +4830,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -5502,7 +5474,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5516,7 +5488,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -5962,7 +5933,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "text/csv": {
                 "schema": {
@@ -5976,7 +5947,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -6077,7 +6047,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6091,7 +6061,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -6217,7 +6186,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6231,7 +6200,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -6375,7 +6343,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6389,7 +6357,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -6541,7 +6508,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6555,7 +6522,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -6771,7 +6737,7 @@
             }
           },
           "403": {
-            "description": "`TWO_FACTOR_REQUIRED`: The account signs in with a password and has not enrolled TOTP two-factor authentication.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6785,7 +6751,6 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "TWO_FACTOR_REQUIRED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -6861,7 +6826,7 @@
   },
   "info": {
     "title": "TSH Onboarding Conductor Engine API",
-    "description": "The HTTP surface of the onboarding engine: the service that loads workflow definitions, runs\nonboardings against them and drives connectors, provider callbacks and client webhooks.\n\n## Audiences\n\n- **Onboarding flow.** The end customer's own onboarding. Unauthenticated: the onboarding id is\n  the only handle, so treat it as a capability.\n- **Admin.** The operator surface the admin panel is built on. Every operation requires an admin\n  session cookie (see *Authentication*).\n- **Provider callbacks.** Where a connector's provider posts an asynchronous result, authenticated\n  by the HMAC recipe the connector adapter declares.\n\n## Authentication\n\nAdmin operations carry the `adminSession` security requirement: the httpOnly session\ncookie better-auth sets when an operator signs in under `/v1/auth`. A missing or expired session is\nanswered with `401` `ADMIN_SESSION_REQUIRED`; a password account that has not enrolled TOTP with\n`403` `TWO_FACTOR_REQUIRED`; a session whose platform role and active organization role lack the\npermission the route needs with `403` `ADMIN_PERMISSION_MISSING`; and `503` `AUTH_UNAVAILABLE` says the\nsession could not be judged because the auth store was unreachable. Every decision, granted or\nrefused, is written to the audit log.\n\n## Errors\n\nThe engine answers a refusal it owns with `{ \"code\", \"message\" }`: `code` is the stable\nidentifier a client should branch on, and each operation lists the codes it can return. Some codes\nadd detail properties; the operation's response description names them. Where the framework answers\ninstead of the engine, the body is NestJS's own `{ \"statusCode\", \"message\", \"error\" }` envelope:\nrequest validation (`400`), and a `500` on the\nsubmit and provider-callback routes, where a connector adapter can fail with a plain error and there\nis no `code` to branch on.\n\n## Bodies the workflow decides\n\nTwo request bodies have no fixed shape. A submit body follows the current step: read\n`GET /v1/onboardings/{id}/state` and its `step.schema` says exactly what the engine will accept.\nA connector's settings body is a map whose keys the connector adapter declares; the read side lists\nthem. The compile body is a workflow document, and its schema is embedded here in full.\n\n## About this document\n\nGenerated from the engine's own route and DTO decorators, and committed beside the code; a test\nfails when the two disagree. A running engine serves it at `GET /v1/openapi.json`.",
+    "description": "The HTTP surface of the onboarding engine: the service that loads workflow definitions, runs\nonboardings against them and drives connectors, provider callbacks and client webhooks.\n\n## Audiences\n\n- **Onboarding flow.** The end customer's own onboarding. Unauthenticated: the onboarding id is\n  the only handle, so treat it as a capability.\n- **Admin.** The operator surface the admin panel is built on. Every operation requires an admin\n  session cookie (see *Authentication*).\n- **Provider callbacks.** Where a connector's provider posts an asynchronous result, authenticated\n  by the HMAC recipe the connector adapter declares.\n\n## Authentication\n\nAdmin operations carry the `adminSession` security requirement: the httpOnly session\ncookie better-auth sets when an operator signs in under `/v1/auth`. A missing or expired session is\nanswered with `401` `ADMIN_SESSION_REQUIRED`; a session whose platform role and active organization role lack the\npermission the route needs with `403` `ADMIN_PERMISSION_MISSING`; and `503` `AUTH_UNAVAILABLE` says the\nsession could not be judged because the auth store was unreachable. Every decision, granted or\nrefused, is written to the audit log.\n\n## Errors\n\nThe engine answers a refusal it owns with `{ \"code\", \"message\" }`: `code` is the stable\nidentifier a client should branch on, and each operation lists the codes it can return. Some codes\nadd detail properties; the operation's response description names them. Where the framework answers\ninstead of the engine, the body is NestJS's own `{ \"statusCode\", \"message\", \"error\" }` envelope:\nrequest validation (`400`), and a `500` on the\nsubmit and provider-callback routes, where a connector adapter can fail with a plain error and there\nis no `code` to branch on.\n\n## Bodies the workflow decides\n\nTwo request bodies have no fixed shape. A submit body follows the current step: read\n`GET /v1/onboardings/{id}/state` and its `step.schema` says exactly what the engine will accept.\nA connector's settings body is a map whose keys the connector adapter declares; the read side lists\nthem. The compile body is a workflow document, and its schema is embedded here in full.\n\n## About this document\n\nGenerated from the engine's own route and DTO decorators, and committed beside the code; a test\nfails when the two disagree. A running engine serves it at `GET /v1/openapi.json`.",
     "version": "0.1.2",
     "contact": {},
     "license": {

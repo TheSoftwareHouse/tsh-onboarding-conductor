@@ -8,8 +8,6 @@ export type AdminSession = {
   email: string;
   /** `user.role` from the admin plugin. */
   platformRole: string | null;
-  /** A credential user needs TOTP enrolled; a user with no credential account is exempt. */
-  twoFactorSatisfied: boolean;
   activeOrganizationId: string | null;
 };
 

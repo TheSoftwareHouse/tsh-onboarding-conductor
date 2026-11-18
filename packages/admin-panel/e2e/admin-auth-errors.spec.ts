@@ -3,16 +3,9 @@ import {
   APP_URL,
   ENGINE_ONBOARDINGS_ROUTE,
   OPERATOR_EMAIL,
-  SEEDED_UNENROLLED_TOKEN,
   VIEWER_EMAIL,
   signInWithTwoFactor,
 } from './auth-helpers';
-
-const ENGINE_BASE_URL = process.env.VITE_ENGINE_API_BASE_URL;
-
-if (!ENGINE_BASE_URL) {
-  throw new Error('VITE_ENGINE_API_BASE_URL must be provided to the admin-panel Playwright suite.');
-}
 
 /**
  * What the operator is told when the engine refuses an admin request. Each status calls for a
@@ -100,24 +93,6 @@ test.describe('admin panel authentication failures @auth-enabled', () => {
     );
     await expect(page.getByRole('columnheader', { name: 'Onboarding', exact: true })).toBeVisible();
     await expect(page.getByRole('row')).toHaveCount(1);
-  });
-
-  test('should send a session without two-factor to enrolment on a 403 TWO_FACTOR_REQUIRED', async ({
-    context,
-    page,
-  }) => {
-    // A session that already exists (a reload, or a social sign-in) never passes the credential
-    // form's own enrolment check, so the engine's 403 is the only signal the panel gets.
-    await context.addCookies([
-      { name: 'fixture_session', value: SEEDED_UNENROLLED_TOKEN, url: ENGINE_BASE_URL },
-    ]);
-
-    await page.goto(APP_URL);
-
-    await expect(
-      page.getByRole('heading', { name: 'Set up two-factor authentication' }),
-    ).toBeVisible();
-    await expect(page.getByRole('table')).toHaveCount(0);
   });
 
   test('should recover once the engine starts accepting the session again', async ({ page }) => {

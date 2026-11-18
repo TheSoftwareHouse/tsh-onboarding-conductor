@@ -10,13 +10,12 @@ import { TextFormField } from '@/components/ui/form/TextFormField/TextFormField'
 import { showSuccessToast } from '@/components/ui/Toast/toast-manager';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { authClient } from '@/services/auth/auth-client';
-import { AuthShell } from '../AuthShell/AuthShell';
 
 export interface TwoFactorSetupProps {
   /** Called after the operator has seen the backup codes and continued. */
   onDone: () => void;
-  /** Present only when enrollment is optional for this operator; renders a skip button. */
-  onSkip?: () => void;
+  /** Abandons the setup before it is verified; two-factor stays off. */
+  onCancel: () => void;
 }
 
 interface Enrollment {
@@ -142,59 +141,50 @@ function VerifyStep({
  * Enrolls the signed-in operator in TOTP: password, QR code, first code, then the backup codes,
  * which are shown once and never again.
  */
-export function TwoFactorSetup({ onDone, onSkip }: TwoFactorSetupProps): ReactElement {
+export function TwoFactorSetup({ onDone, onCancel }: TwoFactorSetupProps): ReactElement {
   const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
   const [isVerified, setIsVerified] = useState(false);
 
   const description = !enrollment
-    ? onSkip
-      ? 'Two-factor authentication is recommended for your account. You can set it up now or skip it.'
-      : 'Your account needs two-factor authentication before you can use the panel.'
+    ? 'Confirm your password to start.'
     : isVerified
       ? 'Save these backup codes now. Each works once, and they are not shown again.'
       : 'Scan the QR code with an authenticator app, then enter the code it shows.';
 
   return (
-    <AuthShell>
-      <div className="flex w-full max-w-110 flex-col gap-8 border border-border-hair bg-bg-page p-10">
-        <div className="flex flex-col gap-3">
-          <Typography variant="h5" as="h1">
-            Set up two-factor authentication
-          </Typography>
-          <Typography variant="body-md" className="text-fg-3">
-            {description}
-          </Typography>
-        </div>
-        {!enrollment ? <PasswordStep onEnrolled={setEnrollment} /> : null}
-        {enrollment && !isVerified ? (
-          <VerifyStep
-            totpURI={enrollment.totpURI}
-            onVerified={() => {
-              showSuccessToast('Two-factor authentication enabled');
-              setIsVerified(true);
-            }}
-          />
-        ) : null}
-        {enrollment && isVerified ? (
-          <div className="flex flex-col gap-4">
-            <ul className="grid grid-cols-2 gap-2" aria-label="Backup codes">
-              {enrollment.backupCodes.map((code) => (
-                <Typography key={code} as="li" variant="mono" className="text-fg-1">
-                  {code}
-                </Typography>
-              ))}
-            </ul>
-            <Button variant="primary" size="xl" onClick={onDone}>
-              I have saved my backup codes
-            </Button>
-          </div>
-        ) : null}
-        {onSkip && !isVerified ? (
-          <Button variant="quiet" onClick={onSkip}>
-            Skip for now
+    <div className="flex max-w-110 flex-col gap-6">
+      <Typography variant="body-md" className="text-fg-3">
+        {description}
+      </Typography>
+      {!enrollment ? <PasswordStep onEnrolled={setEnrollment} /> : null}
+      {enrollment && !isVerified ? (
+        <VerifyStep
+          totpURI={enrollment.totpURI}
+          onVerified={() => {
+            showSuccessToast('Two-factor authentication enabled');
+            setIsVerified(true);
+          }}
+        />
+      ) : null}
+      {enrollment && isVerified ? (
+        <div className="flex flex-col gap-4">
+          <ul className="grid grid-cols-2 gap-2" aria-label="Backup codes">
+            {enrollment.backupCodes.map((code) => (
+              <Typography key={code} as="li" variant="mono" className="text-fg-1">
+                {code}
+              </Typography>
+            ))}
+          </ul>
+          <Button variant="primary" size="xl" onClick={onDone}>
+            I have saved my backup codes
           </Button>
-        ) : null}
-      </div>
-    </AuthShell>
+        </div>
+      ) : null}
+      {!isVerified ? (
+        <Button variant="quiet" onClick={onCancel}>
+          Cancel
+        </Button>
+      ) : null}
+    </div>
   );
 }

@@ -21,7 +21,6 @@ const BETTER_AUTH_CONFIG = {
   ENVIRONMENT_NAME: 'test',
   NODE_ENV: 'test',
   DATABASE_URL: 'postgres://user:pass@localhost:5432/db',
-  AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED: true,
 };
 
 /** Stands in for `TypeOrmModule.forRoot`, which is what normally publishes `DataSource`. */

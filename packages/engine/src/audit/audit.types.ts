@@ -101,13 +101,14 @@ export type WebhookAction = (typeof WEBHOOK_ACTIONS)[number];
 export const ADMIN_ACCESS_ACTIONS = [
   'auth.access_granted',
   'auth.session_missing',
-  'auth.two_factor_required',
   'auth.permission_missing',
   'auth.verification_unavailable',
   'auth.access_unauthenticated',
   // Outcomes of the retired bearer-token guard. No longer written, kept so rows already in the trail still list and render.
   'auth.token_rejected',
   'auth.role_missing',
+  // Written while TOTP was mandatory; it is now opt-in, so no admin route refuses for it.
+  'auth.two_factor_required',
 ] as const;
 
 export type AdminAccessAction = (typeof ADMIN_ACCESS_ACTIONS)[number];

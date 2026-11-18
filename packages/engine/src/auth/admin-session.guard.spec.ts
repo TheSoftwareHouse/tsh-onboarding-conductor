@@ -1,4 +1,4 @@
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { Reflector } from '@nestjs/core';
@@ -17,7 +17,6 @@ import type { AdminPermission } from './domain/admin-permissions';
 import { AdminPermissionMissingException } from './errors/admin-permission-missing.exception';
 import { AdminSessionRequiredException } from './errors/admin-session-required.exception';
 import { AuthUnavailableException } from './errors/auth-unavailable.exception';
-import { TwoFactorRequiredException } from './errors/two-factor-required.exception';
 
 const PERMISSION: AdminPermission = { resource: 'workflow', action: 'write' };
 const ENDPOINT = { method: 'POST', path: '/v1/admin/workflows' };
@@ -26,7 +25,6 @@ const MEMBER: AdminSession = {
   userId: 'user-1',
   email: 'anna@tsh.io',
   platformRole: null,
-  twoFactorSatisfied: true,
   activeOrganizationId: 'org-1',
 };
 
@@ -128,22 +126,6 @@ describe('AdminSessionGuard', () => {
     expect(request.adminSession).toBeUndefined();
     expect(recorded(audit)).toMatchObject({ outcome: 'session_missing', endpoint: ENDPOINT });
     expect(new AdminSessionRequiredException()).toBeInstanceOf(UnauthorizedException);
-  });
-
-  it('answers 403 and audits two_factor_required before looking at permissions', async () => {
-    const { sut, verifier, audit, context } = createSut({
-      session: { ...MEMBER, platformRole: 'superadmin', twoFactorSatisfied: false },
-    });
-
-    await expect(sut.canActivate(context)).rejects.toBeInstanceOf(TwoFactorRequiredException);
-
-    expect(verifier.hasPermission).not.toHaveBeenCalled();
-    expect(recorded(audit)).toEqual({
-      outcome: 'two_factor_required',
-      endpoint: ENDPOINT,
-      operator: { ...MEMBER_IDENTITY, platformRole: 'superadmin' },
-    });
-    expect(new TwoFactorRequiredException()).toBeInstanceOf(ForbiddenException);
   });
 
   it('answers 403 and audits permission_missing for a member lacking the permission', async () => {

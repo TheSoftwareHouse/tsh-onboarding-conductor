@@ -55,12 +55,12 @@ describe('organization', () => {
   it('turns a failed organization read into an ApiError', async () => {
     mockedGetFullOrganization.mockResolvedValue({
       data: null,
-      error: { status: 403, code: 'TWO_FACTOR_REQUIRED' },
+      error: { status: 403, code: 'FORBIDDEN' },
     });
 
     await expect(fetchActiveOrganization()).rejects.toMatchObject({
       status: 403,
-      code: 'TWO_FACTOR_REQUIRED',
+      code: 'FORBIDDEN',
     });
   });
 });

@@ -48,7 +48,7 @@ lets you make quietly.
   otherwise.** `GET /v1/onboardings/:id`, `/:id/transitions` and `/:id/agreements` sit behind
   `AdminSessionGuard` (a better-auth session cookie, never a bearer token), but `.env.dist` ships `ADMIN_AUTH_ENABLED=false`, so they answer `200` on a
   developer machine and `401` everywhere auth is on. There is no `/history` route; `/:id/transitions`
-  is its admin-only successor. Admin routes take a session cookie from `/v1/auth/*` and answer `401 ADMIN_SESSION_REQUIRED`, `403 TWO_FACTOR_REQUIRED` or `403 ADMIN_PERMISSION_MISSING`; a BFF has no credential for them, and API-key or client-credentials access is not built. Never proxy an admin route to an end user, and do not take a local
+  is its admin-only successor. Admin routes take a session cookie from `/v1/auth/*` and answer `401 ADMIN_SESSION_REQUIRED` or `403 ADMIN_PERMISSION_MISSING`; a BFF has no credential for them, and API-key or client-credentials access is not built. Never proxy an admin route to an end user, and do not take a local
   `200` as evidence that you may.
 - **`POST /submit` runs the connector chain inline.** It is not a queue hand-off: both submits against
   the `base` fixture block — 5 s on the first, **10 s** on the second while two mock KYC connectors deliberate, and a real

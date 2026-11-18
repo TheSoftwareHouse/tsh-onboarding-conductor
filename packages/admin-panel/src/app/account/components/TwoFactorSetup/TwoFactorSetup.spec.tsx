@@ -36,20 +36,17 @@ afterEach(() => {
 });
 
 describe('TwoFactorSetup', () => {
-  it('offers a skip button only when setup is optional', async () => {
-    const onSkip = vi.fn();
-    const { rerender } = render(<TwoFactorSetup onDone={vi.fn()} />);
+  it('cancels before verification', async () => {
+    const onCancel = vi.fn();
+    render(<TwoFactorSetup onDone={vi.fn()} onCancel={onCancel} />);
 
-    expect(screen.queryByRole('button', { name: 'Skip for now' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    rerender(<TwoFactorSetup onDone={vi.fn()} onSkip={onSkip} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Skip for now' }));
-
-    expect(onSkip).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
   it('asks for the password first and sends it to enable', async () => {
-    render(<TwoFactorSetup onDone={vi.fn()} />);
+    render(<TwoFactorSetup onDone={vi.fn()} onCancel={vi.fn()} />);
 
     await enrollWithPassword();
 
@@ -57,7 +54,7 @@ describe('TwoFactorSetup', () => {
   });
 
   it('shows the QR code and the secret as text after enrolment', async () => {
-    render(<TwoFactorSetup onDone={vi.fn()} />);
+    render(<TwoFactorSetup onDone={vi.fn()} onCancel={vi.fn()} />);
 
     await enrollWithPassword();
 
@@ -68,7 +65,7 @@ describe('TwoFactorSetup', () => {
   it('shows a wrong password and does not advance', async () => {
     mockedEnable.mockResolvedValue({ data: null, error: { message: 'Invalid password' } });
 
-    render(<TwoFactorSetup onDone={vi.fn()} />);
+    render(<TwoFactorSetup onDone={vi.fn()} onCancel={vi.fn()} />);
     await enrollWithPassword();
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid password');
@@ -77,7 +74,7 @@ describe('TwoFactorSetup', () => {
 
   it('verifies the first code, then shows backup codes once and finishes on confirm', async () => {
     const onDone = vi.fn();
-    render(<TwoFactorSetup onDone={onDone} />);
+    render(<TwoFactorSetup onDone={onDone} onCancel={vi.fn()} />);
 
     await enrollWithPassword();
     await userEvent.type(await screen.findByLabelText(/^Code from your app/), '123456');
@@ -87,6 +84,7 @@ describe('TwoFactorSetup', () => {
     expect(await screen.findByText('aaaa-1111')).toBeInTheDocument();
     expect(screen.getByText('bbbb-2222')).toBeInTheDocument();
     expect(onDone).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'I have saved my backup codes' }));
 
@@ -96,7 +94,7 @@ describe('TwoFactorSetup', () => {
   it('keeps the operator on the code step when the first code is wrong', async () => {
     mockedVerifyTotp.mockResolvedValue({ data: null, error: { message: 'Invalid code' } });
 
-    render(<TwoFactorSetup onDone={vi.fn()} />);
+    render(<TwoFactorSetup onDone={vi.fn()} onCancel={vi.fn()} />);
     await enrollWithPassword();
     await userEvent.type(await screen.findByLabelText(/^Code from your app/), '000000');
     await userEvent.click(screen.getByRole('button', { name: 'Verify and enable' }));

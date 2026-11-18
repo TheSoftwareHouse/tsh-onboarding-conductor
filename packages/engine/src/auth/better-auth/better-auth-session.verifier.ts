@@ -1,20 +1,16 @@
 import type { IncomingHttpHeaders } from 'node:http';
-import type { Pool } from 'pg';
 import {
   AdminSessionVerifierUnavailableError,
   type AdminSession,
   type AdminSessionVerifierPort,
 } from '../admin-session-verifier.port';
-import { isTwoFactorWaived, type AdminPermission } from '../domain/admin-permissions';
+import type { AdminPermission } from '../domain/admin-permissions';
 import { loadBetterAuth, type BetterAuthInstance } from './load-better-auth';
-
-/** `account.providerId` of an email + password account; a social (Microsoft) account has its own. */
-const CREDENTIAL_PROVIDER_ID = 'credential';
 
 /** The slice of the instance's `api` this adapter calls; the plugin endpoints are not in the base type. */
 type SessionApi = {
   getSession(input: { headers: Headers }): Promise<{
-    user: { id: string; email: string; role?: string | null; twoFactorEnabled?: boolean | null };
+    user: { id: string; email: string; role?: string | null };
     session: { activeOrganizationId?: string | null };
   } | null>;
   hasPermission(input: {
@@ -22,16 +18,6 @@ type SessionApi = {
     body: { permissions: Record<string, string[]> };
   }): Promise<{ success: boolean }>;
 };
-
-/** Whether the user signs in with a password, which is what makes the 2FA rule apply to them. */
-export async function hasCredentialAccount(pool: Pool, userId: string): Promise<boolean> {
-  const { rowCount } = await pool.query(
-    'SELECT 1 FROM "account" WHERE "userId" = $1 AND "providerId" = $2 LIMIT 1',
-    [userId, CREDENTIAL_PROVIDER_ID],
-  );
-
-  return rowCount > 0;
-}
 
 /** better-auth's `APIError` carries the HTTP status of a refusal; a store failure has none. */
 function isClientRefusal(error: unknown): boolean {
@@ -48,11 +34,7 @@ function toUnavailable(error: unknown): AdminSessionVerifierUnavailableError {
 
 /** Reads sessions and organization permissions through the better-auth instance. */
 export class BetterAuthSessionVerifier implements AdminSessionVerifierPort {
-  constructor(
-    private readonly auth: BetterAuthInstance,
-    private readonly pool: Pool,
-    private readonly superadminTwoFactorRequired: boolean,
-  ) {}
+  constructor(private readonly auth: BetterAuthInstance) {}
 
   async resolve(headers: IncomingHttpHeaders): Promise<AdminSession | null> {
     try {
@@ -69,13 +51,6 @@ export class BetterAuthSessionVerifier implements AdminSessionVerifierPort {
         userId: user.id,
         email: user.email,
         platformRole: user.role ?? null,
-        // 2FA rule: a credential user must have TOTP; a user with no credential account (Microsoft
-        // only) is exempt because the tenant's Conditional Access enforces MFA. A superadmin is
-        // exempt too when AUTH_SUPERADMIN_TWO_FACTOR_REQUIRED is false.
-        twoFactorSatisfied:
-          user.twoFactorEnabled === true ||
-          isTwoFactorWaived(user.role, this.superadminTwoFactorRequired) ||
-          !(await hasCredentialAccount(this.pool, user.id)),
         activeOrganizationId: session.activeOrganizationId ?? null,
       };
     } catch (error) {

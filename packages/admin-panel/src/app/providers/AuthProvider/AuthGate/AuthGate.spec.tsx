@@ -20,7 +20,7 @@ vi.mock('@/services/auth/auth-client', () => ({
   authClient: {
     useSession: mockedUseSession,
     signIn: { social: vi.fn(), email: mockedSignInEmail },
-    twoFactor: { enable: vi.fn(), verifyTotp: vi.fn(), verifyBackupCode: vi.fn() },
+    twoFactor: { verifyTotp: vi.fn(), verifyBackupCode: vi.fn() },
     resetPassword: vi.fn(),
   },
 }));
@@ -124,7 +124,7 @@ describe('AuthGate', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows the 2FA setup screen after a credential sign-in without 2FA', async () => {
+  it('lets a credential sign-in without 2FA straight into the panel, since 2FA is opt-in', async () => {
     mockedUseSession.mockReturnValue({ data: null, isPending: false });
     // A successful sign-in leaves a session behind; the gate then reads it on the next render.
     mockedSignInEmail.mockImplementation(() => {
@@ -136,30 +136,18 @@ describe('AuthGate', () => {
     });
     const { default: userEvent } = await import('@testing-library/user-event');
 
-    renderGate();
+    const { rerender } = renderGate();
     await userEvent.type(screen.getByLabelText(/^Email/), 'anna@tsh.io');
     await userEvent.type(screen.getByLabelText(/^Password/), 'secret-pass');
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await vi.waitFor(() => expect(mockedSignInEmail).toHaveBeenCalled());
+    // better-auth's session atom re-renders the gate once the sign-in lands; the mock cannot.
+    rerender(gateElement());
 
-    expect(
-      await screen.findByRole('heading', { name: 'Set up two-factor authentication' }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('admin table')).toBeInTheDocument();
   });
 
-  it('swaps the panel for the 2FA setup screen when the engine answers 403 TWO_FACTOR_REQUIRED', async () => {
-    renderGate();
-
-    await failQueryWith(
-      new ApiError('Two-factor required', { status: 403, code: 'TWO_FACTOR_REQUIRED' }),
-    );
-
-    expect(
-      screen.getByRole('heading', { name: 'Set up two-factor authentication' }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('admin table')).not.toBeInTheDocument();
-  });
-
-  it('keeps the panel for a 403 that is not a missing second factor', async () => {
+  it('keeps the panel on a 403, which the page reports itself', async () => {
     renderGate();
 
     await failQueryWith(
@@ -185,39 +173,5 @@ describe('AuthGate', () => {
 
     expect(screen.queryByText(/Signing in/)).not.toBeInTheDocument();
     expect(screen.getByLabelText(/^Authenticator code/)).toHaveValue('123');
-  });
-
-  it('keeps the 2FA setup screen mounted while the session refetches', async () => {
-    const { default: userEvent } = await import('@testing-library/user-event');
-    const { rerender } = renderGate();
-    await failQueryWith(
-      new ApiError('Two-factor required', { status: 403, code: 'TWO_FACTOR_REQUIRED' }),
-    );
-    await userEvent.type(screen.getByLabelText(/^Password/), 'secret-pass');
-
-    mockedUseSession.mockReturnValue({ data: { user: { email: 'anna@tsh.io' } }, isPending: true });
-    rerender(gateElement());
-
-    expect(screen.queryByText(/Signing in/)).not.toBeInTheDocument();
-    expect(screen.getByLabelText(/^Password/)).toHaveValue('secret-pass');
-  });
-
-  it('does not show the 2FA setup screen to the next operator after a sign-out', async () => {
-    const { rerender } = renderGate();
-    await failQueryWith(
-      new ApiError('Two-factor required', { status: 403, code: 'TWO_FACTOR_REQUIRED' }),
-    );
-    expect(
-      screen.getByRole('heading', { name: 'Set up two-factor authentication' }),
-    ).toBeInTheDocument();
-
-    mockedUseSession.mockReturnValue({ data: null, isPending: false });
-    rerender(gateElement());
-    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
-
-    mockedUseSession.mockReturnValue({ data: { user: { email: 'bob@tsh.io' } }, isPending: false });
-    rerender(gateElement());
-
-    expect(screen.getByText('admin table')).toBeInTheDocument();
   });
 });

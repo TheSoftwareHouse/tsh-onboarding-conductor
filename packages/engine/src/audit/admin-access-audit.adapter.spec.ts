@@ -48,22 +48,6 @@ describe('toAdminAccessAuditInput', () => {
     });
   });
 
-  it('attributes a two-factor refusal to the operator who was turned away', () => {
-    expect(
-      toAdminAccessAuditInput({
-        outcome: 'two_factor_required',
-        endpoint: ENDPOINT,
-        operator: OPERATOR,
-      }),
-    ).toEqual({
-      action: 'auth.two_factor_required',
-      actorType: 'operator',
-      actorId: 'user-1',
-      resourceId: '/v1/onboardings',
-      metadata: OPERATOR_METADATA,
-    });
-  });
-
   it('records the permission a refusal was measured against', () => {
     expect(
       toAdminAccessAuditInput({

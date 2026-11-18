@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
+import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { Client, type Pool } from 'pg';
@@ -54,8 +55,17 @@ const READ_ROUTES = ['/v1/onboardings', '/v1/admin/audit'];
 /** Guard runs before validation and the handler, so this refuses a body-less call with no side effect. */
 const WRITE_ROUTE = '/v1/admin/encryption/keys';
 
-async function bootApp(): Promise<NestExpressApplication> {
+/**
+ * `config` is set on the `ConfigService` before the app starts. Changing `process.env` instead would
+ * be too late: the config module read the environment when `AppModule` was imported, and a value
+ * the developer's `.env` carries would win.
+ */
+async function bootApp(config: Record<string, string> = {}): Promise<NestExpressApplication> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  const configService = moduleRef.get(ConfigService);
+  for (const [key, value] of Object.entries(config)) {
+    configService.set(key, value);
+  }
   const app = moduleRef.createNestApplication<NestExpressApplication>();
   await startE2eServer(app);
 
@@ -115,15 +125,10 @@ describe('Admin endpoint authentication (e2e)', () => {
         .expect(401);
     });
 
-    it('answers 403 TWO_FACTOR_REQUIRED for a credential superadmin without TOTP', async () => {
+    it('answers 200 for a credential superadmin without TOTP, which is opt-in', async () => {
       const operator = await createOperator(app, { platformRole: 'superadmin' });
 
-      const response = await request(app.getHttpServer())
-        .get(route)
-        .set('Cookie', operator.cookie)
-        .expect(403);
-
-      expect(response.body.code).toBe('TWO_FACTOR_REQUIRED');
+      await request(app.getHttpServer()).get(route).set('Cookie', operator.cookie).expect(200);
     });
 
     it('answers 403 ADMIN_PERMISSION_MISSING for a user with no organization', async () => {
@@ -173,20 +178,31 @@ describe('Admin endpoint authentication (e2e)', () => {
   });
 
   describe('better-auth admin and organization endpoints', () => {
-    it.each(['/v1/auth/organization/invite-member', '/v1/auth/admin/set-role'])(
-      'refuses %s to a credential superadmin without TOTP',
-      async (path) => {
-        const operator = await createOperator(app, { platformRole: 'superadmin' });
+    it('lets a credential superadmin without TOTP change a role', async () => {
+      const operator = await createOperator(app, { platformRole: 'superadmin' });
+      const target = await createOperator(app);
 
-        const response = await request(app.getHttpServer())
-          .post(path)
-          .set('Cookie', operator.cookie)
-          .send({ userId: operator.userId, role: 'user' })
-          .expect(403);
+      await request(app.getHttpServer())
+        .post('/v1/auth/admin/set-role')
+        .set('Cookie', operator.cookie)
+        .send({ userId: target.userId, role: 'superadmin' })
+        .expect(200);
+    });
 
-        expect(response.body.code).toBe('TWO_FACTOR_REQUIRED');
-      },
-    );
+    it('applies the query string of a GET, such as the list-users role filter', async () => {
+      const operator = await createOperator(app, { platformRole: 'superadmin', twoFactor: true });
+      await createOperator(app);
+
+      const response = await request(app.getHttpServer())
+        .get('/v1/auth/admin/list-users')
+        .query({ filterField: 'role', filterValue: 'superadmin', filterOperator: 'eq', limit: 100 })
+        .set('Cookie', operator.cookie)
+        .expect(200);
+      const roles = (response.body.users as Array<{ role: string }>).map((user) => user.role);
+
+      expect(roles).toContain('superadmin');
+      expect(roles.every((role) => role === 'superadmin')).toBe(true);
+    });
 
     it('refuses impersonation to a superadmin with TOTP', async () => {
       const operator = await createOperator(app, { platformRole: 'superadmin', twoFactor: true });
@@ -266,17 +282,13 @@ describe('Admin endpoint authentication (e2e)', () => {
       const keep = await createOperator(app);
 
       await makeOnlySuperadmin(keep.userId);
-      process.env.AUTH_SUPERADMIN_EMAIL = seedEmail;
-      process.env.AUTH_SUPERADMIN_PASSWORD = OPERATOR_PASSWORD;
 
-      try {
-        for (let boot = 0; boot < 2; boot += 1) {
-          const seeded = await bootApp();
-          await seeded.close();
-        }
-      } finally {
-        delete process.env.AUTH_SUPERADMIN_EMAIL;
-        delete process.env.AUTH_SUPERADMIN_PASSWORD;
+      for (let boot = 0; boot < 2; boot += 1) {
+        const seeded = await bootApp({
+          AUTH_SUPERADMIN_EMAIL: seedEmail,
+          AUTH_SUPERADMIN_PASSWORD: OPERATOR_PASSWORD,
+        });
+        await seeded.close();
       }
 
       const { rows } = await pool.query(

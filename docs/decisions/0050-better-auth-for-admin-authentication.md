@@ -19,14 +19,17 @@ replaces MSAL in the panel and the `jose`-based Azure JWT guard in the engine.
 3. **An organization groups operators and grants them permissions** on the admin routes.
    Engine data (workflows, onboardings, connectors, audit) stays global: no
    `organization_id` column and no organization filter in any query.
-4. **Email and password is invite-only, 2FA is mandatory** (TOTP plus backup codes), and
+4. **Email and password is invite-only, 2FA is opt-in** (TOTP plus backup codes, turned on
+   and off by each operator for their own account), and
    the first superadmin is seeded from environment variables at startup. A single
    `databaseHooks.user.create.before` hook refuses to create a user without a pending,
    unexpired invitation for that email, unless the call is server-side (the seed, admin
    `createUser`). It covers email sign-up and Microsoft implicit sign-up.
-5. **A Microsoft sign-in counts as satisfying 2FA.** The tenant's Conditional Access
-   enforces MFA, not the engine. A user with a `credential` account must have
-   `twoFactorEnabled`; a user whose only account is `microsoft` is exempt.
+5. **No admin route refuses an operator for lacking 2FA.** This deliberately relaxes the
+   first version of this record, which made TOTP mandatory for password accounts: the
+   requester wants each operator to choose. An operator who turned it on is asked for a code
+   at every password sign-in. A Microsoft sign-in has no engine-side second factor at all;
+   the tenant's Conditional Access is its only MFA.
 
 Further choices:
 
@@ -85,12 +88,13 @@ new migration written by hand from the CLI's generated SQL.
 
 `@AdminRoute(...)` carries a permission from one statement set shared with the
 organization plugin's access control. Its outcomes are `401` without a session, `403`
-`TWO_FACTOR_REQUIRED`, `403` `ADMIN_PERMISSION_MISSING`, and `503` when the auth store is
-unreachable. The public onboarding API and `/v1/webhooks` keep their current posture.
+`ADMIN_PERMISSION_MISSING`, and `503` when the auth store is unreachable. The public onboarding API and `/v1/webhooks` keep their current posture.
 `ADMIN_AUTH_ENABLED=false` still lets requests through for local work.
 
-Microsoft sign-ins rely on the tenant's Conditional Access for MFA; an engine deployment
-pointed at a tenant without it has no second factor for those operators.
+A password account without TOTP is protected by its password alone; whether to turn TOTP on
+is the operator's call, not the deployment's. Microsoft sign-ins rely on the tenant's
+Conditional Access for MFA; an engine deployment pointed at a tenant without it has no second
+factor for those operators.
 
 Reversing this means restoring the Azure guard and the panel's MSAL flow and dropping the
 `auth` schema; operator accounts and sessions would be lost.

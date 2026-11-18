@@ -906,15 +906,13 @@ touches four places:
 4. A button in the panel's `SignInPage`, calling `authClient.signIn.social({ provider })`.
 
 The guard, the audit trail and the admin endpoints never see the provider, so they do not change.
-Two rules apply to the new provider automatically, and both are decisions to make deliberately:
+Two things apply to the new provider automatically, and both are decisions to make deliberately:
 
 - **Invite-only.** The user-creation hook covers a social implicit sign-up, so a person with no
   pending invitation for their email is refused. The email the provider reports is what the
   invitation is matched against, so accept only a provider whose email claim you trust.
-- **2FA.** A user with no password (`credential`) account is exempt from the engine's TOTP rule,
-  on the premise that the identity provider enforces MFA. A provider whose tenant does not require
-  MFA would let operators skip it. Either require MFA there, or extend the rule in
-  `better-auth-session.verifier.ts` and `auth-endpoint-guards.hook.ts`, which must agree.
+- **2FA.** The engine's TOTP is opt-in and needs a password to turn on, so a user who signs in
+  only through the provider has no engine-side second factor. Require MFA at the provider.
 
 Register `<BETTER_AUTH_URL>/v1/auth/callback/<provider>` as the redirect URI with the provider.
 
