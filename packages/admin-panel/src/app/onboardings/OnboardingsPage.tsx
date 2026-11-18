@@ -102,7 +102,12 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
     value: AdminOnboardingDraftFilters[K],
   ): void => {
     setDraftError(null);
-    setFilters((current) => ({ ...current, [key]: value }));
+    // A version belongs to one workflow, so a new workflow drops the drafted one.
+    setFilters((current) => ({
+      ...current,
+      [key]: value,
+      ...(key === 'workflowId' && value !== current.workflowId ? { workflowVersion: '' } : {}),
+    }));
   };
 
   const handleReload = (): void => {

@@ -11,6 +11,8 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ### Changed
 
+- Admin panel — The Onboardings Workflow and Workflow version filters are pickers fed by the engine's workflow lists instead of text fields; the version is cleared when the workflow changes.
+- Admin panel — Filter selects (Onboardings, Workflows, Logs) use the panel's own `Select` instead of the browser's native select.
 - **Breaking:** Engine — `POST /v1/onboardings/:id/review/:action`, the manual review decision,
   now requires the same Microsoft Entra ID bearer token as the other admin routes; a caller that
   posted it without a token now gets `401`. It was the one operator action outside the guard. The

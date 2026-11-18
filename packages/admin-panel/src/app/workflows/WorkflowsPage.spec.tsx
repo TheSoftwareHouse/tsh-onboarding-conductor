@@ -215,7 +215,8 @@ describe('WorkflowsPage', () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE]);
 
-    await user.selectOptions(screen.getByLabelText('Scope'), 'fixtures');
+    await user.click(screen.getByRole('combobox', { name: 'Scope' }));
+    await user.click(await screen.findByRole('option', { name: 'fixtures' }));
     mockedFetchAdminWorkflows.mockResolvedValueOnce(page([]));
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
@@ -328,7 +329,7 @@ describe('WorkflowsPage', () => {
     );
     expect(screen.getByLabelText('Search')).toHaveValue('eea');
     expect(screen.getByLabelText('Search')).toHaveAttribute('maxlength', '100');
-    expect(screen.getByLabelText('Scope')).toHaveValue('built-in');
+    expect(screen.getByRole('combobox', { name: 'Scope' })).toHaveTextContent('built-in');
     expect(screen.getByLabelText('Has unpublished draft')).toBeChecked();
   });
 
@@ -345,10 +346,12 @@ describe('WorkflowsPage', () => {
   });
 
   it('offers every scope, fixtures included, when the engine is not in production', async () => {
+    const user = userEvent.setup();
     await renderReady([RECORD_ONE]);
 
-    const scope = within(screen.getByLabelText('Scope'));
-    expect(scope.getAllByRole('option').map((option) => option.textContent)).toEqual([
+    await user.click(screen.getByRole('combobox', { name: 'Scope' }));
+    const options = await screen.findAllByRole('option');
+    expect(options.map((option) => option.textContent)).toEqual([
       'All',
       'built-in',
       'users',
@@ -365,9 +368,12 @@ describe('WorkflowsPage', () => {
       expect(mockedFetchAdminWorkflows).toHaveBeenCalledTimes(1);
     });
     expect(mockedFetchAdminWorkflows).toHaveBeenNthCalledWith(1, DEFAULT_REQUEST);
-    const scope = within(screen.getByLabelText('Scope'));
-    expect(scope.queryByRole('option', { name: 'fixtures' })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Scope')).toHaveValue('');
+    const user = userEvent.setup();
+    const trigger = screen.getByRole('combobox', { name: 'Scope' });
+    expect(trigger).toHaveTextContent('All');
+    await user.click(trigger);
+    await screen.findByRole('option', { name: 'built-in' });
+    expect(screen.queryByRole('option', { name: 'fixtures' })).not.toBeInTheDocument();
   });
 
   it('exposes accessible form, live region, and table semantics', async () => {

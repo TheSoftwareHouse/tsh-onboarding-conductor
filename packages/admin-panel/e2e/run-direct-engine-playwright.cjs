@@ -9,6 +9,10 @@ const packageRoot = path.join(__dirname, '..');
 const monorepoRoot = path.join(packageRoot, '..', '..');
 const envFilePath = path.join(monorepoRoot, '.env.development.local');
 const panelOrigin = process.env.BASE_URL || 'http://localhost:5174';
+const ONBOARDINGS_PATH = '/v1/onboardings';
+const WORKFLOWS_PATH = '/v1/admin/workflows';
+const WORKFLOW_VERSIONS_PATTERN = /^\/v1\/admin\/workflows\/[^/]+\/versions$/;
+const WORKFLOW_LIST_KEYS = new Set(['page', 'limit', 'search', 'scope', 'hasDraft']);
 const ALLOWED_QUERY_KEYS = new Set([
   'page',
   'limit',
@@ -88,6 +92,21 @@ function isValidSearch(search) {
   }
 
   return true;
+}
+
+/** Validates a recorded request by route: the onboardings list's own query, or the pickers' reads. */
+function isValidRequestTarget(request) {
+  if (request.pathname === ONBOARDINGS_PATH) {
+    return isValidSearch(request.search);
+  }
+
+  if (request.pathname === WORKFLOWS_PATH) {
+    return [...new URLSearchParams(request.search).keys()].every((key) =>
+      WORKFLOW_LIST_KEYS.has(key),
+    );
+  }
+
+  return WORKFLOW_VERSIONS_PATTERN.test(request.pathname) && request.search === '';
 }
 
 function waitForServer(url) {
@@ -330,9 +349,8 @@ async function main() {
     const invalidRequests = requests.filter(
       (request) =>
         request.origin !== panelOrigin ||
-        request.pathname !== '/v1/onboardings' ||
         !['GET', 'OPTIONS'].includes(request.method) ||
-        !isValidSearch(request.search),
+        !isValidRequestTarget(request),
     );
 
     if (invalidRequests.length > 0) {

@@ -8,6 +8,7 @@ import { BrowserRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import { OnboardingsPage } from './OnboardingsPage';
+import { PENDING_CONNECTOR_ERROR_MESSAGE } from './utils/filter-admin-onboardings';
 import { ApiError } from '@/services/api/api-error';
 import {
   fetchAdminOnboardings,
@@ -19,6 +20,12 @@ import {
   AdminOnboardingsExportError,
   fetchAdminOnboardingsCsv,
 } from '@/api/onboardings/onboardings-export';
+import {
+  fetchAdminWorkflows,
+  type AdminWorkflowsPage,
+  type AdminWorkflowSummary,
+} from '@/api/workflows/admin-workflows';
+import { fetchWorkflowVersions } from '@/api/workflows/workflow-versions';
 import { showErrorToast } from '@/components/ui/Toast/toast-manager';
 import { downloadFile } from '@/lib/download-file';
 
@@ -40,6 +47,18 @@ vi.mock('@/api/onboardings/onboardings-export', async (importOriginal) => {
   };
 });
 
+vi.mock('@/api/workflows/admin-workflows', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/workflows/admin-workflows')>();
+
+  return { ...actual, fetchAdminWorkflows: vi.fn() };
+});
+
+vi.mock('@/api/workflows/workflow-versions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/workflows/workflow-versions')>();
+
+  return { ...actual, fetchWorkflowVersions: vi.fn() };
+});
+
 vi.mock('@/lib/download-file', () => ({ downloadFile: vi.fn() }));
 
 vi.mock('@/components/ui/Toast/toast-manager', () => ({
@@ -48,6 +67,8 @@ vi.mock('@/components/ui/Toast/toast-manager', () => ({
 
 const mockedFetchAdminOnboardings = vi.mocked(fetchAdminOnboardings);
 const mockedFetchCsv = vi.mocked(fetchAdminOnboardingsCsv);
+const mockedFetchWorkflows = vi.mocked(fetchAdminWorkflows);
+const mockedFetchVersions = vi.mocked(fetchWorkflowVersions);
 const mockedDownloadFile = vi.mocked(downloadFile);
 const mockedShowErrorToast = vi.mocked(showErrorToast);
 
@@ -118,6 +139,67 @@ function page(
   };
 }
 
+function workflowSummary(workflowId: string, name: string): AdminWorkflowSummary {
+  return {
+    workflowId,
+    name,
+    scope: 'users',
+    servingVersion: 1,
+    versionCount: 2,
+    draftCount: 0,
+    inProgressCount: 0,
+    createdAt: '2026-07-01T00:00:00.000Z',
+    updatedAt: '2026-07-01T00:00:00.000Z',
+  };
+}
+
+const WORKFLOWS_PAGE: AdminWorkflowsPage = {
+  records: [
+    workflowSummary('kyc-basic', 'KYC Basic'),
+    workflowSummary('kyc-advanced', 'KYC Advanced'),
+  ],
+  pagination: { page: 1, limit: 20, total: 2, totalPages: 1 },
+};
+
+const VERSIONS = [
+  {
+    version: 3,
+    status: 'draft',
+    createdAt: '2026-07-03T00:00:00.000Z',
+    updatedAt: '2026-07-03T00:00:00.000Z',
+  },
+  {
+    version: 2,
+    status: 'published',
+    createdAt: '2026-07-02T00:00:00.000Z',
+    updatedAt: '2026-07-02T00:00:00.000Z',
+  },
+  {
+    version: 1,
+    status: 'retired',
+    createdAt: '2026-07-01T00:00:00.000Z',
+    updatedAt: '2026-07-01T00:00:00.000Z',
+  },
+] as const;
+
+type User = ReturnType<typeof userEvent.setup>;
+
+/** Opens the Workflow combobox and picks the item with this name. */
+async function pickWorkflow(user: User, name: string): Promise<void> {
+  await user.click(screen.getByLabelText('Workflow'));
+  await user.click(await screen.findByRole('option', { name: new RegExp(name) }));
+}
+
+/** Picks a version by its option text once the select has enabled. */
+async function pickVersion(user: User, optionName: string): Promise<void> {
+  const select = screen.getByLabelText('Workflow version');
+  await waitFor(() => {
+    expect(select).toBeEnabled();
+  });
+  await user.click(select);
+  await user.click(await screen.findByRole('option', { name: optionName }));
+}
+
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -179,6 +261,10 @@ async function renderReady(
 beforeEach(() => {
   mockedFetchAdminOnboardings.mockReset();
   mockedFetchCsv.mockReset();
+  mockedFetchWorkflows.mockReset();
+  mockedFetchWorkflows.mockResolvedValue(WORKFLOWS_PAGE);
+  mockedFetchVersions.mockReset();
+  mockedFetchVersions.mockResolvedValue([...VERSIONS]);
   mockedDownloadFile.mockReset();
   mockedShowErrorToast.mockReset();
 });
@@ -251,7 +337,9 @@ describe('OnboardingsPage', () => {
       'aria-current',
       'page',
     );
-    expect(screen.getByLabelText('Workflow ID')).toHaveValue('kyc-advanced');
+    await waitFor(() => {
+      expect(screen.getByLabelText('Workflow')).toHaveValue('KYC Advanced');
+    });
   });
 
   it('hands its criteria to the row link, so the details page can come back to them', async () => {
@@ -304,7 +392,7 @@ describe('OnboardingsPage', () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE, RECORD_TWO]);
 
-    await user.type(screen.getByLabelText('Workflow ID'), 'does-not-exist');
+    await pickWorkflow(user, 'KYC Advanced');
 
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('status')).toHaveTextContent(
@@ -319,11 +407,85 @@ describe('OnboardingsPage', () => {
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
       2,
-      defaultQueryFilters({ workflowId: 'does-not-exist' }),
+      defaultQueryFilters({ workflowId: 'kyc-advanced' }),
     );
     expect(screen.getByRole('status')).toHaveTextContent(
       'No onboardings match the current filters.',
     );
+  });
+
+  it('does not submit an invalid pending connector and keeps previously applied results', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    const connectorInput = screen.getByLabelText('Pending connector');
+    await user.type(connectorInput, 'Bad Id');
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    expect(connectorInput).toHaveAttribute('aria-invalid', 'true');
+    expect(
+      screen.getByText(PENDING_CONNECTOR_ERROR_MESSAGE, {
+        selector: '#onboarding-filters-error',
+      }),
+    ).toBeVisible();
+    expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
+  });
+
+  it('trims submitted values before applying and requesting filters', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    await user.type(screen.getByLabelText('Current step'), '  collect-documents  ');
+    await user.type(screen.getByLabelText('Onboarding ID'), `  ${RECORD_ONE.onboardingId}  `);
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      2,
+      defaultQueryFilters({
+        currentStep: 'collect-documents',
+        onboardingId: RECORD_ONE.onboardingId,
+      }),
+    );
+  });
+
+  it('shows a version-only URL as v<n> and lets Any version clear it', async () => {
+    const user = userEvent.setup();
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    renderPage(undefined, '/onboardings?workflowVersion=7');
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Workflow version')).toHaveTextContent('v7');
+    });
+    await pickVersion(user, 'Any version');
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, defaultQueryFilters());
+    expect(screen.getByLabelText('Workflow version')).toBeDisabled();
+  });
+
+  it('lets a URL version be cleared when its versions fail to load', async () => {
+    const user = userEvent.setup();
+    mockedFetchVersions.mockRejectedValue(new Error('versions failed'));
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    renderPage(undefined, '/onboardings?workflowId=kyc-basic&workflowVersion=2');
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Workflow version')).toHaveTextContent('v2');
+    });
+    await pickVersion(user, 'Versions unavailable');
+
+    expect(screen.getByLabelText('Workflow version')).toHaveTextContent('Versions unavailable');
+    expect(screen.getByLabelText('Workflow version')).toBeDisabled();
   });
 
   it('refetches the same applied key once on resubmission without showing stale rows while pending', async () => {
@@ -343,7 +505,7 @@ describe('OnboardingsPage', () => {
       );
     });
 
-    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
+    await pickWorkflow(user, 'KYC Basic');
     mockedFetchAdminOnboardings.mockReturnValueOnce(resubmissionRequest.promise);
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
@@ -363,29 +525,11 @@ describe('OnboardingsPage', () => {
     );
   });
 
-  it('does not submit invalid workflow version and keeps previously applied results', async () => {
-    const user = userEvent.setup();
-    await renderReady([RECORD_ONE]);
-
-    const versionInput = screen.getByLabelText('Workflow version');
-    await user.type(versionInput, 'abc');
-    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
-
-    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
-    expect(versionInput).toHaveAttribute('aria-invalid', 'true');
-    expect(
-      screen.getByText('Enter a whole number greater than zero.', {
-        selector: '#onboarding-filters-error',
-      }),
-    ).toBeVisible();
-    expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
-  });
-
   it('shows the fetch error state when the request for a newly applied criterion rejects', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE]);
 
-    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
+    await pickWorkflow(user, 'KYC Basic');
     mockedFetchAdminOnboardings.mockRejectedValueOnce(
       new ApiError('Request failed with status 400.', { status: 400 }),
     );
@@ -406,7 +550,7 @@ describe('OnboardingsPage', () => {
   it('repeats the applied query when Reload is activated after errors and payload failures', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE]);
-    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
+    await pickWorkflow(user, 'KYC Basic');
 
     mockedFetchAdminOnboardings.mockRejectedValueOnce(
       new ApiError('Request failed with status 500.', { status: 500 }),
@@ -455,29 +599,12 @@ describe('OnboardingsPage', () => {
     );
   });
 
-  it('trims submitted values before applying and requesting filters', async () => {
-    const user = userEvent.setup();
-    await renderReady([RECORD_ONE]);
-
-    await user.type(screen.getByLabelText('Workflow ID'), '  kyc-basic  ');
-    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
-    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
-
-    await waitFor(() => {
-      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
-    });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
-      2,
-      defaultQueryFilters({ workflowId: 'kyc-basic' }),
-    );
-  });
-
   it('clears draft and applied filters via Reset filters and fetches unfiltered exactly once', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE, RECORD_TWO]);
 
-    const workflowIdInput = screen.getByLabelText('Workflow ID');
-    await user.type(workflowIdInput, 'kyc-basic');
+    const workflowIdInput = screen.getByLabelText('Workflow');
+    await pickWorkflow(user, 'KYC Basic');
     mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
@@ -609,7 +736,8 @@ describe('OnboardingsPage', () => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
 
-    await user.selectOptions(screen.getByLabelText('Per page'), '50');
+    await user.click(screen.getByLabelText('Per page'));
+    await user.click(await screen.findByRole('option', { name: '50' }));
     mockedFetchAdminOnboardings.mockResolvedValueOnce(
       page([RECORD_ONE], { limit: 50, total: 41, totalPages: 1 }),
     );
@@ -656,7 +784,7 @@ describe('OnboardingsPage', () => {
 
     // The operator's natural order: pick the tab, then narrow inside it. The status must survive
     // the Apply rather than being overwritten by the draft seeded at mount.
-    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
+    await pickWorkflow(user, 'KYC Basic');
     mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_TWO]));
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
@@ -693,7 +821,7 @@ describe('OnboardingsPage', () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE, RECORD_TWO]);
 
-    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
+    await pickWorkflow(user, 'KYC Basic');
 
     expect(screen.queryByText('1 active')).not.toBeInTheDocument();
     expect(screen.queryByText('Saved as a shareable link')).not.toBeInTheDocument();
@@ -799,6 +927,92 @@ describe('OnboardingsPage', () => {
     expect(screen.getByRole('region', { name: 'Onboardings results' })).toBeInTheDocument();
   });
 
+  it('adds the picked version to the request when Apply filters is submitted', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    await pickWorkflow(user, 'KYC Basic');
+    await pickVersion(user, 'v1 — retired');
+    expect(screen.queryByRole('option', { name: /v3/ })).not.toBeInTheDocument();
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      2,
+      defaultQueryFilters({ workflowId: 'kyc-basic', workflowVersion: '1' }),
+    );
+  });
+
+  it('disables Workflow version until a workflow is picked', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    expect(screen.getByLabelText('Workflow version')).toBeDisabled();
+    expect(mockedFetchVersions).not.toHaveBeenCalled();
+
+    await pickWorkflow(user, 'KYC Basic');
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Workflow version')).toBeEnabled();
+    });
+  });
+
+  it('clears the drafted version when the workflow changes', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    await pickWorkflow(user, 'KYC Basic');
+    await pickVersion(user, 'v2 — published');
+    expect(screen.getByLabelText('Workflow version')).toHaveTextContent('v2 — published');
+
+    await pickWorkflow(user, 'KYC Advanced');
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Workflow version')).toHaveTextContent('Any version');
+    });
+  });
+
+  it('keeps the drafted version when the same workflow is picked again', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    await pickWorkflow(user, 'KYC Basic');
+    await pickVersion(user, 'v2 — published');
+    await pickWorkflow(user, 'KYC Basic');
+
+    expect(screen.getByLabelText('Workflow version')).toHaveTextContent('v2 — published');
+  });
+
+  it('clears the workflow and its version when the combobox is cleared', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    await pickWorkflow(user, 'KYC Basic');
+    await pickVersion(user, 'v2 — published');
+    await user.click(screen.getByRole('button', { name: 'Clear' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Workflow version')).toBeDisabled();
+    });
+    expect(screen.getByLabelText('Workflow version')).toHaveTextContent('Any version');
+  });
+
+  it('shows the workflow and version a URL carries in the pickers', async () => {
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    renderPage(undefined, '/onboardings?workflowId=kyc-basic&workflowVersion=2');
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Workflow')).toHaveValue('KYC Basic');
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText('Workflow version')).toHaveTextContent('v2 — published');
+    });
+  });
+
   describe('Export CSV', () => {
     it('is hidden while the list loads', () => {
       const { promise } = deferred<Awaited<ReturnType<typeof fetchAdminOnboardings>>>();
@@ -878,11 +1092,11 @@ describe('OnboardingsPage', () => {
       expect(await screen.findByRole('button', { name: 'Export 1 as CSV' })).toBeEnabled();
     });
 
-    it('is disabled while the workflow version draft is invalid', async () => {
+    it('is disabled while the pending connector draft is invalid', async () => {
       const user = userEvent.setup();
       await renderReady([RECORD_ONE]);
 
-      await user.type(screen.getByLabelText('Workflow version'), 'abc');
+      await user.type(screen.getByLabelText('Pending connector'), 'Bad Id');
       await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
       expect(screen.getByRole('button', { name: 'Export 1 as CSV' })).toBeDisabled();
