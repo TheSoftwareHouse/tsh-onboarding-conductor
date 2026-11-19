@@ -3022,7 +3022,11 @@ surface's only constraint, and it constrains browsers, not clients.
 (`packages/engine/src/auth/better-auth/better-auth.middleware.ts`) to `v1/auth/{*path}`, so the
 handler lives at `/v1/auth/*` (every path outside `/v1` is the panel's `index.html`). It needs an
 unparsed body, so `main.ts`'s JSON and urlencoded parsers skip `/v1/auth`, as they skip
-`/v1/webhooks`. Mounting in the module instead of `main.ts` means the e2e suites, which build the
+`/v1/webhooks`. Under Nest's middleware Express has already split the path into `baseUrl` and a
+`url` without the query string, and better-call rebuilds the request from those two, so the
+middleware restores `req.url` from `req.originalUrl` (and empties `baseUrl`) before handing over;
+without it every query parameter of a `GET` under `/v1/auth` — the users list's role filter,
+search and paging — is silently dropped. Mounting in the module instead of `main.ts` means the e2e suites, which build the
 app through `Test.createTestingModule`, get it too. With `ADMIN_AUTH_ENABLED=false` no instance and
 no middleware exist. There is no global guard: the library's Nest wrapper registers one, which
 would lock the public flow, so it is not used.
@@ -3218,6 +3222,13 @@ platform role, ban and unban, revoke sessions, temporary password) and `/platfor
 the signed-in superadmin belongs to. The panel does not hide actions a role cannot perform: it
 reacts to the `403`. With `VITE_AUTH_ENABLED=false` the gate renders the panel directly.
 
+Two writes refresh more than their own list. Creating an organization makes the creator its owner
+and changes what every admin read may return, so `createOrganization` awaits the invalidation of
+every query (`awaits: [[]]`). The client refreshes the session on its own after the two-factor,
+organization-create, set-active and accept-invitation calls, but not after the admin plugin's
+`setRole`; `setUserRole` therefore emits `$sessionSignal` itself, so a superadmin who changes their
+own platform role sees the sidebar change without reloading.
+
 Out of scope, so not built: data tenancy, impersonation, passkeys, audit rows for writes through
 better-auth's own endpoints, permission-aware UI, per-request session caching, shared-storage rate
 limiting across replicas (better-auth's default is per process), `/v1/auth/*` in the OpenAPI
@@ -3306,8 +3317,8 @@ rendering is the only one, and the drift test compares the parsed documents.
 served from `GET /v1/onboardings` with a details page per onboarding and an Export CSV download; **Logs**, a
 filterable, read-only view of the audit trail (§8); and **Connectors**, which writes connector
 settings. **Workflows** also writes, but only drafts (Workflows, below). An **Admin** group adds
-**Organization** for everyone and, for a superadmin only, **Users** and **Organizations** (see
-Authentication, §11).
+**Organization** for everyone and, for a superadmin only, **Users** and **Organizations**, and an **Account** group holds the signed-in operator's
+two-factor setting (see Authentication, §11).
 
 Every engine read and write fails with one class, `ApiError` (`src/services/api/api-error.ts`),
 registered as TanStack Query's `defaultError`

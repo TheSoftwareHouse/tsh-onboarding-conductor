@@ -79,7 +79,7 @@ Each environment is its own deployment, with its own database, so connector cred
 
 ## Before you deploy
 
-Operator sign-in uses better-auth, built into the engine, and is **on unless explicitly turned off**, so a deployment that forgets to configure it refuses to serve admin data rather than serving it to anyone. Operators sign in with email and password plus an authenticator code, or with Microsoft; accounts are by invitation only.
+Operator sign-in uses better-auth, built into the engine, and is **on unless explicitly turned off**, so a deployment that forgets to configure it refuses to serve admin data rather than serving it to anyone. Operators sign in with email and password, plus an authenticator code once they have turned two-factor authentication on, or with Microsoft; accounts are by invitation only.
 
 - `ADMIN_AUTH_ENABLED` is what protects onboarding data: with it on, every operator route requires a session whose operator holds the route's permission. It defaults to on. Setting it to `false` is refused outright when `NODE_ENV=production`.
 - With it on, the engine refuses to start without `BETTER_AUTH_SECRET` (at least 32 characters; generate one with `openssl rand -base64 32`), `BETTER_AUTH_URL` (the engine's own absolute http or https URL, the base for cookies and links), `AUTH_SMTP_URL` and `AUTH_MAIL_FROM`. The last two carry invitation and password-reset mail; `smtp://mailhog:1025` reaches the local MailHog. Keep the secret out of source control.

@@ -32,7 +32,7 @@ archive with the bump.
 - **Admin handlers** are marked `@AdminRoute({ resource, action })`
   (`src/auth/admin-route.decorator.ts`), never a bare `@UseGuards(AdminSessionGuard)` and never an
   `@ApiSecurity` or `@ApiCookieAuth` by hand: the decorator applies the guard, stores the
-  permission and documents the cookie security scheme and the four auth refusals in one step so the
+  permission and documents the cookie security scheme and the three auth refusals in one step so the
   three cannot disagree.
 - **Request DTOs**: every property carries `@ApiProperty` or `@ApiPropertyOptional` beside its
   class-validator decorators, with a `description`, and an `example` where a real value helps.
