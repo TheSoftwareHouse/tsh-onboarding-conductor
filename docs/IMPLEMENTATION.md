@@ -3006,7 +3006,7 @@ to callers, so the error-code table above gains no `VALIDATION_FAILED` entry.
 ### Authentication — better-auth on the admin surface
 
 Operators sign in through better-auth, mounted in the engine
-([0050](decisions/0050-better-auth-for-admin-authentication.md)). The panel signs in with email and
+([0053](decisions/0053-better-auth-for-admin-authentication.md)). The panel signs in with email and
 password, plus a TOTP code for an operator who turned two-factor on, or with Microsoft when it is configured. The session is an
 httpOnly cookie (`better-auth.session_token`, `SameSite=Lax`, `Secure` when `NODE_ENV=production`),
 not a bearer token. Every route under `/v1/admin/`, the operator routes on onboardings (the reads,
