@@ -1,4 +1,4 @@
-# 0050. better-auth authenticates admin operators
+# 0051. better-auth authenticates admin operators
 
 - **Status:** Accepted
 - **Date:** 2026-11-16
