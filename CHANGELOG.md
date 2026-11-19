@@ -21,6 +21,9 @@ One product version covers the whole monorepo. Every pull request adds its line 
 - Tooling — `.claude/settings.local.json` is no longer tracked and is git-ignored, so each person's
   local Claude Code settings stay on their machine. `tsh-product-design`, the one plugin it enabled,
   moved to the shared `.claude/settings.json`.
+- Tooling — The repository is connected to the project's knowledge base: `.claude/settings.json`
+  adds the `tsh-onboarding-conductor-context` marketplace and enables `tsh-onboarding-conductor-shared`
+  and `tsh-product-management`, and `CLAUDE.md` carries the pointer to it.
 
 ### Fixed
 

@@ -145,3 +145,8 @@ above) has none — there is nothing package-specific to say yet beyond this fil
   plugin installed, invoke `/tsh-core:managing-decision-records`; without it,
   match the format of the existing records and update the index in
   `docs/decisions/README.md` in the same change.
+
+<!-- tsh:project-context START — DO NOT REMOVE. No agent ever removes or edits this block; only /tsh-product-management:initializing-project-context changes it. -->
+
+Project knowledge base: git@github.com:TheSoftwareHouse/tsh-onboarding-conductor-context.git. For work that touches decisions, scope, glossary terms, the data model or new dependencies, use /tsh-product-management:navigating-project-context. If that skill is unavailable, say so plainly — do not answer from memory and do not clone the repository yourself; the fix is to install `tsh-product-management@tsh-agentic-collections` and run /tsh-product-management:initializing-project-context (Attach repository).
+<!-- tsh:project-context END -->
