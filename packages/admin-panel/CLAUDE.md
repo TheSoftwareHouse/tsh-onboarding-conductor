@@ -114,7 +114,7 @@ A nested route nests as a folder named for what it shows: `/onboardings/:onboard
 `src/app/onboardings/details/`.
 
 Outside the routes: `src/components/ui/` (shared components), `src/services/` (external
-boundaries — `auth/` wraps MSAL, `api/` wraps axios), `src/api/<domain>/`, and `src/config/`,
+boundaries — `auth/` wraps the better-auth client, `api/` wraps axios), `src/api/<domain>/`, and `src/config/`,
 `src/constants/`, `src/lib/`. `src/app/providers/` and `src/app/layout/` are the app shell. The
 shell mounts no header: **every page renders its own `PageHeader`**.
 

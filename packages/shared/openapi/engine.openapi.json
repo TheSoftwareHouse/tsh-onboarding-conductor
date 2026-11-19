@@ -18,31 +18,76 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -50,7 +95,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Read the encryption state and key history",
@@ -94,31 +139,76 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "503": {
-            "description": "`ENCRYPTION_KEY_NOT_CONFIGURED`: This engine process has no `ENCRYPTION_KEY` configured, so it can neither create nor wrap a data key; configure the key-encryption key and restart the engine.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`ENCRYPTION_KEY_NOT_CONFIGURED`: This engine process has no `ENCRYPTION_KEY` configured, so it can neither create nor wrap a data key; configure the key-encryption key and restart the engine.\n\n`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -126,7 +216,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Turn encryption on or off",
@@ -172,21 +262,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -217,11 +337,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -229,7 +364,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Choose how often the key rotates on its own",
@@ -255,21 +390,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -301,11 +466,26 @@
             }
           },
           "503": {
-            "description": "`ENCRYPTION_KEY_NOT_CONFIGURED`: This engine process has no `ENCRYPTION_KEY` configured, so it can neither create nor wrap a data key; configure the key-encryption key and restart the engine.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`ENCRYPTION_KEY_NOT_CONFIGURED`: This engine process has no `ENCRYPTION_KEY` configured, so it can neither create nor wrap a data key; configure the key-encryption key and restart the engine.\n\n`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -313,7 +493,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Rotate the encryption key",
@@ -339,21 +519,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -384,11 +594,26 @@
             }
           },
           "503": {
-            "description": "`ENCRYPTION_KEY_NOT_CONFIGURED`: This engine process has no `ENCRYPTION_KEY` configured, so it can neither create nor wrap a data key; configure the key-encryption key and restart the engine.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`ENCRYPTION_KEY_NOT_CONFIGURED`: This engine process has no `ENCRYPTION_KEY` configured, so it can neither create nor wrap a data key; configure the key-encryption key and restart the engine.\n\n`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -396,7 +621,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Re-encrypt every stored onboarding onto the active key",
@@ -526,31 +751,76 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -558,7 +828,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "List audit events",
@@ -649,21 +919,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -694,11 +994,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -706,7 +1021,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Publish the next version of an agreement family",
@@ -785,31 +1100,76 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -817,7 +1177,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "List published agreement versions",
@@ -880,21 +1240,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -925,11 +1315,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -937,7 +1342,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Compile a workflow document (dry run)",
@@ -999,21 +1404,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1046,11 +1481,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1058,7 +1508,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Create a workflow draft",
@@ -1144,31 +1594,76 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1176,7 +1671,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "List workflows",
@@ -1213,21 +1708,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1258,11 +1783,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1270,7 +1810,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Read a workflow definition",
@@ -1307,21 +1847,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1352,11 +1922,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1364,7 +1949,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "List a workflow's versions",
@@ -1446,21 +2031,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1491,11 +2106,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1503,7 +2133,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Read one version of a workflow definition",
@@ -1593,21 +2223,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1667,11 +2327,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1679,7 +2354,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Replace a draft",
@@ -1729,21 +2404,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1800,11 +2505,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1812,7 +2532,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Delete a draft",
@@ -1871,21 +2591,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1916,11 +2666,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -1928,7 +2693,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Read a version's document",
@@ -2010,21 +2775,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2083,11 +2878,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2095,7 +2905,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Publish a draft",
@@ -2106,7 +2916,7 @@
     },
     "/v1/admin/workflows/{workflowId}/steps/{stepName}/connector": {
       "put": {
-        "description": "Replaces the authored primary connector's id on one published version (`scope: version`) or on every non-retired published version that declares the step with a single connector (`scope: all`); config, field mapping, retry and fallbacks are untouched. Drafts and later published versions run their authored connector. The adapter is validated against each targeted version only, nothing is written unless all accept it, and the first to refuse it names itself in `workflowVersion`. Onboardings already parked on the step finish with the provider they started on. The response projects the slot from the target version, or the highest covered one for `all`. The write is audited under the operator the token identifies.",
+        "description": "Replaces the authored primary connector's id on one published version (`scope: version`) or on every non-retired published version that declares the step with a single connector (`scope: all`); config, field mapping, retry and fallbacks are untouched. Drafts and later published versions run their authored connector. The adapter is validated against each targeted version only, nothing is written unless all accept it, and the first to refuse it names itself in `workflowVersion`. Onboardings already parked on the step finish with the provider they started on. The response projects the slot from the target version, or the highest covered one for `all`. The write is audited under the operator the session identifies.",
         "operationId": "selectWorkflowStepConnector",
         "parameters": [
           {
@@ -2184,21 +2994,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2280,11 +3120,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2292,7 +3147,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Bind a step's connector slot to another adapter",
@@ -2301,7 +3156,7 @@
         ]
       },
       "delete": {
-        "description": "Drops the stored binding on one published version (`scope: version`) or on every non-retired published version that declares the step (`scope: all`), so they run the connector their document authored. Bindings on retired versions are kept. Clearing a step with no binding succeeds. The write is audited under the operator the token identifies.",
+        "description": "Drops the stored binding on one published version (`scope: version`) or on every non-retired published version that declares the step (`scope: all`), so they run the connector their document authored. Bindings on retired versions are kept. Clearing a step with no binding succeeds. The write is audited under the operator the session identifies.",
         "operationId": "clearWorkflowStepConnector",
         "parameters": [
           {
@@ -2366,21 +3221,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2462,11 +3347,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2474,7 +3374,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Return a step's connector slot to its authored adapter",
@@ -2500,31 +3400,76 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2532,7 +3477,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "List step types",
@@ -2559,31 +3504,76 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2591,7 +3581,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Read the workflow JSON Schema",
@@ -2617,31 +3607,76 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2649,7 +3684,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "List connector settings",
@@ -2685,21 +3720,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2730,11 +3795,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2742,7 +3822,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Read one connector's settings",
@@ -2751,7 +3831,7 @@
         ]
       },
       "put": {
-        "description": "Stores the body as the whole settings map. Because a secret is never read back, a body that omits a currently stored key is refused by default rather than silently dropping it; `replace=true` opts in to dropping it. Every key and value is validated against the adapter's schema. The write is audited under the operator the token identifies.",
+        "description": "Stores the body as the whole settings map. Because a secret is never read back, a body that omits a currently stored key is refused by default rather than silently dropping it; `replace=true` opts in to dropping it. Every key and value is validated against the adapter's schema. The write is audited under the operator the session identifies.",
         "operationId": "replaceConnectorSettings",
         "parameters": [
           {
@@ -2832,21 +3912,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2877,11 +3987,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2889,7 +4014,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Replace connector settings wholesale",
@@ -2898,7 +4023,7 @@
         ]
       },
       "patch": {
-        "description": "Changes only the keys the body names: a string overwrites, `null` deletes, an absent key is left as it is. This is how an operator changes one field without resubmitting secrets the API never returns. Every submitted key and value is validated against the adapter's schema. The write is audited under the operator the token identifies.",
+        "description": "Changes only the keys the body names: a string overwrites, `null` deletes, an absent key is left as it is. This is how an operator changes one field without resubmitting secrets the API never returns. Every submitted key and value is validated against the adapter's schema. The write is audited under the operator the session identifies.",
         "operationId": "mergeConnectorSettings",
         "parameters": [
           {
@@ -2966,21 +4091,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -3011,11 +4166,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -3023,7 +4193,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Merge connector settings",
@@ -3032,7 +4202,7 @@
         ]
       },
       "delete": {
-        "description": "Removes every stored setting of the connector, so each key reports as unset and the connector is no longer configured. The write is audited under the operator the token identifies.",
+        "description": "Removes every stored setting of the connector, so each key reports as unset and the connector is no longer configured. The write is audited under the operator the session identifies.",
         "operationId": "removeConnectorSettings",
         "parameters": [
           {
@@ -3051,21 +4221,51 @@
             "description": "The stored settings are gone."
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -3096,11 +4296,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -3108,7 +4323,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Clear connector settings",
@@ -3576,31 +4791,76 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -3608,7 +4868,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "List onboardings",
@@ -4140,7 +5400,7 @@
     },
     "/v1/onboardings/{id}/review/{action}": {
       "post": {
-        "description": "Applies the `manual.<action>` transition the current step declares and reports where the onboarding now stands. An operator route: it requires the same bearer token as the admin routes.",
+        "description": "Applies the `manual.<action>` transition the current step declares and reports where the onboarding now stands. An operator route: it requires the same admin session as the admin routes.",
         "operationId": "reviewOnboarding",
         "parameters": [
           {
@@ -4189,21 +5449,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -4312,11 +5602,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -4324,7 +5629,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Record a manual review decision",
@@ -4603,31 +5908,76 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "text/csv": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "text/csv": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "text/csv": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -4635,7 +5985,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Export onboardings as CSV",
@@ -4672,21 +6022,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -4717,11 +6097,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -4729,7 +6124,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "List the states an onboarding moved through",
@@ -4766,21 +6161,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -4811,11 +6236,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -4823,7 +6263,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "List an onboarding's agreements",
@@ -4878,21 +6318,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -4924,11 +6394,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -4936,7 +6421,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Link a published agreement version to an onboarding",
@@ -4998,21 +6483,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -5133,11 +6648,26 @@
             }
           },
           "503": {
-            "description": "`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.\n\n`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.\n\n`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\n`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -5145,7 +6675,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Read a parked connector's verdict back from its provider",
@@ -5182,21 +6712,51 @@
             }
           },
           "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "description": "`ADMIN_SESSION_REQUIRED`: There is no valid admin session; sign in again.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_SESSION_REQUIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ADMIN_PERMISSION_MISSING"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -5227,11 +6787,26 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`AUTH_UNAVAILABLE`: The auth store could not be reached, so the session was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AUTH_UNAVAILABLE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -5239,7 +6814,7 @@
         },
         "security": [
           {
-            "entraBearer": []
+            "adminSession": []
           }
         ],
         "summary": "Read an onboarding record",
@@ -5251,7 +6826,7 @@
   },
   "info": {
     "title": "TSH Onboarding Conductor Engine API",
-    "description": "The HTTP surface of the onboarding engine: the service that loads workflow definitions, runs\nonboardings against them and drives connectors, provider callbacks and client webhooks.\n\n## Audiences\n\n- **Onboarding flow.** The end customer's own onboarding. Unauthenticated: the onboarding id is\n  the only handle, so treat it as a capability.\n- **Admin.** The operator surface the admin panel is built on. Every operation requires a bearer\n  access token (see *Authentication*).\n- **Provider callbacks.** Where a connector's provider posts an asynchronous result, authenticated\n  by the HMAC recipe the connector adapter declares.\n\n## Authentication\n\nAdmin operations carry the `entraBearer` security requirement: a Microsoft Entra ID\naccess token for the engine's API app registration whose `roles` claim holds at least one of the\nconfigured operator roles. A missing or unverifiable token is answered with `401`, a verified token\nwithout an operator role with `403`, and `503` says the token could not be judged because Entra's\nsigning keys were unreachable. Every decision, granted or refused, is written to the audit log.\n\n## Errors\n\nThe engine answers a refusal it owns with `{ \"code\", \"message\" }`: `code` is the stable\nidentifier a client should branch on, and each operation lists the codes it can return. Some codes\nadd detail properties; the operation's response description names them. Where the framework answers\ninstead of the engine, the body is NestJS's own `{ \"statusCode\", \"message\", \"error\" }` envelope:\nrequest validation (`400`), the admin bearer guard (`401`, `403`, `503`), and a `500` on the\nsubmit and provider-callback routes, where a connector adapter can fail with a plain error and there\nis no `code` to branch on.\n\n## Bodies the workflow decides\n\nTwo request bodies have no fixed shape. A submit body follows the current step: read\n`GET /v1/onboardings/{id}/state` and its `step.schema` says exactly what the engine will accept.\nA connector's settings body is a map whose keys the connector adapter declares; the read side lists\nthem. The compile body is a workflow document, and its schema is embedded here in full.\n\n## About this document\n\nGenerated from the engine's own route and DTO decorators, and committed beside the code; a test\nfails when the two disagree. A running engine serves it at `GET /v1/openapi.json`.",
+    "description": "The HTTP surface of the onboarding engine: the service that loads workflow definitions, runs\nonboardings against them and drives connectors, provider callbacks and client webhooks.\n\n## Audiences\n\n- **Onboarding flow.** The end customer's own onboarding. Unauthenticated: the onboarding id is\n  the only handle, so treat it as a capability.\n- **Admin.** The operator surface the admin panel is built on. Every operation requires an admin\n  session cookie (see *Authentication*).\n- **Provider callbacks.** Where a connector's provider posts an asynchronous result, authenticated\n  by the HMAC recipe the connector adapter declares.\n\n## Authentication\n\nAdmin operations carry the `adminSession` security requirement: the httpOnly session\ncookie better-auth sets when an operator signs in under `/v1/auth`. A missing or expired session is\nanswered with `401` `ADMIN_SESSION_REQUIRED`; a session whose platform role and active organization role lack the\npermission the route needs with `403` `ADMIN_PERMISSION_MISSING`; and `503` `AUTH_UNAVAILABLE` says the\nsession could not be judged because the auth store was unreachable. Every decision, granted or\nrefused, is written to the audit log.\n\n## Errors\n\nThe engine answers a refusal it owns with `{ \"code\", \"message\" }`: `code` is the stable\nidentifier a client should branch on, and each operation lists the codes it can return. Some codes\nadd detail properties; the operation's response description names them. Where the framework answers\ninstead of the engine, the body is NestJS's own `{ \"statusCode\", \"message\", \"error\" }` envelope:\nrequest validation (`400`), and a `500` on the\nsubmit and provider-callback routes, where a connector adapter can fail with a plain error and there\nis no `code` to branch on.\n\n## Bodies the workflow decides\n\nTwo request bodies have no fixed shape. A submit body follows the current step: read\n`GET /v1/onboardings/{id}/state` and its `step.schema` says exactly what the engine will accept.\nA connector's settings body is a map whose keys the connector adapter declares; the read side lists\nthem. The compile body is a workflow document, and its schema is embedded here in full.\n\n## About this document\n\nGenerated from the engine's own route and DTO decorators, and committed beside the code; a test\nfails when the two disagree. A running engine serves it at `GET /v1/openapi.json`.",
     "version": "0.1.2",
     "contact": {},
     "license": {
@@ -5270,7 +6845,7 @@
     },
     {
       "name": "Admin: manual review",
-      "description": "An operator's decision on an onboarding waiting in `awaiting_manual_review`. Behind the same bearer guard as the admin routes: the decision is an operator action, not part of the end customer's flow."
+      "description": "An operator's decision on an onboarding waiting in `awaiting_manual_review`. Behind the same session guard as the admin routes: the decision is an operator action, not part of the end customer's flow."
     },
     {
       "name": "Provider callbacks",
@@ -5278,41 +6853,41 @@
     },
     {
       "name": "Admin: onboardings",
-      "description": "Operator reads over every onboarding: the paginated list, one record, the states it moved through and the agreements it holds, plus the one write that links a published agreement version to it. Requires an operator bearer token."
+      "description": "Operator reads over every onboarding: the paginated list, one record, the states it moved through and the agreements it holds, plus the one write that links a published agreement version to it. Requires an operator session."
     },
     {
       "name": "Admin: agreements",
-      "description": "The published versions of every agreement family: publish the next version of one, which links it as pending to every onboarding now behind, and list what has been published. Requires an operator bearer token."
+      "description": "The published versions of every agreement family: publish the next version of one, which links it as pending to every onboarding now behind, and list what has been published. Requires an operator session."
     },
     {
       "name": "Admin: workflows",
-      "description": "The workflow catalogue as a reader sees it, a dry compile of a document that stores nothing, and the write that binds a step's connector slot to another adapter. Requires an operator bearer token."
+      "description": "The workflow catalogue as a reader sees it, a dry compile of a document that stores nothing, and the write that binds a step's connector slot to another adapter. Requires an operator session."
     },
     {
       "name": "Admin: step types",
-      "description": "The step palette a workflow builder offers and the JSON Schema an authored workflow document must satisfy. Requires an operator bearer token."
+      "description": "The step palette a workflow builder offers and the JSON Schema an authored workflow document must satisfy. Requires an operator session."
     },
     {
       "name": "Admin: connectors",
-      "description": "Operator-provided connector settings, including credentials. A secret value never leaves the engine: the read side reports that a secret is set, not what it is. Requires an operator bearer token."
+      "description": "Operator-provided connector settings, including credentials. A secret value never leaves the engine: the read side reports that a secret is set, not what it is. Requires an operator session."
     },
     {
       "name": "Admin: audit",
-      "description": "The paginated audit log with its filters. Requires an operator bearer token."
+      "description": "The paginated audit log with its filters. Requires an operator session."
     },
     {
       "name": "Admin: encryption",
-      "description": "Encryption of `onboardings.context`: whether it is on, the key history with derived sweep progress, the switch that turns it on or off, and the write that rotates the key. A response never carries key material. Requires an operator bearer token."
+      "description": "Encryption of `onboardings.context`: whether it is on, the key history with derived sweep progress, the switch that turns it on or off, and the write that rotates the key. A response never carries key material. Requires an operator session."
     }
   ],
   "servers": [],
   "components": {
     "securitySchemes": {
-      "entraBearer": {
-        "scheme": "bearer",
-        "bearerFormat": "JWT",
-        "type": "http",
-        "description": "A Microsoft Entra ID access token issued for the engine API app registration (`AZURE_API_AUDIENCE`), carrying at least one of the roles in `ADMIN_REQUIRED_ROLES`. With `ADMIN_AUTH_ENABLED=false`, a local-only setting the engine refuses in production, the guard is skipped and no token is needed."
+      "adminSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "better-auth.session_token",
+        "description": "The better-auth session cookie set by `/v1/auth` sign-in (prefixed `__Secure-` over HTTPS). With `ADMIN_AUTH_ENABLED=false`, a local-only setting the engine refuses in production, the guard is skipped and no session is needed."
       }
     },
     "schemas": {
@@ -5334,7 +6909,7 @@
               "string",
               "null"
             ],
-            "description": "The operator who turned encryption on or added this key, as the bearer token identified them, or the unknown-actor marker when admin authentication is off. Null only for a row inserted outside the API; every key the engine creates records who asked for it."
+            "description": "The operator who turned encryption on or added this key, as the better-auth user id, or the unknown-actor marker when admin authentication is off. Null only for a row inserted outside the API; every key the engine creates records who asked for it."
           },
           "activatedAt": {
             "type": "string",
@@ -6897,7 +8472,7 @@
               "string",
               "null"
             ],
-            "description": "The operator who last wrote the settings, as the bearer token identified them."
+            "description": "The operator who last wrote the settings, as the better-auth user id."
           }
         },
         "required": [
@@ -7877,7 +9452,7 @@
       },
       "NestHttpError": {
         "type": "object",
-        "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), the admin bearer guard (`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
+        "description": "NestJS's default error envelope, returned where the framework answers instead of the engine: request validation (`400`, `message` lists each violated rule), and a `500` on the submit and provider-callback routes where a connector adapter fails with a plain error rather than a coded refusal.",
         "required": [
           "statusCode",
           "message"

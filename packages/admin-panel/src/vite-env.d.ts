@@ -4,11 +4,8 @@
 interface ImportMetaEnv {
   readonly VITE_ENGINE_API_BASE_URL?: string;
   readonly VITE_AUTH_ENABLED?: string;
-  readonly VITE_SSO_PROVIDER?: string;
-  readonly VITE_AZURE_CLIENT_ID?: string;
-  readonly VITE_AZURE_TENANT_ID?: string;
-  readonly VITE_AZURE_API_SCOPE?: string;
-  readonly VITE_AZURE_REDIRECT_URI?: string;
+  /** Set by the engine in `/config.js` when Microsoft sign-in is configured; never set at build time. */
+  readonly VITE_AUTH_MICROSOFT_ENABLED?: string;
   /** The engine's own `NODE_ENV`, written into `/config.js` by the engine; never set at build time. */
   readonly VITE_NODE_ENV?: string;
   /** The engine's `ENVIRONMENT_NAME`, written into `/config.js` by the engine; never set at build time. */

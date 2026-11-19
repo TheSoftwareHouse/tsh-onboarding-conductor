@@ -8,7 +8,7 @@ import { API_ENUMS } from './api-enums';
 import { embedJsonSchemaDocument } from './json-schema-components';
 import { toOpenApi31Dialect } from './openapi-dialect';
 import {
-  ADMIN_BEARER_AUTH,
+  ADMIN_SESSION_AUTH,
   API_ERROR_SCHEMA,
   API_TAGS,
   JSON_VALUE_SCHEMA,
@@ -33,18 +33,19 @@ onboardings against them and drives connectors, provider callbacks and client we
 
 - **Onboarding flow.** The end customer's own onboarding. Unauthenticated: the onboarding id is
   the only handle, so treat it as a capability.
-- **Admin.** The operator surface the admin panel is built on. Every operation requires a bearer
-  access token (see *Authentication*).
+- **Admin.** The operator surface the admin panel is built on. Every operation requires an admin
+  session cookie (see *Authentication*).
 - **Provider callbacks.** Where a connector's provider posts an asynchronous result, authenticated
   by the HMAC recipe the connector adapter declares.
 
 ## Authentication
 
-Admin operations carry the \`${ADMIN_BEARER_AUTH}\` security requirement: a Microsoft Entra ID
-access token for the engine's API app registration whose \`roles\` claim holds at least one of the
-configured operator roles. A missing or unverifiable token is answered with \`401\`, a verified token
-without an operator role with \`403\`, and \`503\` says the token could not be judged because Entra's
-signing keys were unreachable. Every decision, granted or refused, is written to the audit log.
+Admin operations carry the \`${ADMIN_SESSION_AUTH}\` security requirement: the httpOnly session
+cookie better-auth sets when an operator signs in under \`/v1/auth\`. A missing or expired session is
+answered with \`401\` \`ADMIN_SESSION_REQUIRED\`; a session whose platform role and active organization role lack the
+permission the route needs with \`403\` \`ADMIN_PERMISSION_MISSING\`; and \`503\` \`AUTH_UNAVAILABLE\` says the
+session could not be judged because the auth store was unreachable. Every decision, granted or
+refused, is written to the audit log.
 
 ## Errors
 
@@ -52,7 +53,7 @@ The engine answers a refusal it owns with \`{ "code", "message" }\`: \`code\` is
 identifier a client should branch on, and each operation lists the codes it can return. Some codes
 add detail properties; the operation's response description names them. Where the framework answers
 instead of the engine, the body is NestJS's own \`{ "statusCode", "message", "error" }\` envelope:
-request validation (\`400\`), the admin bearer guard (\`401\`, \`403\`, \`503\`), and a \`500\` on the
+request validation (\`400\`), and a \`500\` on the
 submit and provider-callback routes, where a connector adapter can fail with a plain error and there
 is no \`code\` to branch on.
 
@@ -87,8 +88,7 @@ const NEST_HTTP_ERROR: SchemaObject = {
   type: 'object',
   description:
     "NestJS's default error envelope, returned where the framework answers instead of the engine: " +
-    'request validation (`400`, `message` lists each violated rule), the admin bearer guard ' +
-    '(`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a ' +
+    'request validation (`400`, `message` lists each violated rule), and a `500` on the submit and provider-callback routes where a ' +
     'connector adapter fails with a plain error rather than a coded refusal.',
   required: ['statusCode', 'message'],
   properties: {
@@ -178,18 +178,17 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     .setDescription(DESCRIPTION)
     .setVersion(readEngineVersion())
     .setLicense('MIT', 'https://opensource.org/licenses/MIT')
-    .addBearerAuth(
+    .addCookieAuth(
+      'better-auth.session_token',
       {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
+        type: 'apiKey',
+        in: 'cookie',
         description:
-          'A Microsoft Entra ID access token issued for the engine API app registration ' +
-          '(`AZURE_API_AUDIENCE`), carrying at least one of the roles in `ADMIN_REQUIRED_ROLES`. ' +
-          'With `ADMIN_AUTH_ENABLED=false`, a local-only setting the engine refuses in production, ' +
-          'the guard is skipped and no token is needed.',
+          'The better-auth session cookie set by `/v1/auth` sign-in (prefixed `__Secure-` over ' +
+          'HTTPS). With `ADMIN_AUTH_ENABLED=false`, a local-only setting the engine refuses in ' +
+          'production, the guard is skipped and no session is needed.',
       },
-      ADMIN_BEARER_AUTH,
+      ADMIN_SESSION_AUTH,
     );
 
   for (const tag of Object.values(API_TAGS)) {

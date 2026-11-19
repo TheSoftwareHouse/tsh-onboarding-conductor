@@ -8,8 +8,8 @@ import { AdminAccessAuditAdapter } from '../audit/admin-access-audit.adapter';
 import { AuditModule } from '../audit/audit.module';
 import { AuditLogEntity } from '../audit/entity/audit-log.entity';
 import { ADMIN_ACCESS_AUDIT } from './admin-access-audit.port';
+import { AdminSessionGuard } from './admin-session.guard';
 import { AuthModule } from './auth.module';
-import { AzureJwtGuard } from './azure-jwt.guard';
 
 /**
  * The guard writes to the audit log and the audit endpoint sits behind the guard, so the two
@@ -47,7 +47,7 @@ describe('AuthModule and AuditModule wiring', () => {
   it('resolves the guard with its audit port despite the module cycle', async () => {
     const moduleRef = await compileRealModules();
 
-    expect(moduleRef.get(AzureJwtGuard, { strict: false })).toBeInstanceOf(AzureJwtGuard);
+    expect(moduleRef.get(AdminSessionGuard, { strict: false })).toBeInstanceOf(AdminSessionGuard);
     expect(moduleRef.get(ADMIN_ACCESS_AUDIT, { strict: false })).toBeInstanceOf(
       AdminAccessAuditAdapter,
     );

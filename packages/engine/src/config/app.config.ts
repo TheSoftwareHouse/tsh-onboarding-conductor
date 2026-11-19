@@ -13,7 +13,6 @@ import {
   validateSync,
 } from 'class-validator';
 
-import { DEFAULT_SSO_PROVIDER, SsoProvider } from '../auth/sso-provider';
 import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-webhook-url.validator';
 import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
 import { parseConnectorCallbackUnsignedTypes } from './connector-callback-unsigned-types.config';
@@ -88,24 +87,9 @@ const VERIFF_TIMEOUT_MS_MAX = 30000;
 
 const CONNECTOR_CALLBACK_UNSIGNED_TYPES_DEFAULT = '';
 
-const MULTI_TENANT_AUTHORITY_PLACEHOLDERS = ['common', 'organizations', 'consumers'];
-
-const ADMIN_REQUIRED_ROLES_DEFAULT = 'admin';
-
-/**
- * Splits the configured app-role allowlist. A caller needs any one of these roles in its token's
- * `roles` claim to reach the admin endpoints.
- */
-export function parseAdminRequiredRoles(value: string | undefined): string[] {
-  if (typeof value !== 'string') {
-    return [];
-  }
-
-  return value
-    .split(',')
-    .map((role) => role.trim())
-    .filter((role) => role !== '');
-}
+const BETTER_AUTH_SECRET_MIN_LENGTH = 32;
+const BETTER_AUTH_HTTP_PROTOCOLS = ['http:', 'https:'];
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const CONNECTOR_MOCKS_DEFAULT = '';
 
@@ -178,69 +162,70 @@ export class AppConfig {
   @TransformTrimString()
   VITE_AUTH_ENABLED?: string;
 
-  @IsString()
-  @IsOptional()
-  @Type(() => String)
-  @TransformTrimString()
-  VITE_SSO_PROVIDER?: string;
-
-  @IsString()
-  @IsOptional()
-  @Type(() => String)
-  @TransformTrimString()
-  VITE_AZURE_CLIENT_ID?: string;
-
-  @IsString()
-  @IsOptional()
-  @Type(() => String)
-  @TransformTrimString()
-  VITE_AZURE_TENANT_ID?: string;
-
-  @IsString()
-  @IsOptional()
-  @Type(() => String)
-  @TransformTrimString()
-  VITE_AZURE_API_SCOPE?: string;
-
-  @IsString()
-  @IsOptional()
-  @Type(() => String)
-  @TransformTrimString()
-  VITE_AZURE_REDIRECT_URI?: string;
-
   @IsBoolean()
   @IsOptional()
   @Type(() => String)
   @TransformBooleanString()
   ADMIN_AUTH_ENABLED: boolean = true;
 
-  /**
-   * Which directory the admin endpoints trust. Only the settings belonging to the selected
-   * provider are required; the others are ignored entirely.
-   */
-  @IsEnum(SsoProvider)
+  /** better-auth's signing and encryption secret. Required with `ADMIN_AUTH_ENABLED=true`; never rendered into the panel. */
+  @IsString()
   @IsOptional()
   @Type(() => String)
-  @TransformProviderName()
-  ADMIN_SSO_PROVIDER: SsoProvider = DEFAULT_SSO_PROVIDER;
+  @TransformTrimString()
+  BETTER_AUTH_SECRET?: string;
+
+  /** The engine's own absolute http(s) URL, the base better-auth builds cookies and redirects from. */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  BETTER_AUTH_URL?: string;
+
+  /** SMTP URL of the mail server carrying invitations and password resets, e.g. `smtp://mailhog:1025`. */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  AUTH_SMTP_URL?: string;
 
   @IsString()
   @IsOptional()
   @Type(() => String)
   @TransformTrimString()
-  AZURE_TENANT_ID?: string;
+  AUTH_MAIL_FROM?: string;
+
+  /** The seed superadmin's credentials; set both or neither. The seed runs only while no superadmin exists. */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  AUTH_SUPERADMIN_EMAIL?: string;
 
   @IsString()
   @IsOptional()
   @Type(() => String)
   @TransformTrimString()
-  AZURE_API_AUDIENCE?: string;
+  AUTH_SUPERADMIN_PASSWORD?: string;
+
+  /** The Microsoft sign-in triple; set all three or none. The secret never reaches the panel. */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  AUTH_MICROSOFT_CLIENT_ID?: string;
 
   @IsString()
   @IsOptional()
   @Type(() => String)
   @TransformTrimString()
-  ADMIN_REQUIRED_ROLES: string = ADMIN_REQUIRED_ROLES_DEFAULT;
+  AUTH_MICROSOFT_CLIENT_SECRET?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  AUTH_MICROSOFT_TENANT_ID?: string;
 
   // Optional override for the `users/` workflow scope. Built-in and fixture
   // workflows ship with the application and are not configurable.
@@ -642,43 +627,11 @@ export function validateConfig(config: Record<string, unknown>) {
     parseEncryptionKey(validatedConfig.ENCRYPTION_KEY);
   }
 
-  if (validatedConfig.ADMIN_AUTH_ENABLED) {
-    // Each provider demands its own settings, so only the selected one's are checked. A provider
-    // added later gets its own branch here and leaves the rules below untouched.
-    if (validatedConfig.ADMIN_SSO_PROVIDER === SsoProvider.AZURE) {
-      const tenantId = validatedConfig.AZURE_TENANT_ID?.trim();
-      if (!tenantId) {
-        throw new Error('AZURE_TENANT_ID is required when ADMIN_AUTH_ENABLED=true');
-      }
+  validateBetterAuthConfig(validatedConfig);
 
-      // The accepted issuer is derived from the tenant id, so a multi-tenant placeholder would
-      // widen the trust boundary to every Entra directory instead of pinning it to ours.
-      if (MULTI_TENANT_AUTHORITY_PLACEHOLDERS.includes(tenantId.toLowerCase())) {
-        throw new Error(
-          `AZURE_TENANT_ID must be a concrete directory (tenant) id, not '${tenantId}'`,
-        );
-      }
-
-      const audience = validatedConfig.AZURE_API_AUDIENCE?.trim();
-      if (!audience) {
-        throw new Error('AZURE_API_AUDIENCE is required when ADMIN_AUTH_ENABLED=true');
-      }
-
-      validatedConfig.AZURE_TENANT_ID = tenantId;
-      validatedConfig.AZURE_API_AUDIENCE = audience;
-    }
-
-    const requiredRoles = parseAdminRequiredRoles(validatedConfig.ADMIN_REQUIRED_ROLES);
-    if (requiredRoles.length === 0) {
-      throw new Error(
-        'ADMIN_REQUIRED_ROLES must name at least one Entra app role when ADMIN_AUTH_ENABLED=true',
-      );
-    }
-
-    validatedConfig.ADMIN_REQUIRED_ROLES = requiredRoles.join(',');
-  } else if (validatedConfig.NODE_ENV === NodeEnv.PRODUCTION) {
+  if (!validatedConfig.ADMIN_AUTH_ENABLED && validatedConfig.NODE_ENV === NodeEnv.PRODUCTION) {
     // The flag is a local escape hatch, and `.env.dist` ships it as false so a fresh clone runs
-    // without an Entra tenant. A production `.env` copied from that sample would silently carry it
+    // without a better-auth setup. A production `.env` copied from that sample would silently carry it
     // over and serve onboarding data with no credential demanded. Refusing to start makes that omission loud
     // rather than leaving an `auth.access_unauthenticated` row as the only trace.
     throw new Error(
@@ -696,6 +649,66 @@ export function validateConfig(config: Record<string, unknown>) {
   }
 
   return validatedConfig;
+}
+
+/**
+ * Blank counts as unset: Compose forwards an unset `.env` entry as an empty string. The partial
+ * pair and triple are refused even while admin auth is off, so a typo surfaces where it is written
+ * rather than the day auth is switched on.
+ */
+function validateBetterAuthConfig(config: AppConfig): void {
+  if (config.ADMIN_AUTH_ENABLED) {
+    for (const name of [
+      'BETTER_AUTH_SECRET',
+      'BETTER_AUTH_URL',
+      'AUTH_SMTP_URL',
+      'AUTH_MAIL_FROM',
+    ] as const) {
+      if (!config[name]) {
+        throw new Error(`${name} is required when ADMIN_AUTH_ENABLED=true`);
+      }
+    }
+
+    if (config.BETTER_AUTH_SECRET!.length < BETTER_AUTH_SECRET_MIN_LENGTH) {
+      throw new Error(
+        `BETTER_AUTH_SECRET must be at least ${BETTER_AUTH_SECRET_MIN_LENGTH} characters`,
+      );
+    }
+
+    if (!isAbsoluteHttpUrl(config.BETTER_AUTH_URL!)) {
+      throw new Error('BETTER_AUTH_URL must be an absolute http(s) URL');
+    }
+  }
+
+  if (Boolean(config.AUTH_SUPERADMIN_EMAIL) !== Boolean(config.AUTH_SUPERADMIN_PASSWORD)) {
+    throw new Error('AUTH_SUPERADMIN_EMAIL and AUTH_SUPERADMIN_PASSWORD must be set together');
+  }
+
+  const microsoft = [
+    config.AUTH_MICROSOFT_CLIENT_ID,
+    config.AUTH_MICROSOFT_CLIENT_SECRET,
+    config.AUTH_MICROSOFT_TENANT_ID,
+  ];
+
+  if (microsoft.some(Boolean) && !microsoft.every(Boolean)) {
+    throw new Error(
+      'AUTH_MICROSOFT_CLIENT_ID, AUTH_MICROSOFT_CLIENT_SECRET and AUTH_MICROSOFT_TENANT_ID must be set together',
+    );
+  }
+
+  // `common`, `organizations` and `consumers` fail here too: only a concrete directory pins the
+  // accepted issuer to ours.
+  if (config.AUTH_MICROSOFT_TENANT_ID && !GUID_PATTERN.test(config.AUTH_MICROSOFT_TENANT_ID)) {
+    throw new Error('AUTH_MICROSOFT_TENANT_ID must be a concrete tenant GUID');
+  }
+}
+
+function isAbsoluteHttpUrl(value: string): boolean {
+  try {
+    return BETTER_AUTH_HTTP_PROTOCOLS.includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
 }
 
 function TransformBooleanString() {
@@ -716,15 +729,6 @@ function TransformBooleanString() {
 
     return value;
   });
-}
-
-/**
- * Provider names are matched case-insensitively, the same way the admin panel reads
- * `VITE_SSO_PROVIDER`, so the two sides cannot be configured with the same value yet disagree
- * about whether it is valid.
- */
-function TransformProviderName() {
-  return Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value));
 }
 
 function TransformTrimString() {

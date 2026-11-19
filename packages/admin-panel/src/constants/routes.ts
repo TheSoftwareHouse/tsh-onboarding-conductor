@@ -13,6 +13,7 @@
 
 const ONBOARDINGS_ROOT = '/onboardings';
 const WORKFLOWS_ROOT = '/workflows';
+const PLATFORM_ROOT = '/platform';
 
 export const ADMIN_ROUTES = {
   onboardings: {
@@ -38,5 +39,22 @@ export const ADMIN_ROUTES = {
   },
   encryption: {
     root: '/encryption',
+  },
+  organization: {
+    root: '/organization',
+  },
+  /** The signed-in operator's own settings. */
+  account: {
+    root: '/account',
+  },
+  /** Superadmin-only pages. */
+  platform: {
+    users: `${PLATFORM_ROOT}/users`,
+    organizations: `${PLATFORM_ROOT}/organizations`,
+  },
+  /** Reached from the mailed invitation link, so it renders without a session. */
+  acceptInvitation: {
+    /** Pattern the router matches on. Not a path — `:invitationId` is a placeholder. */
+    pattern: '/accept-invitation/:invitationId',
   },
 } as const;

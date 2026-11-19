@@ -20,7 +20,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { AdminRoute } from '../auth/admin-route.decorator';
-import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
+import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/admin-session.guard';
 import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-responses.decorator';
 import { API_TAGS, WORKFLOW_DOCUMENT_SCHEMA, schemaRef } from '../openapi/openapi.constants';
 import { ALL_SELECTION_SCOPE, VERSION_SELECTION_SCOPE } from './domain/connector-selection';
@@ -109,7 +109,7 @@ export class WorkflowsController {
    */
   @Post('compile')
   @HttpCode(200)
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'read' })
   @ApiOperation({
     operationId: 'compileWorkflow',
     summary: 'Compile a workflow document (dry run)',
@@ -143,7 +143,7 @@ export class WorkflowsController {
   }
 
   @Post('/')
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'write' })
   @ApiOperation({
     operationId: 'createWorkflowDraft',
     summary: 'Create a workflow draft',
@@ -168,11 +168,11 @@ export class WorkflowsController {
     @Body(new RawWorkflowDocumentPipe()) document: unknown,
     @Req() request: AdminAuthenticatedRequest,
   ): Promise<AdminWorkflowDraftResponseDto> {
-    return this.workflowDraftsService.create(document, resolveOperatorId(request.adminTokenClaims));
+    return this.workflowDraftsService.create(document, resolveOperatorId(request.adminSession));
   }
 
   @Get('/')
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'read' })
   @ApiOperation({
     operationId: 'listAdminWorkflows',
     summary: 'List workflows',
@@ -190,7 +190,7 @@ export class WorkflowsController {
   }
 
   @Get(':workflowId')
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'read' })
   @ApiOperation({
     operationId: 'getWorkflow',
     summary: 'Read a workflow definition',
@@ -212,7 +212,7 @@ export class WorkflowsController {
   }
 
   @Get(':workflowId/versions')
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'read' })
   @ApiOperation({
     operationId: 'listAdminWorkflowVersions',
     summary: "List a workflow's versions",
@@ -237,7 +237,7 @@ export class WorkflowsController {
   }
 
   @Get(':workflowId/versions/:version')
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'read' })
   @ApiOperation({
     operationId: 'getWorkflowVersion',
     summary: 'Read one version of a workflow definition',
@@ -279,7 +279,7 @@ export class WorkflowsController {
   }
 
   @Get(':workflowId/versions/:version/document')
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'read' })
   @ApiOperation({
     operationId: 'getWorkflowVersionDocument',
     summary: "Read a version's document",
@@ -301,7 +301,7 @@ export class WorkflowsController {
   }
 
   @Put(':workflowId/versions/:version')
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'write' })
   @ApiOperation({
     operationId: 'updateWorkflowDraft',
     summary: 'Replace a draft',
@@ -338,13 +338,13 @@ export class WorkflowsController {
       workflowId,
       version,
       document,
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
   }
 
   @Post(':workflowId/versions/:version/publish')
   @HttpCode(200)
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'publish' })
   @ApiOperation({
     operationId: 'publishWorkflowDraft',
     summary: 'Publish a draft',
@@ -380,13 +380,13 @@ export class WorkflowsController {
     return this.workflowDraftsService.publish(
       workflowId,
       version,
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
   }
 
   @Delete(':workflowId/versions/:version')
   @HttpCode(204)
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'write' })
   @ApiOperation({
     operationId: 'deleteWorkflowDraft',
     summary: 'Delete a draft',
@@ -410,12 +410,12 @@ export class WorkflowsController {
     return this.workflowDraftsService.remove(
       workflowId,
       version,
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
   }
 
   @Put(':workflowId/steps/:stepName/connector')
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'write' })
   @ApiOperation({
     operationId: 'selectWorkflowStepConnector',
     summary: "Bind a step's connector slot to another adapter",
@@ -427,7 +427,7 @@ export class WorkflowsController {
       'targeted version only, nothing is written unless all accept it, and the first to refuse it ' +
       'names itself in `workflowVersion`. Onboardings already parked on the step finish with the ' +
       'provider they started on. The response projects the slot from the target version, or the ' +
-      'highest covered one for `all`. The write is audited under the operator the token ' +
+      'highest covered one for `all`. The write is audited under the operator the session ' +
       'identifies.',
   })
   @ApiParam({
@@ -463,13 +463,13 @@ export class WorkflowsController {
       stepName,
       dto.connectorId,
       toSelectionTarget(dto),
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
   }
 
   @Delete(':workflowId/steps/:stepName/connector')
   @HttpCode(204)
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'write' })
   @ApiOperation({
     operationId: 'clearWorkflowStepConnector',
     summary: "Return a step's connector slot to its authored adapter",
@@ -477,7 +477,7 @@ export class WorkflowsController {
       'Drops the stored binding on one published version (`scope: version`) or on every ' +
       'non-retired published version that declares the step (`scope: all`), so they run the ' +
       'connector their document authored. Bindings on retired versions are kept. Clearing a step ' +
-      'with no binding succeeds. The write is audited under the operator the token identifies.',
+      'with no binding succeeds. The write is audited under the operator the session identifies.',
   })
   @ApiParam({
     name: 'workflowId',
@@ -507,7 +507,7 @@ export class WorkflowsController {
       workflowId,
       stepName,
       toSelectionTarget(query),
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
   }
 }

@@ -254,7 +254,9 @@ function createTrafficLog(page: Page) {
   page.on('request', (request) => {
     const url = new URL(request.url());
 
-    if (url.origin !== ENGINE_ORIGIN) {
+    // The sidebar asks better-auth for the session even with the gate off; that is not onboarding
+    // traffic, and this log exists to prove what the table itself requests.
+    if (url.origin !== ENGINE_ORIGIN || url.pathname.startsWith('/v1/auth/')) {
       return;
     }
 
@@ -827,7 +829,11 @@ test.describe.serial('admin onboardings', () => {
       await route.fulfill({
         status: 200,
         contentType: 'text/csv; charset=utf-8',
-        headers: { 'access-control-allow-origin': '*' },
+        // The panel sends its session cookie, so the browser rejects a wildcard origin.
+        headers: {
+          'access-control-allow-origin': APP_URL,
+          'access-control-allow-credentials': 'true',
+        },
         body: EXPORT_CSV_BODY,
       });
     });

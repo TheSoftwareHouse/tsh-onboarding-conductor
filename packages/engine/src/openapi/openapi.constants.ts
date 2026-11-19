@@ -10,8 +10,8 @@
  */
 export const OPENAPI_DOCUMENT_PATH = '/v1/openapi.json';
 
-/** The bearer scheme every admin operation references; `buildOpenApiDocument` registers it. */
-export const ADMIN_BEARER_AUTH = 'entraBearer';
+/** The cookie scheme every admin operation references; `buildOpenApiDocument` registers it. */
+export const ADMIN_SESSION_AUTH = 'adminSession';
 
 /** Components decorators reference by `$ref`; `buildOpenApiDocument` fills each of them in. */
 export const API_ERROR_SCHEMA = 'ApiError';
@@ -47,7 +47,7 @@ export const API_TAGS = {
     name: 'Admin: manual review',
     description:
       "An operator's decision on an onboarding waiting in `awaiting_manual_review`. Behind the " +
-      'same bearer guard as the admin routes: the decision is an operator action, not part of the ' +
+      'same session guard as the admin routes: the decision is an operator action, not part of the ' +
       "end customer's flow.",
   },
   providerCallbacks: {
@@ -62,45 +62,45 @@ export const API_TAGS = {
     description:
       'Operator reads over every onboarding: the paginated list, one record, the states it moved ' +
       'through and the agreements it holds, plus the one write that links a published agreement ' +
-      'version to it. Requires an operator bearer token.',
+      'version to it. Requires an operator session.',
   },
   adminAgreements: {
     name: 'Admin: agreements',
     description:
       'The published versions of every agreement family: publish the next version of one, which ' +
       'links it as pending to every onboarding now behind, and list what has been published. ' +
-      'Requires an operator bearer token.',
+      'Requires an operator session.',
   },
   adminWorkflows: {
     name: 'Admin: workflows',
     description:
       'The workflow catalogue as a reader sees it, a dry compile of a document that stores ' +
       "nothing, and the write that binds a step's connector slot to another adapter. Requires " +
-      'an operator bearer token.',
+      'an operator session.',
   },
   adminStepTypes: {
     name: 'Admin: step types',
     description:
       'The step palette a workflow builder offers and the JSON Schema an authored workflow ' +
-      'document must satisfy. Requires an operator bearer token.',
+      'document must satisfy. Requires an operator session.',
   },
   adminConnectors: {
     name: 'Admin: connectors',
     description:
       'Operator-provided connector settings, including credentials. A secret value never leaves ' +
       'the engine: the read side reports that a secret is set, not what it is. Requires an ' +
-      'operator bearer token.',
+      'operator session.',
   },
   adminAudit: {
     name: 'Admin: audit',
-    description: 'The paginated audit log with its filters. Requires an operator bearer token.',
+    description: 'The paginated audit log with its filters. Requires an operator session.',
   },
   adminEncryption: {
     name: 'Admin: encryption',
     description:
       'Encryption of `onboardings.context`: whether it is on, the key history with derived ' +
       'sweep progress, the switch that turns it on or off, and the write that rotates the key. ' +
-      'A response never carries key material. Requires an operator bearer token.',
+      'A response never carries key material. Requires an operator session.',
   },
 } as const satisfies Record<string, ApiTag>;
 

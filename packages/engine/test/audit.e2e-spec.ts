@@ -996,7 +996,7 @@ describe('Audit transaction slice (e2e)', () => {
   beforeAll(async () => {
     const webhookBaseUrl = await startLocalWebhookServer();
 
-    // This suite sends no Entra ID token; admin auth has its own e2e spec.
+    // This suite sends no admin session; admin auth has its own e2e spec.
     process.env.ADMIN_AUTH_ENABLED = 'false';
     process.env.CLIENT_WEBHOOK_BASE_URL = webhookBaseUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = '150';

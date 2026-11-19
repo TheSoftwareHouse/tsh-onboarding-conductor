@@ -1,41 +1,43 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SSO_PROVIDERS } from '@/services/auth/auth-config';
 import { SignInPage } from './SignInPage';
 
-const { mockedUseMsal, mockedReadAuthConfig } = vi.hoisted(() => ({
-  mockedUseMsal: vi.fn(),
-  mockedReadAuthConfig: vi.fn(),
+const { mockedSocial, mockedSignInEmail, mockedRequestReset, mockedMicrosoftEnabled, mockedToast } =
+  vi.hoisted(() => ({
+    mockedSocial: vi.fn(),
+    mockedSignInEmail: vi.fn(),
+    mockedRequestReset: vi.fn(),
+    mockedMicrosoftEnabled: vi.fn<() => boolean>(),
+    mockedToast: vi.fn(),
+  }));
+
+vi.mock('@/services/auth/auth-client', () => ({
+  authClient: {
+    signIn: { social: mockedSocial, email: mockedSignInEmail },
+    requestPasswordReset: mockedRequestReset,
+  },
 }));
 
-vi.mock('@/services/auth/auth-config', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/services/auth/auth-config')>()),
-  readAuthConfig: mockedReadAuthConfig,
+vi.mock('@/services/auth/auth-config', () => ({
+  isMicrosoftSignInEnabled: mockedMicrosoftEnabled,
 }));
 
-vi.mock('@azure/msal-react', () => ({
-  useMsal: mockedUseMsal,
-}));
+vi.mock('@/components/ui/Toast/toast-manager', () => ({ showSuccessToast: mockedToast }));
 
-const API_SCOPE = 'api://engine-id/Onboardings.Read';
-
-function stubMsal(loginRedirect = vi.fn(() => Promise.resolve())) {
-  mockedUseMsal.mockReturnValue({ instance: { loginRedirect } });
-
-  return loginRedirect;
+async function fillAndSubmit(): Promise<void> {
+  await userEvent.type(screen.getByLabelText(/^Email/), 'anna@tsh.io');
+  await userEvent.type(screen.getByLabelText(/^Password/), 'secret-pass');
+  await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockedReadAuthConfig.mockReturnValue({
-    provider: 'azure',
-    clientId: 'client-id',
-    tenantId: 'tenant-id',
-    apiScope: API_SCOPE,
-  });
-  stubMsal();
+  mockedMicrosoftEnabled.mockReturnValue(true);
+  mockedSocial.mockResolvedValue({});
+  mockedSignInEmail.mockResolvedValue({ data: { user: { twoFactorEnabled: true } }, error: null });
+  mockedRequestReset.mockResolvedValue({ data: {}, error: null });
 });
 
 afterEach(() => {
@@ -43,91 +45,99 @@ afterEach(() => {
 });
 
 describe('SignInPage', () => {
-  it('labels the button for the configured SSO provider', () => {
-    // The label comes from the provider registry rather than being hard-coded, so switching the
-    // panel to another directory does not leave it inviting operators to sign in with Microsoft.
+  it('starts Microsoft sign-in from the button', async () => {
     render(<SignInPage />);
 
-    expect(
-      screen.getByRole('button', { name: SSO_PROVIDERS.azure.signInLabel }),
-    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Sign in with Microsoft/ }));
+
+    expect(mockedSocial).toHaveBeenCalledWith(expect.objectContaining({ provider: 'microsoft' }));
   });
 
-  it('offers sign-in and shows no error before anything has been tried', () => {
+  it('hides the Microsoft button when the engine has no Microsoft sign-in', () => {
+    mockedMicrosoftEnabled.mockReturnValue(false);
+
     render(<SignInPage />);
 
-    expect(screen.getByRole('heading', { name: 'Admin onboardings' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sign in with Microsoft' })).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Microsoft/ })).not.toBeInTheDocument();
   });
 
-  it('renders the title as the page’s single level-1 heading', () => {
-    render(<SignInPage />);
+  it('shows the error handed in', () => {
+    render(<SignInPage error="Session lookup failed" />);
 
-    expect(
-      screen.getByRole('heading', { level: 1, name: 'Admin onboardings' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Session lookup failed');
   });
 
-  it('renders the brand lockup in the header', () => {
-    render(<SignInPage />);
+  it('shows a Microsoft sign-in start failure', async () => {
+    mockedSocial.mockRejectedValue(new Error('popup blocked'));
 
-    expect(
-      within(screen.getByRole('banner')).getByRole('img', { name: 'TSH' }),
-    ).toBeInTheDocument();
+    render(<SignInPage />);
+    await userEvent.click(screen.getByRole('button', { name: /Sign in with Microsoft/ }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('popup blocked');
   });
 
-  it('keeps the trailing arrow out of the button’s accessible name', () => {
+  it('refuses an invalid email without calling the engine', async () => {
     render(<SignInPage />);
 
-    expect(screen.getByRole('button')).toHaveAccessibleName(SSO_PROVIDERS.azure.signInLabel);
+    await userEvent.type(screen.getByLabelText(/^Email/), 'not-an-email');
+    await userEvent.type(screen.getByLabelText(/^Password/), 'x');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(await screen.findByText('Enter a valid email address.')).toBeInTheDocument();
+    expect(mockedSignInEmail).not.toHaveBeenCalled();
   });
 
-  it('requests the engine scope up front so the first data call is served from cache', async () => {
-    // Asking for consent during sign-in avoids a second interactive prompt on the first request.
-    const loginRedirect = stubMsal();
-    render(<SignInPage />);
+  it('signs in with email and password', async () => {
+    const onTwoFactorRequired = vi.fn();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in with Microsoft' }));
-
-    expect(loginRedirect).toHaveBeenCalledWith({ scopes: [API_SCOPE] });
-  });
-
-  it('reports a redirect that could not even be started', async () => {
-    const loginRedirect = vi.fn(() => Promise.reject(new Error('popup blocked')));
-    stubMsal(loginRedirect);
-    render(<SignInPage />);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in with Microsoft' }));
-
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('popup blocked'));
-  });
-
-  it('reports a non-Error rejection without rendering an unhelpful object', async () => {
-    stubMsal(vi.fn(() => Promise.reject('something odd')));
-    render(<SignInPage />);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in with Microsoft' }));
+    render(<SignInPage onTwoFactorRequired={onTwoFactorRequired} />);
+    await fillAndSubmit();
 
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('Sign-in could not be started.'),
+      expect(mockedSignInEmail).toHaveBeenCalledWith({
+        email: 'anna@tsh.io',
+        password: 'secret-pass',
+      }),
     );
+    expect(onTwoFactorRequired).not.toHaveBeenCalled();
   });
 
-  it('shows a failure carried over from an earlier redirect', () => {
-    render(<SignInPage error="Sign-in failed (AADSTS50011): redirect URI mismatch" />);
+  it('hands over to the TOTP challenge on twoFactorRedirect', async () => {
+    mockedSignInEmail.mockResolvedValue({ data: { twoFactorRedirect: true }, error: null });
+    const onTwoFactorRequired = vi.fn();
 
-    expect(screen.getByRole('alert')).toHaveTextContent('AADSTS50011');
+    render(<SignInPage onTwoFactorRequired={onTwoFactorRequired} />);
+    await fillAndSubmit();
+
+    await waitFor(() => expect(onTwoFactorRequired).toHaveBeenCalledTimes(1));
   });
 
-  it('lets a fresh attempt supersede the error the gate handed it', async () => {
-    const loginRedirect = vi.fn(() => Promise.reject(new Error('popup blocked')));
-    stubMsal(loginRedirect);
-    render(<SignInPage error="Sign-in failed (AADSTS50011): redirect URI mismatch" />);
+  it('shows the engine refusal', async () => {
+    mockedSignInEmail.mockResolvedValue({
+      data: null,
+      error: { message: 'Invalid email or password' },
+    });
 
-    await userEvent.click(screen.getByRole('button', { name: 'Sign in with Microsoft' }));
+    render(<SignInPage />);
+    await fillAndSubmit();
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('popup blocked'));
-    expect(screen.getByRole('alert')).not.toHaveTextContent('AADSTS50011');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid email or password');
+  });
+
+  it('requests a password reset link pointing at the reset route', async () => {
+    render(<SignInPage />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Forgot password' }));
+    await userEvent.type(screen.getByLabelText(/^Email/), 'anna@tsh.io');
+    await userEvent.click(screen.getByRole('button', { name: 'Send reset link' }));
+
+    await waitFor(() =>
+      expect(mockedRequestReset).toHaveBeenCalledWith({
+        email: 'anna@tsh.io',
+        redirectTo: `${window.location.origin}/reset-password`,
+      }),
+    );
+    expect(mockedToast).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument();
   });
 });

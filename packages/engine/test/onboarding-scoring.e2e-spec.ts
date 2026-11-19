@@ -77,7 +77,7 @@ describe('Onboarding scoring (e2e)', () => {
   };
 
   beforeAll(async () => {
-    // This suite sends no Entra ID token; admin auth has its own e2e spec.
+    // This suite sends no admin session; admin auth has its own e2e spec.
     process.env.ADMIN_AUTH_ENABLED = 'false';
 
     const { AppModule } = await import('../src/app.module');

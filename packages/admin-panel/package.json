@@ -16,8 +16,6 @@
     "test:e2e:headed": "node e2e/run-direct-engine-playwright.cjs --headed"
   },
   "dependencies": {
-    "@azure/msal-browser": "^5.18.0",
-    "@azure/msal-react": "^5.5.5",
     "@base-ui/react": "1.8.0",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lint": "^6.9.7",
@@ -31,9 +29,11 @@
     "@tsh/ddl-schema": "workspace:*",
     "@xyflow/react": "^12.11.3",
     "axios": "^1.13.1",
+    "better-auth": "1.7.25",
     "clsx": "^2.1.1",
     "codemirror": "^6.0.2",
     "nuqs": "^2.10.1",
+    "qrcode.react": "4.2.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-hook-form": "^7.88.0",

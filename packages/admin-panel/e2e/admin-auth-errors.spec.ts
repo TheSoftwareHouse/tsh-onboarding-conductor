@@ -1,66 +1,67 @@
 import { expect, test, type Page } from '@playwright/test';
-
-const APP_URL = process.env.BASE_URL || 'http://localhost:5174';
-const ENGINE_ONBOARDINGS_ROUTE = '**/v1/onboardings**';
+import {
+  APP_URL,
+  ENGINE_ONBOARDINGS_ROUTE,
+  OPERATOR_EMAIL,
+  VIEWER_EMAIL,
+  signInWithTwoFactor,
+} from './auth-helpers';
 
 /**
- * What the operator is told when the engine refuses the request. Each status calls for a
+ * What the operator is told when the engine refuses an admin request. Each status calls for a
  * different next step — sign in again, ask for a role, or simply wait — and getting these wrong
  * sends someone chasing their own session over an engine-side fault.
  *
- * The suite runs with sign-in disabled, so the refusals are injected at the network boundary
- * rather than produced by Entra. That is deliberate: what is under test is how the panel reports
- * an engine refusal, which is independent of how the token was obtained.
+ * The panel is signed in through the fake engine's real cookie flow; the 401 and 503 refusals are
+ * then injected at the network boundary, because the fake engine only produces them for a missing
+ * or unverifiable session, which the gate would already have caught. What is under test is how the
+ * panel reports a refusal.
  */
-const REFUSALS = [
+const INJECTED_REFUSALS = [
   {
     status: 401,
-    label: 'an expired or unacceptable token',
+    code: 'ADMIN_SESSION_REQUIRED',
+    label: 'an expired session',
     message: 'Your session is no longer accepted by the engine. Sign in again.',
   },
   {
-    status: 403,
-    label: 'an account with no admin role',
-    message: 'Your account is signed in but is not assigned a role that may view onboardings.',
-  },
-  {
     status: 503,
-    label: 'an engine that cannot reach Entra',
+    code: 'ADMIN_VERIFICATION_UNAVAILABLE',
+    label: 'an engine that cannot verify sessions',
     message:
-      'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.',
+      'The sign-in service is unavailable right now. This is not a problem with your account — try again shortly.',
   },
 ] as const;
 
-async function respondWith(page: Page, status: number): Promise<void> {
+const CORS_HEADERS = {
+  'access-control-allow-origin': APP_URL,
+  'access-control-allow-credentials': 'true',
+};
+
+async function respondWith(page: Page, status: number, code: string) {
   await page.route(ENGINE_ONBOARDINGS_ROUTE, async (route) => {
-    if (route.request().method() === 'OPTIONS') {
-      await route.fulfill({
-        status: 204,
-        headers: {
-          'access-control-allow-origin': APP_URL,
-          'access-control-allow-headers': 'authorization,content-type',
-          'access-control-allow-methods': 'GET,OPTIONS',
-        },
-      });
-
-      return;
-    }
-
     await route.fulfill({
       status,
       contentType: 'application/json',
-      headers: { 'access-control-allow-origin': APP_URL },
-      body: JSON.stringify({ message: 'refused' }),
+      headers: CORS_HEADERS,
+      body: JSON.stringify({ statusCode: status, code, message: 'refused' }),
     });
   });
 }
 
-test.describe('admin panel authentication failures', () => {
-  for (const refusal of REFUSALS) {
-    test(`should explain a ${refusal.status} from ${refusal.label}`, async ({ page }) => {
-      await respondWith(page, refusal.status);
+async function signInAsOperatorThenRefuse(page: Page, status: number, code: string) {
+  // Sign in first against the fake engine, then start refusing: the first table load is what the
+  // refusal replaces, so it has to be the next onboarding request.
+  await signInWithTwoFactor(page, OPERATOR_EMAIL);
+  await expect(page.getByRole('table')).toBeVisible();
+  await respondWith(page, status, code);
+  await page.getByRole('button', { name: 'Reload' }).click();
+}
 
-      await page.goto(APP_URL);
+test.describe('admin panel authentication failures @auth-enabled', () => {
+  for (const refusal of INJECTED_REFUSALS) {
+    test(`should explain a ${refusal.status} from ${refusal.label}`, async ({ page }) => {
+      await signInAsOperatorThenRefuse(page, refusal.status, refusal.code);
 
       await expect(page.getByRole('status')).toHaveText(
         `Unable to load onboardings: ${refusal.message}`,
@@ -72,62 +73,35 @@ test.describe('admin panel authentication failures', () => {
     page,
   }) => {
     // The 401/503 distinction only pays off if the 503 message avoids the sign-in advice.
-    await respondWith(page, 503);
-
-    await page.goto(APP_URL);
+    await signInAsOperatorThenRefuse(page, 503, 'ADMIN_VERIFICATION_UNAVAILABLE');
 
     const status = page.getByRole('status');
     await expect(status).toContainText('not a problem with your account');
     await expect(status).not.toContainText('Sign in again');
   });
 
-  test('should show no onboarding table when the engine refuses the request', async ({ page }) => {
-    await respondWith(page, 403);
+  test('should explain a missing admin permission and show no table', async ({ page }) => {
+    // The fake engine answers 403 ADMIN_PERMISSION_MISSING for this account after a full sign-in.
+    await signInWithTwoFactor(page, VIEWER_EMAIL);
 
-    await page.goto(APP_URL);
-
-    await expect(page.getByRole('status')).toContainText('not assigned a role');
+    await expect(page.getByRole('status')).toHaveText(
+      'Unable to load onboardings: Your role in the active organization does not allow viewing onboardings.',
+    );
     await expect(page.getByRole('table')).toHaveCount(0);
   });
 
-  test('should recover once the engine starts accepting the credential again', async ({ page }) => {
-    // A refusal must not be a terminal state: an operator who is granted a role mid-session
-    // should be able to reload rather than restart the panel.
-    let refuse = true;
+  test('should recover once the engine starts accepting the session again', async ({ page }) => {
+    // A refusal must not be a terminal state: an operator who is granted a permission mid-session
+    // should be able to reload rather than sign in again.
+    await signInWithTwoFactor(page, OPERATOR_EMAIL);
+    await expect(page.getByRole('table')).toBeVisible();
+    await respondWith(page, 403, 'ADMIN_PERMISSION_MISSING');
+    await page.getByRole('button', { name: 'Reload' }).click();
+    await expect(page.getByRole('status')).toContainText('does not allow viewing');
 
-    await page.route(ENGINE_ONBOARDINGS_ROUTE, async (route) => {
-      if (route.request().method() === 'OPTIONS') {
-        await route.fulfill({
-          status: 204,
-          headers: {
-            'access-control-allow-origin': APP_URL,
-            'access-control-allow-headers': 'authorization,content-type',
-            'access-control-allow-methods': 'GET,OPTIONS',
-          },
-        });
-
-        return;
-      }
-
-      await route.fulfill({
-        status: refuse ? 403 : 200,
-        contentType: 'application/json',
-        headers: { 'access-control-allow-origin': APP_URL },
-        body: refuse
-          ? JSON.stringify({ message: 'refused' })
-          : JSON.stringify({
-              items: [],
-              meta: { pagination: { page: 1, limit: 100, total: 0, totalPages: 0 } },
-            }),
-      });
-    });
-
-    await page.goto(APP_URL);
-    await expect(page.getByRole('status')).toContainText('not assigned a role');
-
-    refuse = false;
+    await page.unroute(ENGINE_ONBOARDINGS_ROUTE);
     await page.getByRole('button', { name: 'Reload' }).click();
 
-    await expect(page.getByRole('status')).toHaveText('No onboardings were returned.');
+    await expect(page.getByRole('table')).toBeVisible();
   });
 });

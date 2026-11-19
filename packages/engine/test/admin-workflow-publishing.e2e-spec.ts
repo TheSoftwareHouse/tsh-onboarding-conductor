@@ -7,15 +7,10 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
-import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type KeyLike } from 'jose';
 import { FIXTURE_WORKFLOWS_DIR } from '../src/workflows/workflow-roots';
 import { exceptionFactory } from '../src/validation/validation-exception.factory';
 import { startE2eServer } from './e2e-server';
-
-const TENANT_ID = '99999999-9999-9999-9999-999999999999';
-const AUDIENCE = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-const KEY_ID = 'admin-workflow-publishing-signing-key';
-const OPERATOR_OID = '9f3c0000-0000-0000-0000-0000000000ef';
+import { createOperator, deleteOperators, type Operator } from './admin-session.support';
 
 const FAMILY_PREFIX = 'publishing-e2e-';
 const FLOW_ID = `${FAMILY_PREFIX}flow`;
@@ -76,18 +71,11 @@ describe('Admin workflow publishing (e2e)', () => {
   let app: NestExpressApplication | undefined;
   let dataSource: DataSource;
   let usersDir: string;
-  let privateKey: KeyLike;
-  let getKey: ReturnType<typeof createLocalJWKSet>;
-  let token: string;
+  let operator: Operator;
 
   const startApp = async (): Promise<void> => {
     const { AppModule } = await import('../src/app.module');
-    const { ADMIN_TOKEN_VERIFIER } = await import('../src/auth/admin-token-verifier.port');
-    const { AzureTokenVerifier } = await import('../src/auth/azure-token-verifier');
-    const moduleFixture = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(ADMIN_TOKEN_VERIFIER)
-      .useValue(new AzureTokenVerifier({ tenantId: TENANT_ID, audience: AUDIENCE, getKey }))
-      .compile();
+    const moduleFixture = await Test.createTestingModule({ imports: [AppModule] }).compile();
 
     app = moduleFixture.createNestApplication<NestExpressApplication>(undefined, {
       bodyParser: false,
@@ -104,7 +92,7 @@ describe('Admin workflow publishing (e2e)', () => {
   };
 
   const http = () => request(app!.getHttpServer());
-  const authed = (req: request.Test): request.Test => req.set('Authorization', `Bearer ${token}`);
+  const authed = (req: request.Test): request.Test => req.set('Cookie', operator.cookie);
   const createDraft = (body: unknown) =>
     authed(http().post('/v1/admin/workflows')).send(body as object);
   const publishUrl = (id: string, version: number | string) =>
@@ -166,21 +154,11 @@ describe('Admin workflow publishing (e2e)', () => {
   };
 
   beforeAll(async () => {
-    const keyPair = await generateKeyPair('RS256', { extractable: true });
-    privateKey = keyPair.privateKey;
-    const publicJwk = await exportJWK(keyPair.publicKey);
-    getKey = createLocalJWKSet({
-      keys: [{ ...publicJwk, kid: KEY_ID, alg: 'RS256', use: 'sig' }],
-    });
-
     usersDir = mkdtempSync(path.join(tmpdir(), 'engine-workflow-publishing-'));
     writeUsersFile('flow.workflow.json', validDocument(FLOW_ID, 1, 'Publishing E2E file'));
     writeUsersFile('latest.workflow.json', validDocument(LATEST_ID, 3, 'Publishing E2E latest'));
 
     process.env.ADMIN_AUTH_ENABLED = 'true';
-    process.env.AZURE_TENANT_ID = TENANT_ID;
-    process.env.AZURE_API_AUDIENCE = AUDIENCE;
-    process.env.ADMIN_REQUIRED_ROLES = 'admin';
     process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5173';
     process.env.CLIENT_WEBHOOK_BASE_URL = '';
     process.env.WORKFLOWS_USERS_DIR = usersDir;
@@ -190,26 +168,13 @@ describe('Admin workflow publishing (e2e)', () => {
     await stopApp();
     await startApp();
 
-    const { buildEntraIssuer } = await import('../src/auth/azure-token-verifier');
-    token = await new SignJWT({
-      scp: 'Onboardings.Read',
-      oid: OPERATOR_OID,
-      preferred_username: 'workflow.publishing@tsh.io',
-      tid: TENANT_ID,
-      roles: ['admin'],
-    })
-      .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
-      .setSubject('operator-subject')
-      .setIssuer(buildEntraIssuer(TENANT_ID))
-      .setAudience(AUDIENCE)
-      .setIssuedAt()
-      .setExpirationTime('30m')
-      .sign(privateKey);
+    operator = await createOperator(app!, { platformRole: 'superadmin', twoFactor: true });
   });
 
   afterAll(async () => {
     if (dataSource?.isInitialized) {
       await purgeFamilies();
+      await deleteOperators(app!);
     }
 
     await stopApp();
@@ -217,7 +182,7 @@ describe('Admin workflow publishing (e2e)', () => {
     delete process.env.WORKFLOWS_USERS_DIR;
   });
 
-  it('answers 401 without a token', async () => {
+  it('answers 401 without a session', async () => {
     await http().post(publishUrl(FLOW_ID, 1)).expect(401);
   });
 
@@ -271,7 +236,7 @@ describe('Admin workflow publishing (e2e)', () => {
         metadata: { workflowId: FLOW_ID, version: 2 },
       });
       expect(rows[1].metadata).toEqual({ workflowId: FLOW_ID, version: 2 });
-      expect(rows[1].actor_id).toEqual(expect.stringContaining(OPERATOR_OID));
+      expect(rows[1].actor_id).toEqual(operator.userId);
       expect(JSON.stringify(rows[1])).not.toContain('steps');
     });
 

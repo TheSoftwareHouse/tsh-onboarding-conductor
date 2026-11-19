@@ -173,7 +173,7 @@ describe('HttpRequestConnector (e2e)', () => {
     workflowsDir = mkdtempSync(path.join(tmpdir(), 'engine-http-connector-workflows-'));
     writeWorkflow(workflowsDir);
 
-    // This suite sends no Entra ID token; admin auth has its own e2e spec.
+    // This suite sends no admin session; admin auth has its own e2e spec.
     process.env.ADMIN_AUTH_ENABLED = 'false';
     // Sibling suites in this process point this at a live server of their own, so it is reset
     // rather than inherited; everything else comes from .env.
