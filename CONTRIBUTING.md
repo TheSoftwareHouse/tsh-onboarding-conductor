@@ -33,7 +33,8 @@ tool by hand produces confusing failures.
 
 1. **Branch from `main`**, named `<type>/<slug>` using the
    [Conventional Commits](https://www.conventionalcommits.org/) types: `feat`, `fix`, `chore`,
-   `refactor`, `docs`. For example `feat/postal-code-field-type`.
+   `refactor`, `docs`. For example `feat/postal-code-field-type`. The one exception is a release
+   branch, `release/X.Y.Z` (see [Versioning](#versioning)).
 2. **Keep the change small.** One reviewable slice per pull request. A large branch that touches
    several areas is harder to review than three that don't, and it is more likely to sit unmerged.
 3. **Match the surrounding style.** The codebase explains _why_ in comments rather than restating
@@ -60,8 +61,9 @@ tool by hand produces confusing failures.
 ## Versioning
 
 One product version covers the whole monorepo: the root `package.json`, every workspace's and the
-OpenAPI document's `info.version` ([decision 0046](docs/decisions/0046-manual-versioning.md)). A
-merge does not change it; a maintainer bumps it in a pull request of its own.
+OpenAPI document's `info.version` ([decision 0050](docs/decisions/0050-ci-tags-every-release.md)).
+Only a `release/X.Y.Z` pull request changes it, and when that pull request merges, CI tags its merge
+commit `vX.Y.Z` and publishes a GitHub Release. Nobody tags by hand.
 
 ### Changelog
 
@@ -85,18 +87,65 @@ Every pull request adds a line to `CHANGELOG.md`, under `## Unreleased`, in the
 
 ### Bump the version
 
-On an up-to-date branch off `main`:
+A maintainer cuts a release from an up-to-date `main`, on a branch named for the version:
 
 ```bash
-pnpm version:bump patch    # or minor, major, or an explicit version such as 1.0.0
+git switch main && git pull
+git switch -c release/0.2.0
+pnpm version:bump minor    # or patch, major, or an explicit version such as 1.0.0
 ```
 
-The script turns `## Unreleased` into `## X.Y.Z — <today>` above the entries collected so far and
-opens a new, empty `## Unreleased`, writes `X.Y.Z` into every `package.json`, and regenerates the
-OpenAPI document and the documentation site's API pages. It refuses when `## Unreleased` lists no
-change. It does not commit: review the diff and open a pull request titled `chore: release vX.Y.Z`.
+`pnpm version:bump` refuses to run on any branch but `release/<the version it computes>`, and it
+creates no branch. It turns `## Unreleased` into `## X.Y.Z — <today>` above the entries collected so
+far and opens a new, empty `## Unreleased`, writes `X.Y.Z` into every `package.json`, and
+regenerates the OpenAPI document and the documentation site's API pages. It refuses when
+`## Unreleased` lists no change. It does not commit: review the diff, commit it and open a pull
+request titled `chore: release vX.Y.Z`.
+
+- The pull request holds only the files the bump wrote. CI (`pnpm release:check`, which you can run
+  locally) fails a pull request that changes the version from any other branch, from a branch whose
+  name does not match the new version, with a version not above the current one or without its
+  changelog section, with lines left under `## Unreleased` (after a rebase, move them into the
+  release's section), with a file outside the bump's set, or behind `main` —
+  rebase it onto the latest `main` before it merges. A pull request that does not change the
+  version is unaffected.
+- When the pull request merges, the release workflow creates the annotated tag `vX.Y.Z` on its merge
+  commit and a GitHub Release `X.Y.Z` whose notes are that version's changelog section
+  (`pnpm release:notes X.Y.Z` prints them). Features merged meanwhile are never part of the tag.
+- If the run fails, re-run it. Once GitHub no longer offers a re-run, run **Release** by hand from
+  the Actions tab with the release commit (the squash commit of the release pull request). Either
+  way it creates only what is missing; a tag already on another commit fails the run.
 
 While the version is `0.x`, a breaking change bumps the minor; from `1.0.0` on, the major.
+
+### Release setup (admins)
+
+Repository settings and a one-off backfill, none of which live in the repository:
+
+- **Immutable releases:** on (Settings → General → Releases). Once a release is published its tag
+  cannot be moved or deleted and its name cannot be reused; its title and notes stay editable. It
+  covers only releases published after it is switched on, so switch it on before the backfill.
+- **Branch ruleset on `release/**`:** creation restricted to the Maintain and Admin roles.
+- **Branch ruleset on `main`:** require the `changelog` and `release-check` status checks and
+  "Require branches to be up to date before merging". `pull_request` checks do not re-run when
+  `main` advances, so without it a release branch that fell behind can merge on a stale green check.
+- **Backfill, once.** The releases made before tagging have no release pull request to trigger the
+  workflow, so an admin tags them and publishes their GitHub Releases:
+
+```bash
+git tag -a v0.1.0 -m "Release 0.1.0" d412111b
+git tag -a v0.1.1 -m "Release 0.1.1" 62fb9a91
+git tag -a v0.1.2 -m "Release 0.1.2" b139ed73
+git push origin v0.1.0 v0.1.1 v0.1.2
+for version in 0.1.0 0.1.1 0.1.2; do
+  node scripts/release-notes.cjs "$version" > "/tmp/notes-$version.md"
+  gh release create "v$version" --title "$version" --notes-file "/tmp/notes-$version.md" --verify-tag
+done
+```
+
+Nothing restricts who creates a `v*` tag, because a ruleset cannot single out the release workflow:
+never push one by hand outside the backfill. A stray tag fails the release run instead of being
+overwritten.
 
 ## Checks
 

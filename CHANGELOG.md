@@ -9,7 +9,18 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ## Unreleased
 
+### Added
+
+- Release — CI creates an annotated `vX.Y.Z` tag on a merged `release/X.Y.Z` pull request's merge
+  commit and a GitHub Release with that version's changelog section as notes; run by hand with the
+  release commit, it finishes a release whose run failed. `pnpm release:check` fails a pull request
+  that changes the version outside a release branch, lowers it, lacks its changelog section, or
+  leaves a line under `## Unreleased`.
+
 ### Changed
+
+- Release — `pnpm version:bump` refuses to run on any branch but `release/X.Y.Z` for the version it
+  computes.
 
 - **Breaking:** Engine — `POST /v1/onboardings/:id/review/:action`, the manual review decision,
   now requires the same Microsoft Entra ID bearer token as the other admin routes; a caller that
