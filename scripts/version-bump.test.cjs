@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 const { nextVersion, replaceVersion, releaseUnreleased } = require('./version-bump-lib.cjs');
-const { expandGlob, packageFiles } = require('./version-bump.cjs');
+const { expandGlob, packageFiles, releaseFiles } = require('./version-bump.cjs');
 const { changelogChanged } = require('./check-changelog.cjs');
 
 const REPO_ROOT = resolve(__dirname, '..');
@@ -93,5 +93,17 @@ describe('changelogChanged', () => {
   it('passes only when CHANGELOG.md is among the changed files', () => {
     assert.equal(changelogChanged(['CHANGELOG.md', 'package.json']), true);
     assert.equal(changelogChanged(['docs/CHANGELOG.md', 'package.json']), false);
+  });
+});
+
+describe('releaseFiles', () => {
+  it('lists the changelog, every package.json and the OpenAPI document, plus the archive directory', () => {
+    const { files, directories } = releaseFiles();
+    assert.deepEqual(files, [
+      'CHANGELOG.md',
+      ...packageFiles(),
+      'packages/shared/openapi/engine.openapi.json',
+    ]);
+    assert.deepEqual(directories, ['packages/shared/openapi/versions/']);
   });
 });

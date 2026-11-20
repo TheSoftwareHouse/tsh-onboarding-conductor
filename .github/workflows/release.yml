@@ -1,0 +1,117 @@
+name: Release
+
+# Tags and publishes a release when a `release/X.Y.Z` pull request merges (ADR 0050). The release
+# commit is that pull request's merge commit, never whatever main has moved on to, so a feature that
+# merges while a release run is failing or waiting is never tagged. Run it by hand with the release
+# commit to finish a release whose run failed and can no longer be re-run. Every step creates only
+# what is missing: a re-run or a manual run completes a half-done release and never moves a tag.
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Release commit on main (the merge of a release/X.Y.Z pull request)
+        required: true
+        type: string
+
+# The only workflow with write access. A pull request from a fork never reaches the job: it runs only
+# for a merged `release/*` branch of this repository, and only maintainers can create one.
+# Its actions are pinned to commit SHAs: a moved upstream tag must not run with this token.
+permissions:
+  contents: write
+
+# No concurrency group: each run releases its own commit, and a shared group would cancel a pending
+# run when a third one queues.
+jobs:
+  release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/') &&
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the checks need main's ancestry and the release commit's parent.
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      # Values reach the script through env, never interpolated into it. The commit must be on main
+      # and must be the one that changed the version, so a manual run cannot tag a feature commit.
+      - name: Resolve the release commit
+        id: release
+        env:
+          SHA: ${{ github.event.pull_request.merge_commit_sha || inputs.sha }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$SHA" =~ ^[0-9a-f]{7,40}$ ]]; then
+            echo "'$SHA' is not a commit SHA." >&2
+            exit 1
+          fi
+          sha="$(git rev-parse --verify "$SHA^{commit}")"
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "$sha is not on main." >&2
+            exit 1
+          fi
+          version_at() { git show "$1:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version"; }
+          version="$(version_at "$sha")"
+          if [ "$version" = "$(version_at "$sha^")" ]; then
+            echo "$sha does not change the version ($version); it is not a release commit." >&2
+            exit 1
+          fi
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "package.json version '$version' is not X.Y.Z; refusing to tag." >&2
+            exit 1
+          fi
+          git checkout --quiet --detach "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # An existing tag on the release commit is a re-run; on any other commit it is an error, never
+      # something to overwrite.
+      - name: Tag
+        env:
+          SHA: ${{ steps.release.outputs.sha }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          tagged="$(git ls-remote origin "refs/tags/$tag^{}" | cut -f1)"
+          if [ "$tagged" = "$SHA" ]; then
+            echo "$tag already tags $SHA."
+            exit 0
+          fi
+          if [ -n "$tagged" ] || [ -n "$(git ls-remote origin "refs/tags/$tag")" ]; then
+            echo "$tag already exists on another commit ($tagged); not moving it." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Release $VERSION" "$SHA"
+          git push origin "refs/tags/$tag"
+
+      # --verify-tag: without it, gh creates a missing tag from main's head. Run node directly:
+      # `pnpm release:notes` would echo a `$ node ...` line into the notes.
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "Release $tag already exists."
+            exit 0
+          fi
+          node scripts/release-notes.cjs "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$tag" --title "$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --verify-tag
