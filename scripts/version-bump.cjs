@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * Bumps the monorepo's single product version, by hand, in a pull request of its own:
+ * Bumps the monorepo's single product version, on the `release/X.Y.Z` branch for that version, in a
+ * pull request of its own (ADR 0054); on any other branch it refuses before writing anything:
  *   1. turns `CHANGELOG.md`'s `## Unreleased` section into the `## X.Y.Z — <date>` entry;
  *   2. writes X.Y.Z into the root `package.json` and every workspace's;
  *   3. regenerates the OpenAPI document (`info.version` is the engine's version) and the
@@ -17,6 +18,7 @@ const { execFileSync } = require('node:child_process');
 const { existsSync, readdirSync, readFileSync, statSync, writeFileSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 const { nextVersion, replaceVersion, releaseUnreleased } = require('./version-bump-lib.cjs');
+const { releaseBranch, OPENAPI_DOCUMENT, OPENAPI_ARCHIVE } = require('./release-lib.cjs');
 
 const REPO_ROOT = resolve(__dirname, '..');
 const ROOT_PACKAGE = 'package.json';
@@ -60,6 +62,14 @@ function packageFiles() {
   return [ROOT_PACKAGE, ...workspaceGlobs().flatMap(expandGlob)];
 }
 
+/** What a bump commits: the exact files, and directories of which any file counts (the OpenAPI archive). */
+function releaseFiles() {
+  return {
+    files: [CHANGELOG, ...packageFiles(), OPENAPI_DOCUMENT],
+    directories: [OPENAPI_ARCHIVE],
+  };
+}
+
 function pnpm(...args) {
   console.log(`\n$ pnpm ${args.join(' ')}`);
   execFileSync('pnpm', args, { cwd: REPO_ROOT, stdio: 'inherit' });
@@ -72,6 +82,17 @@ function main() {
   }
   const current = JSON.parse(readText(ROOT_PACKAGE)).version;
   const next = nextVersion(current, target);
+
+  const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+  }).trim();
+  if (branch !== releaseBranch(next)) {
+    throw new Error(
+      `Version ${next} is cut on the branch "${releaseBranch(next)}", not "${branch}": ` +
+        `create it from an up-to-date main, then run this again.`,
+    );
+  }
 
   // Every new file text is computed before the first write, so a refusal leaves the tree untouched.
   const isoDate = new Date().toISOString().slice(0, 10);
@@ -99,4 +120,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { workspaceGlobs, expandGlob, packageFiles };
+module.exports = { workspaceGlobs, expandGlob, packageFiles, releaseFiles };

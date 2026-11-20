@@ -34,6 +34,11 @@ One product version covers the whole monorepo. Every pull request adds its line 
   workflow ID, so the fork no longer fails its first publish with `WORKFLOW_SOURCE_KEY_CONFLICT`.
 - Unsaved-changes guard — Leaving a workflow draft with unsaved edits, for another page or another
   version, now asks first; a reload or closing the tab gets the browser's own prompt.
+- Release — CI creates an annotated `vX.Y.Z` tag on a merged `release/X.Y.Z` pull request's merge
+  commit and a GitHub Release with that version's changelog section as notes; run by hand with the
+  release commit, it finishes a release whose run failed. `pnpm release:check` fails a pull request
+  that changes the version outside a release branch, lowers it, lacks its changelog section, or
+  leaves a line under `## Unreleased`.
 
 ### Changed
 
@@ -70,6 +75,8 @@ One product version covers the whole monorepo. Every pull request adds its line 
 - Workflow validation — A failure in one step's connector field mappings, conditions, scoring or
   transitions now carries that step's `path` (`steps[i]`) instead of none, so the admin panel and
   `pnpm workflow:compile` name the step to fix.
+- Release — `pnpm version:bump` refuses to run on any branch but `release/X.Y.Z` for the version it
+  computes.
 - Fonts — The commercial TWK Everett files are no longer in the repository and the typeface is no
   longer referenced. The documentation site and the admin panel ship Inter Tight and JetBrains Mono
   (SIL Open Font License) as their only type.

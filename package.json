@@ -29,6 +29,8 @@
     "skills:evals": "pnpm --filter @tsh/skill-evals run evals",
     "version:bump": "node scripts/version-bump.cjs",
     "changelog:check": "node scripts/check-changelog.cjs",
+    "release:check": "node scripts/check-release.cjs",
+    "release:notes": "node scripts/release-notes.cjs",
     "workflow:validate": "node scripts/validate-workflows.cjs",
     "workflow:compile": "pnpm --filter @tsh/ddl-schema build && node scripts/compile-workflow.cjs",
     "openapi:generate": "pnpm --filter @tsh/ddl-schema build && pnpm --filter @tsh/engine openapi:generate",
