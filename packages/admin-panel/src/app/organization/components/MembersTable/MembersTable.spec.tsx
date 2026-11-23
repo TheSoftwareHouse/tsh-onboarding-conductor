@@ -82,12 +82,6 @@ describe('MembersTable', () => {
     expect(screen.getByRole('combobox', { name: 'Role of ann@tsh.io' })).toHaveValue('admin');
   });
 
-  it('shows an empty message without members', () => {
-    renderTable([]);
-
-    expect(screen.getByText('No members')).toBeInTheDocument();
-  });
-
   it('changes a role and reports it', async () => {
     renderTable();
 

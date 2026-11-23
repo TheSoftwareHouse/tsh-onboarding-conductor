@@ -54,6 +54,19 @@ describe('OrganizationsPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText('Unable to load the organizations: Boom')).toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Unable to load organizations');
+    expect(alert).toHaveTextContent('Boom');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.getByText('create form')).toBeInTheDocument();
+  });
+
+  it('keeps the table and says so when there are no organizations', async () => {
+    vi.mocked(fetchPlatformOrganizations).mockResolvedValue([] as never);
+
+    renderPage();
+
+    expect(await screen.findByText('No organizations yet')).toBeInTheDocument();
+    expect(screen.getByText('organizations: 0')).toBeInTheDocument();
   });
 });

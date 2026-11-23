@@ -19,10 +19,4 @@ describe('OrganizationsTable', () => {
     expect(screen.getByText('Acme')).toBeInTheDocument();
     expect(screen.getByText('acme')).toBeInTheDocument();
   });
-
-  it('shows an empty message without organizations', () => {
-    render(<OrganizationsTable organizations={[]} />);
-
-    expect(screen.getByText('No organizations')).toBeInTheDocument();
-  });
 });

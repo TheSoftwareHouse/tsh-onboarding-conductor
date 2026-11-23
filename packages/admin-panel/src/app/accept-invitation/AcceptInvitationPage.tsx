@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button/Button';
 import { SecretFormField } from '@/components/ui/form/SecretFormField/SecretFormField';
 import { TextFormField } from '@/components/ui/form/TextFormField/TextFormField';
 import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
+import { Loader } from '@/components/ui/Loader/Loader';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { authClient } from '@/services/auth/auth-client';
@@ -142,9 +143,7 @@ export function AcceptInvitationPage(): ReactElement {
           Join the organization
         </Typography>
         {isPending ? (
-          <Typography variant="body-md" className="text-fg-3" role="status">
-            Loading…
-          </Typography>
+          <Loader layout="inline" label="Loading…" />
         ) : session ? (
           <SignedInInvitation invitationId={invitationId} />
         ) : (

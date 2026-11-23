@@ -107,6 +107,32 @@ describe('UsersPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText('Unable to load the users: Boom')).toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Unable to load users');
+    expect(alert).toHaveTextContent('Boom');
+    expect(screen.queryByRole('navigation', { name: 'Users pages' })).not.toBeInTheDocument();
+  });
+
+  it('offers to reset a search that matches nobody', async () => {
+    renderPage();
+    await screen.findByText('users: 1');
+    vi.mocked(fetchPlatformUsers).mockResolvedValue({ users: [], total: 0 } as never);
+
+    await userEvent.type(
+      screen.getByRole('searchbox', { name: 'Search users by email' }),
+      'nobody{Enter}',
+    );
+
+    expect(await screen.findByText('No users match "nobody"')).toBeInTheDocument();
+    vi.mocked(fetchPlatformUsers).mockResolvedValue({
+      users: [{ id: 'u-1', email: 'ann@tsh.io' }],
+      total: 45,
+    } as never);
+    await userEvent.click(screen.getByRole('button', { name: 'Reset search' }));
+
+    await vi.waitFor(() =>
+      expect(fetchPlatformUsers).toHaveBeenLastCalledWith({ search: '', page: 1, pageSize: 20 }),
+    );
+    expect(screen.getByRole('searchbox', { name: 'Search users by email' })).toHaveValue('');
   });
 });

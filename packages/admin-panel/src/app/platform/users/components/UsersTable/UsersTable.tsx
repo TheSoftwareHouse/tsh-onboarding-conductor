@@ -9,7 +9,6 @@ import {
 } from '@/api/platform/platform';
 import { Button } from '@/components/ui/Button/Button';
 import { Chip } from '@/components/ui/Chip/Chip';
-import { EmptyState } from '@/components/ui/EmptyState/EmptyState';
 import { Table, Td, Th } from '@/components/ui/DataTable/DataTable';
 import { Select } from '@/components/ui/Select/Select';
 import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
@@ -71,95 +70,92 @@ export function UsersTable({
   };
 
   return (
-    <>
-      <Table caption="Platform users">
-        <thead>
-          <tr>
-            <Th>Name</Th>
-            <Th>Email</Th>
-            <Th>Role</Th>
-            <Th>Status</Th>
-            <Th align="end">
-              <span className="sr-only">Actions</span>
-            </Th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((user) => {
-            const isLastSuperadmin =
-              isSuperadmin(user) && !user.banned && activeSuperadminCount === 1;
-            const lastSuperadminHint = isLastSuperadmin
-              ? 'The last active superadmin cannot be demoted or banned'
-              : undefined;
+    <Table caption="Platform users">
+      <thead>
+        <tr>
+          <Th>Name</Th>
+          <Th>Email</Th>
+          <Th>Role</Th>
+          <Th>Status</Th>
+          <Th align="end">
+            <span className="sr-only">Actions</span>
+          </Th>
+        </tr>
+      </thead>
+      <tbody>
+        {users.map((user) => {
+          const isLastSuperadmin =
+            isSuperadmin(user) && !user.banned && activeSuperadminCount === 1;
+          const lastSuperadminHint = isLastSuperadmin
+            ? 'The last active superadmin cannot be demoted or banned'
+            : undefined;
 
-            return (
-              <tr key={user.id}>
-                <Td>{user.name}</Td>
-                <Td variant="mono">{user.email}</Td>
-                <Td>
-                  <Select
-                    aria-label={`Role of ${user.email}`}
-                    items={ROLE_ITEMS}
-                    value={(user.role ?? 'user') as PlatformRole}
-                    onValueChange={(role) => handleRoleChange(user, role)}
-                    disabled={isBusy || isLastSuperadmin}
-                  />
-                </Td>
-                <Td>
-                  <Chip tone={user.banned ? 'danger' : 'neutral'}>
-                    {user.banned ? 'Banned' : 'Active'}
-                  </Chip>
-                </Td>
-                <Td variant="end">
-                  <div className="flex justify-end gap-1">
+          return (
+            <tr key={user.id}>
+              <Td>{user.name}</Td>
+              <Td variant="mono">{user.email}</Td>
+              <Td>
+                <Select
+                  aria-label={`Role of ${user.email}`}
+                  items={ROLE_ITEMS}
+                  value={(user.role ?? 'user') as PlatformRole}
+                  onValueChange={(role) => handleRoleChange(user, role)}
+                  disabled={isBusy || isLastSuperadmin}
+                />
+              </Td>
+              <Td>
+                <Chip tone={user.banned ? 'danger' : 'neutral'}>
+                  {user.banned ? 'Banned' : 'Active'}
+                </Chip>
+              </Td>
+              <Td variant="end">
+                <div className="flex justify-end gap-1">
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    aria-label={`Set password of ${user.email}`}
+                    disabled={isBusy}
+                    onClick={() => onSetPassword(user)}
+                  >
+                    Set password
+                  </Button>
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    aria-label={`Revoke sessions of ${user.email}`}
+                    disabled={isBusy}
+                    onClick={() => handleRevoke(user)}
+                  >
+                    Revoke sessions
+                  </Button>
+                  {user.banned ? (
                     <Button
                       variant="quiet"
                       size="sm"
-                      aria-label={`Set password of ${user.email}`}
+                      aria-label={`Unban ${user.email}`}
                       disabled={isBusy}
-                      onClick={() => onSetPassword(user)}
+                      onClick={() => handleUnban(user)}
                     >
-                      Set password
+                      Unban
                     </Button>
+                  ) : (
                     <Button
-                      variant="quiet"
+                      variant="danger"
                       size="sm"
-                      aria-label={`Revoke sessions of ${user.email}`}
-                      disabled={isBusy}
-                      onClick={() => handleRevoke(user)}
+                      aria-label={`Ban ${user.email}`}
+                      title={lastSuperadminHint}
+                      disabled={isBusy || isLastSuperadmin}
+                      onClick={() => handleBan(user)}
                     >
-                      Revoke sessions
+                      Ban
                     </Button>
-                    {user.banned ? (
-                      <Button
-                        variant="quiet"
-                        size="sm"
-                        aria-label={`Unban ${user.email}`}
-                        disabled={isBusy}
-                        onClick={() => handleUnban(user)}
-                      >
-                        Unban
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        aria-label={`Ban ${user.email}`}
-                        title={lastSuperadminHint}
-                        disabled={isBusy || isLastSuperadmin}
-                        onClick={() => handleBan(user)}
-                      >
-                        Ban
-                      </Button>
-                    )}
-                  </div>
-                </Td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </Table>
-      {users.length === 0 && <EmptyState layout="section" title="No users" />}
-    </>
+                  )}
+                </div>
+              </Td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
   );
 }

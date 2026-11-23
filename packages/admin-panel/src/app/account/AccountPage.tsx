@@ -5,7 +5,9 @@ import { accountQueries } from '@/api/account/account-queries';
 import type { AdminPageProps } from '@/lib/admin-page';
 import { Button } from '@/components/ui/Button/Button';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
-import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
+import { EmptyState } from '@/components/ui/EmptyState/EmptyState';
+import { Loader } from '@/components/ui/Loader/Loader';
+import { LoadFailure } from '@/components/ui/LoadFailure/LoadFailure';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { authClient } from '@/services/auth/auth-client';
 import { DisableTwoFactorForm } from './components/DisableTwoFactorForm/DisableTwoFactorForm';
@@ -20,27 +22,30 @@ export function AccountPage({ eyebrow, title }: AdminPageProps): ReactElement {
   const [action, setAction] = useState<TwoFactorAction>(null);
   const isEnabled = session?.user.twoFactorEnabled === true;
 
-  let statusMessage = '';
-  if (!session) {
-    statusMessage = 'Sign-in is off, so there is no account to configure.';
-  } else if (hasPassword.isLoading) {
-    statusMessage = 'Loading account…';
-  } else if (hasPassword.error) {
-    statusMessage = `Unable to load your account: ${hasPassword.error.message}`;
-  }
-
   return (
     <>
       <PageHeader eyebrow={eyebrow} title={title}>
-        <StatusRegion>{statusMessage}</StatusRegion>
-      </PageHeader>
-      <div className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto p-8">
         {session ? (
           <Typography variant="body-md" className="text-fg-3">
             {session.user.email}
           </Typography>
         ) : null}
-        {session && hasPassword.data !== undefined ? (
+      </PageHeader>
+      <div className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto p-8">
+        {!session ? (
+          <EmptyState
+            title="No account to configure"
+            body="Sign-in is off, so there is no signed-in operator."
+          />
+        ) : hasPassword.isPending ? (
+          <Loader label="Loading your account…" />
+        ) : hasPassword.isError ? (
+          <LoadFailure
+            error={hasPassword.error}
+            subject="your account"
+            onRetry={() => hasPassword.refetch()}
+          />
+        ) : (
           <section aria-labelledby="account-two-factor-heading" className="flex flex-col gap-4">
             <Typography
               variant="caps-tiny"
@@ -77,7 +82,7 @@ export function AccountPage({ eyebrow, title }: AdminPageProps): ReactElement {
               </div>
             )}
           </section>
-        ) : null}
+        )}
       </div>
     </>
   );

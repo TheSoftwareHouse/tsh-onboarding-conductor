@@ -65,7 +65,7 @@ describe('OrganizationPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText(/No active organization/)).toBeInTheDocument();
+    expect(await screen.findByText('No active organization')).toBeInTheDocument();
     expect(screen.queryByText('invite form')).not.toBeInTheDocument();
   });
 
@@ -74,6 +74,25 @@ describe('OrganizationPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText('Unable to load the organization: Boom')).toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Unable to load the organization');
+    expect(alert).toHaveTextContent('Boom');
+    expect(screen.queryByText('invite form')).not.toBeInTheDocument();
+  });
+
+  it('shows empty members and invitations under their tables', async () => {
+    vi.mocked(fetchActiveOrganization).mockResolvedValue({
+      id: 'org-1',
+      name: 'Acme',
+      members: [],
+      invitations: [{ id: 'i-2', status: 'accepted' }],
+    } as never);
+
+    renderPage();
+
+    expect(await screen.findByText('No members')).toBeInTheDocument();
+    expect(screen.getByText('members: 0')).toBeInTheDocument();
+    expect(screen.getByText('No pending invitations')).toBeInTheDocument();
+    expect(screen.getByText('invitations: 0')).toBeInTheDocument();
   });
 });
