@@ -17,7 +17,11 @@ import type {
   WorkflowStepPort,
   WorkflowStepTypeDefinition,
 } from '../step-type.port';
-import { COUNTRY_PRESET_NAMES, resolveCountryList } from '../presets/country.preset';
+import {
+  ALPHA_2_PATTERN,
+  COUNTRY_PRESET_NAMES,
+  resolveCountryList,
+} from '../presets/country.preset';
 
 /** Whether the step asks for middle names, and whether an answer is compulsory. */
 const MIDDLE_NAME_MODES = ['optional', 'required', 'omitted'] as const;
@@ -59,7 +63,7 @@ export const identityProfileStepTypeDefinition = {
               type: 'array',
               minItems: 1,
               uniqueItems: true,
-              items: { type: 'string', pattern: '^[A-Z]{2}$' },
+              items: { type: 'string', pattern: ALPHA_2_PATTERN },
             },
           ],
         },

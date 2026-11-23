@@ -4,7 +4,7 @@
 - **Date:** 2026-09-18
 - **Tags:** admin-panel, frontend, forms
 - **Supersedes:** —
-- **Superseded by:** [0035](0035-zod-schemas-for-client-validated-forms.md), its "No resolver" rule only
+- **Superseded by:** [0035](0035-zod-schemas-for-client-validated-forms.md), its "No resolver" rule only; [0051](0051-admin-panel-graph-workflow-editor.md), for the graph editor's inspector forms only
 
 ## Decision
 
