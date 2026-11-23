@@ -4,7 +4,6 @@ import { DEFAULT_PAGE_SIZE, type PageSize } from '@/lib/pagination';
 import type { AdminOnboardingsSearchValues } from './admin-onboardings-search-params';
 import { trimmedOrNull } from '@/lib/search-params';
 
-export const WORKFLOW_VERSION_ERROR_MESSAGE = 'Enter a whole number greater than zero.';
 export const PENDING_CONNECTOR_ERROR_MESSAGE =
   'Enter a connector id: lowercase letters, digits and underscores, starting with a letter.';
 export const PARKED_BEFORE_ERROR_MESSAGE = 'Enter a valid date and time.';
@@ -55,12 +54,6 @@ export function isValidWorkflowVersion(value: string): boolean {
   return POSITIVE_INTEGER_PATTERN.test(value) && Number(value) > 0;
 }
 
-/** Whether the drafted workflow version can be requested; blank names no criterion, so it counts too. */
-export function isRequestableWorkflowVersion(value: string): boolean {
-  const version = trimmedOrNull(value);
-  return version === null || isValidWorkflowVersion(version);
-}
-
 /** True for a connector id the endpoint accepts. Shared with the URL parser for the same reason as the version. */
 export function isValidConnectorId(value: string): boolean {
   return value.length <= PENDING_CONNECTOR_ID_MAX_LENGTH && CONNECTOR_ID_PATTERN.test(value);
@@ -85,8 +78,7 @@ export function isRequestableParkedBefore(value: string): boolean {
 }
 
 /** The drafted criteria the endpoint can refuse, so the panel marks only the offending control. */
-export type AdminOnboardingRefusableField =
-  'workflowVersion' | 'pendingConnectorId' | 'parkedBefore';
+export type AdminOnboardingRefusableField = 'pendingConnectorId' | 'parkedBefore';
 
 /** The refused criterion and why, or null when every drafted value can be requested. */
 export interface AdminOnboardingDraftError {
@@ -101,10 +93,6 @@ export interface AdminOnboardingDraftError {
 export function findDraftError(
   filters: AdminOnboardingDraftFilters,
 ): AdminOnboardingDraftError | null {
-  if (!isRequestableWorkflowVersion(filters.workflowVersion)) {
-    return { field: 'workflowVersion', message: WORKFLOW_VERSION_ERROR_MESSAGE };
-  }
-
   if (!isRequestableConnectorId(filters.pendingConnectorId)) {
     return { field: 'pendingConnectorId', message: PENDING_CONNECTOR_ERROR_MESSAGE };
   }

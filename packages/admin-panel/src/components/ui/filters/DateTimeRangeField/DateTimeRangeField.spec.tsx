@@ -9,12 +9,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+async function pick(option: string): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('combobox', { name: 'Occurred' }));
+  await user.click(await screen.findByRole('option', { name: option }));
+}
+
 const ALL_TIME: DateTimeRange = { period: '', from: '', to: '' };
 
 function renderRange(
   value: DateTimeRange = ALL_TIME,
   onChange: (range: DateTimeRange) => void = vi.fn(),
   disabled = false,
+  invalid = false,
 ): void {
   render(
     <DateTimeRangeField
@@ -24,6 +31,7 @@ function renderRange(
       toName="occurredTo"
       value={value}
       disabled={disabled}
+      invalid={invalid}
       onChange={onChange}
     />,
   );
@@ -33,14 +41,14 @@ describe('DateTimeRangeField', () => {
   it('is reachable by the label the criterion is named after', () => {
     renderRange();
 
-    expect(screen.getByLabelText('Occurred')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Occurred' })).toBeInTheDocument();
   });
 
   it('commits the period itself rather than an instant resolved from it', async () => {
     const onChange = vi.fn();
     renderRange(ALL_TIME, onChange);
 
-    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'Last 7 days');
+    await pick('Last 7 days');
 
     expect(onChange).toHaveBeenLastCalledWith({ period: '7d', from: '', to: '' });
   });
@@ -50,7 +58,7 @@ describe('DateTimeRangeField', () => {
     vi.setSystemTime(new Date('2026-09-11T12:00:30.000Z'));
     renderRange({ period: '1h', from: '', to: '' });
 
-    expect(screen.getByLabelText('Occurred')).toHaveValue('1h');
+    expect(screen.getByRole('combobox', { name: 'Occurred' })).toHaveTextContent('Last hour');
 
     // The window is stated as a period, so no amount of elapsed time can make the control
     // disagree with it - this is what used to drift onto `Custom range…` after a minute.
@@ -58,7 +66,7 @@ describe('DateTimeRangeField', () => {
     cleanup();
     renderRange({ period: '1h', from: '', to: '' });
 
-    expect(screen.getByLabelText('Occurred')).toHaveValue('1h');
+    expect(screen.getByRole('combobox', { name: 'Occurred' })).toHaveTextContent('Last hour');
     expect(screen.queryByLabelText('From')).not.toBeInTheDocument();
   });
 
@@ -66,7 +74,7 @@ describe('DateTimeRangeField', () => {
     const onChange = vi.fn();
     renderRange({ period: '24h', from: '', to: '' }, onChange);
 
-    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'All time');
+    await pick('All time');
 
     expect(onChange).toHaveBeenLastCalledWith(ALL_TIME);
   });
@@ -75,7 +83,7 @@ describe('DateTimeRangeField', () => {
     const onChange = vi.fn();
     renderRange({ period: 'custom', from: '2026-07-01T09:00', to: '2026-07-02T09:00' }, onChange);
 
-    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'Last hour');
+    await pick('Last hour');
 
     expect(onChange).toHaveBeenLastCalledWith({ period: '1h', from: '', to: '' });
   });
@@ -86,7 +94,7 @@ describe('DateTimeRangeField', () => {
 
     expect(screen.queryByLabelText('From')).not.toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'Custom range…');
+    await pick('Custom range…');
 
     expect(onChange).toHaveBeenLastCalledWith({ period: 'custom', from: '', to: '' });
   });
@@ -94,7 +102,7 @@ describe('DateTimeRangeField', () => {
   it('shows the bounds whenever the window is a custom one', () => {
     renderRange({ period: 'custom', from: '2026-07-01T09:00', to: '' });
 
-    expect(screen.getByLabelText('Occurred')).toHaveValue('custom');
+    expect(screen.getByRole('combobox', { name: 'Occurred' })).toHaveTextContent('Custom range…');
     expect(screen.getByLabelText('From')).toBeInTheDocument();
     expect(screen.getByLabelText('To')).toBeInTheDocument();
   });
@@ -115,6 +123,12 @@ describe('DateTimeRangeField', () => {
   it('disables the select while the list is loading', () => {
     renderRange(ALL_TIME, vi.fn(), true);
 
-    expect(screen.getByLabelText('Occurred')).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Occurred' })).toBeDisabled();
+  });
+
+  it('marks the period picker invalid when the window is refused', () => {
+    renderRange(ALL_TIME, vi.fn(), false, true);
+
+    expect(screen.getByRole('combobox', { name: 'Occurred' })).toBeInvalid();
   });
 });

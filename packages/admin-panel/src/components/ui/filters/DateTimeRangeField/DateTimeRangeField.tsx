@@ -1,4 +1,4 @@
-import type { ChangeEvent, ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import {
   CUSTOM_PERIOD,
   DATE_TIME_PERIODS,
@@ -6,9 +6,14 @@ import {
   type DateTimeRangePeriod,
 } from '@/lib/datetime-period';
 import { resolveLocalTimeZoneName } from '@/lib/datetime-local';
-import { input } from '@/components/ui/Input/Input';
+import { Select, type SelectItem } from '@/components/ui/Select/Select';
 import { DateTimePickerField } from '../DateTimePickerField/DateTimePickerField';
 import { FilterField } from '../FilterField';
+
+const PERIOD_ITEMS: readonly SelectItem<Exclude<DateTimeRangePeriod, ''>>[] = [
+  ...DATE_TIME_PERIODS.map((period) => ({ value: period, label: describeDateTimePeriod(period) })),
+  { value: CUSTOM_PERIOD, label: 'Custom range…' },
+];
 
 /** A window: either a relative period, or the two absolute bounds `custom` carries — never both. */
 export interface DateTimeRange {
@@ -55,8 +60,8 @@ export function DateTimeRangeField({
   const selectId = `${idPrefix}-period`;
   const custom = value.period === CUSTOM_PERIOD;
 
-  const handlePeriodChange = (event: ChangeEvent<HTMLSelectElement>): void => {
-    const period = event.target.value as DateTimeRangePeriod;
+  const handlePeriodChange = (next: Exclude<DateTimeRangePeriod, ''> | null): void => {
+    const period = next ?? '';
 
     // `Custom range…` keeps whatever bounds are already entered, so reaching it costs nothing;
     // every other choice is a period, which clears them.
@@ -69,24 +74,18 @@ export function DateTimeRangeField({
 
   return (
     <FilterField controlId={selectId} label={label}>
-      <select
+      <Select
         id={selectId}
         name={selectId}
+        font="text"
+        anyOptionLabel="All time"
+        items={PERIOD_ITEMS}
+        value={value.period === '' ? null : value.period}
+        onValueChange={handlePeriodChange}
         aria-describedby={describedBy}
         aria-invalid={invalid}
         disabled={disabled}
-        value={value.period}
-        onChange={handlePeriodChange}
-        className={input()}
-      >
-        <option value="">All time</option>
-        {DATE_TIME_PERIODS.map((period) => (
-          <option key={period} value={period}>
-            {describeDateTimePeriod(period)}
-          </option>
-        ))}
-        <option value={CUSTOM_PERIOD}>Custom range…</option>
-      </select>
+      />
       {timeZone.length > 0 && <span className="text-caps-tiny text-fg-4">{timeZone}</span>}
       {custom && (
         <div className="flex flex-wrap gap-2">
