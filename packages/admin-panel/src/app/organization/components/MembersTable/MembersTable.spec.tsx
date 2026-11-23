@@ -85,7 +85,7 @@ describe('MembersTable', () => {
   it('shows an empty message without members', () => {
     renderTable([]);
 
-    expect(screen.getByText('No members.')).toBeInTheDocument();
+    expect(screen.getByText('No members')).toBeInTheDocument();
   });
 
   it('changes a role and reports it', async () => {

@@ -7,7 +7,8 @@ import {
   type OrganizationRole,
 } from '@/api/organization/organization';
 import { Button } from '@/components/ui/Button/Button';
-import { Table, TableEmptyRow, Td, Th } from '@/components/ui/DataTable/DataTable';
+import { EmptyState } from '@/components/ui/EmptyState/EmptyState';
+import { Table, Td, Th } from '@/components/ui/DataTable/DataTable';
 import { Select } from '@/components/ui/Select/Select';
 import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
 
@@ -42,22 +43,20 @@ export function MembersTable({ members }: MembersTableProps): ReactElement {
   };
 
   return (
-    <Table caption="Organization members">
-      <thead>
-        <tr>
-          <Th>Name</Th>
-          <Th>Email</Th>
-          <Th>Role</Th>
-          <Th align="end">
-            <span className="sr-only">Actions</span>
-          </Th>
-        </tr>
-      </thead>
-      <tbody>
-        {members.length === 0 ? (
-          <TableEmptyRow colSpan={4}>No members.</TableEmptyRow>
-        ) : (
-          members.map((member) => (
+    <>
+      <Table caption="Organization members">
+        <thead>
+          <tr>
+            <Th>Name</Th>
+            <Th>Email</Th>
+            <Th>Role</Th>
+            <Th align="end">
+              <span className="sr-only">Actions</span>
+            </Th>
+          </tr>
+        </thead>
+        <tbody>
+          {members.map((member) => (
             <tr key={member.id}>
               <Td>{member.user.name}</Td>
               <Td variant="mono">{member.user.email}</Td>
@@ -82,9 +81,10 @@ export function MembersTable({ members }: MembersTableProps): ReactElement {
                 </Button>
               </Td>
             </tr>
-          ))
-        )}
-      </tbody>
-    </Table>
+          ))}
+        </tbody>
+      </Table>
+      {members.length === 0 && <EmptyState layout="section" title="No members" />}
+    </>
   );
 }

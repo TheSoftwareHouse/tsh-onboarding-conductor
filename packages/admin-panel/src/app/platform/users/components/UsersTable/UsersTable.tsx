@@ -9,7 +9,8 @@ import {
 } from '@/api/platform/platform';
 import { Button } from '@/components/ui/Button/Button';
 import { Chip } from '@/components/ui/Chip/Chip';
-import { Table, TableEmptyRow, Td, Th } from '@/components/ui/DataTable/DataTable';
+import { EmptyState } from '@/components/ui/EmptyState/EmptyState';
+import { Table, Td, Th } from '@/components/ui/DataTable/DataTable';
 import { Select } from '@/components/ui/Select/Select';
 import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
 
@@ -70,23 +71,21 @@ export function UsersTable({
   };
 
   return (
-    <Table caption="Platform users">
-      <thead>
-        <tr>
-          <Th>Name</Th>
-          <Th>Email</Th>
-          <Th>Role</Th>
-          <Th>Status</Th>
-          <Th align="end">
-            <span className="sr-only">Actions</span>
-          </Th>
-        </tr>
-      </thead>
-      <tbody>
-        {users.length === 0 ? (
-          <TableEmptyRow colSpan={5}>No users.</TableEmptyRow>
-        ) : (
-          users.map((user) => {
+    <>
+      <Table caption="Platform users">
+        <thead>
+          <tr>
+            <Th>Name</Th>
+            <Th>Email</Th>
+            <Th>Role</Th>
+            <Th>Status</Th>
+            <Th align="end">
+              <span className="sr-only">Actions</span>
+            </Th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.map((user) => {
             const isLastSuperadmin =
               isSuperadmin(user) && !user.banned && activeSuperadminCount === 1;
             const lastSuperadminHint = isLastSuperadmin
@@ -157,9 +156,10 @@ export function UsersTable({
                 </Td>
               </tr>
             );
-          })
-        )}
-      </tbody>
-    </Table>
+          })}
+        </tbody>
+      </Table>
+      {users.length === 0 && <EmptyState layout="section" title="No users" />}
+    </>
   );
 }

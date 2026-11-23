@@ -54,7 +54,7 @@ describe('InvitationsTable', () => {
   it('shows an empty message without invitations', () => {
     renderTable([]);
 
-    expect(screen.getByText('No pending invitations.')).toBeInTheDocument();
+    expect(screen.getByText('No pending invitations')).toBeInTheDocument();
   });
 
   it('cancels an invitation and reports it', async () => {

@@ -3,7 +3,8 @@ import { useMutation } from '@tanstack/react-query';
 import { organizationMutations } from '@/api/organization/organization-mutations';
 import type { OrganizationInvitation } from '@/api/organization/organization';
 import { Button } from '@/components/ui/Button/Button';
-import { Table, TableEmptyRow, Td, Th } from '@/components/ui/DataTable/DataTable';
+import { EmptyState } from '@/components/ui/EmptyState/EmptyState';
+import { Table, Td, Th } from '@/components/ui/DataTable/DataTable';
 import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
 
 export interface InvitationsTableProps {
@@ -23,22 +24,20 @@ export function InvitationsTable({ invitations }: InvitationsTableProps): ReactE
   };
 
   return (
-    <Table caption="Pending invitations">
-      <thead>
-        <tr>
-          <Th>Email</Th>
-          <Th>Role</Th>
-          <Th>Expires</Th>
-          <Th align="end">
-            <span className="sr-only">Actions</span>
-          </Th>
-        </tr>
-      </thead>
-      <tbody>
-        {invitations.length === 0 ? (
-          <TableEmptyRow colSpan={4}>No pending invitations.</TableEmptyRow>
-        ) : (
-          invitations.map((invitation) => (
+    <>
+      <Table caption="Pending invitations">
+        <thead>
+          <tr>
+            <Th>Email</Th>
+            <Th>Role</Th>
+            <Th>Expires</Th>
+            <Th align="end">
+              <span className="sr-only">Actions</span>
+            </Th>
+          </tr>
+        </thead>
+        <tbody>
+          {invitations.map((invitation) => (
             <tr key={invitation.id}>
               <Td variant="mono">{invitation.email}</Td>
               <Td>{invitation.role}</Td>
@@ -55,9 +54,10 @@ export function InvitationsTable({ invitations }: InvitationsTableProps): ReactE
                 </Button>
               </Td>
             </tr>
-          ))
-        )}
-      </tbody>
-    </Table>
+          ))}
+        </tbody>
+      </Table>
+      {invitations.length === 0 && <EmptyState layout="section" title="No pending invitations" />}
+    </>
   );
 }
