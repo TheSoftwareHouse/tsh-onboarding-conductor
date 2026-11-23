@@ -381,8 +381,13 @@ async function respondToDraftRoute(request, response, pathname) {
   }
 
   const workflowId = decodeURIComponent(match[1]);
-  const version = match[2] === undefined ? null : Number.parseInt(match[2], 10);
   const family = findDraftFamily(workflowId);
+  // Any other workflow's versions belong to the onboardings filter's handler.
+  if (family === undefined) {
+    return false;
+  }
+
+  const version = match[2] === undefined ? null : Number.parseInt(match[2], 10);
   sendCorsHeaders(response);
 
   if (request.method === 'OPTIONS') {
@@ -391,7 +396,7 @@ async function respondToDraftRoute(request, response, pathname) {
     return true;
   }
 
-  if (family === undefined || (version !== null && version !== family.version)) {
+  if (version !== null && version !== family.version) {
     sendJson(response, 404, { code: 'WORKFLOW_NOT_FOUND' });
     return true;
   }
