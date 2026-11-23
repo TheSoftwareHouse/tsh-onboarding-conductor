@@ -4,8 +4,10 @@ import { ReactFlowProvider } from '@xyflow/react';
 import { HttpStatusCode } from 'axios';
 import { Link, useLocation, useParams } from 'react-router';
 import { Button } from '@/components/ui/Button/Button';
-import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
-import { Typography } from '@/components/ui/Typography/Typography';
+import { EmptyState } from '@/components/ui/EmptyState/EmptyState';
+import { ErrorState } from '@/components/ui/ErrorState/ErrorState';
+import { Loader } from '@/components/ui/Loader/Loader';
+import { LoadFailure } from '@/components/ui/LoadFailure/LoadFailure';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
 import type { WorkflowDefinition } from '@/api/workflows/workflow-definitions';
 import type { ApiError } from '@/services/api/api-error';
@@ -26,64 +28,31 @@ import { WorkflowStats } from './components/WorkflowStats';
 import { useWorkflowDetailsSearchParams } from './hooks/useWorkflowDetailsSearchParams';
 import { stripDetailsParams } from './utils/workflow-details-search-params';
 
-interface FailureProps {
-  message: string;
-  onRetry: () => void;
+interface MissingVersion {
+  kind: 'notFound' | 'empty';
+  title: string;
 }
 
-function Failure({ message, onRetry }: FailureProps): ReactElement {
-  return (
-    <div className="flex flex-col items-start gap-4 p-8">
-      <StatusRegion>{message}</StatusRegion>
-      <Button variant="secondary" size="md" onClick={onRetry}>
-        Retry
-      </Button>
-    </div>
-  );
-}
+const MISSING_VERSION_BODY = 'Choose one from the version list.';
+const NO_PUBLISHED_VERSION: MissingVersion = {
+  kind: 'empty',
+  title: 'This workflow has no published version',
+};
 
-interface VersionsFailureProps {
-  workflowId: string;
-  error: ApiError;
-  backSearch: string;
-  onRetry: () => void;
-}
-
-/** The versions list could not be read: an unknown workflow, or any other failure with a Retry. */
-function VersionsFailure({
-  workflowId,
-  error,
-  backSearch,
-  onRetry,
-}: VersionsFailureProps): ReactElement {
-  if (error.status !== HttpStatusCode.NotFound) {
-    return <Failure message={`Unable to load workflow: ${error.message}`} onRetry={onRetry} />;
-  }
-
-  return (
-    <div className="flex flex-col items-start gap-4 p-8">
-      <StatusRegion>Workflow {workflowId} not found.</StatusRegion>
-      <Typography
-        as={Link}
-        to={{ pathname: ADMIN_ROUTES.workflows.root, search: backSearch }}
-        variant="body-sm"
-        className="text-tsh-black"
-      >
-        ← Back to workflows
-      </Typography>
-    </div>
-  );
-}
+const versionNotFound = (version: number): MissingVersion => ({
+  kind: 'notFound',
+  title: `Version ${version} does not exist`,
+});
 
 /** Why the versions list leaves nothing to show for this URL, or null when it holds a version to open. */
-function findMissingVersionMessage(
+function findMissingVersion(
   versions: WorkflowVersion[],
   pinnedVersion: number | null,
-): string | null {
+): MissingVersion | null {
   if (pinnedVersion !== null) {
     return versions.some((entry) => entry.version === pinnedVersion)
       ? null
-      : `Version ${pinnedVersion} does not exist.`;
+      : versionNotFound(pinnedVersion);
   }
   // Unpinned, the page opens the highest published version, or else the draft.
   const hasOpenable = versions.some(
@@ -91,7 +60,19 @@ function findMissingVersionMessage(
       entry.status === WORKFLOW_VERSION_STATUS.published ||
       entry.status === WORKFLOW_VERSION_STATUS.draft,
   );
-  return hasOpenable ? null : 'This workflow has no published version.';
+  return hasOpenable ? null : NO_PUBLISHED_VERSION;
+}
+
+function MissingVersionState({ kind, title }: MissingVersion): ReactElement {
+  const props = {
+    title,
+    body: MISSING_VERSION_BODY,
+  } as const;
+  return kind === 'notFound' ? (
+    <ErrorState kind="notFound" {...props} />
+  ) : (
+    <EmptyState {...props} />
+  );
 }
 
 interface VersionContentProps {
@@ -118,22 +99,19 @@ function VersionContent({
   onRetry,
 }: VersionContentProps): ReactElement {
   if (error?.status === HttpStatusCode.NotFound) {
-    const missing =
-      requestedVersion === null
-        ? 'This workflow has no published version.'
-        : `Version ${requestedVersion} does not exist.`;
-
     return (
-      <StatusRegion className="px-8 py-6">{missing} Choose one from the version list.</StatusRegion>
+      <MissingVersionState
+        {...(requestedVersion === null ? NO_PUBLISHED_VERSION : versionNotFound(requestedVersion))}
+      />
     );
   }
 
   if (error !== null) {
-    return <Failure message={`Unable to load this version: ${error.message}`} onRetry={onRetry} />;
+    return <LoadFailure subject="this version" error={error} onRetry={onRetry} />;
   }
 
   if (details === null) {
-    return <StatusRegion className="px-8 py-6">Loading version…</StatusRegion>;
+    return <Loader label="Loading version…" />;
   }
 
   return (
@@ -188,9 +166,9 @@ export function WorkflowDetailsPage(): ReactElement {
     (requestedStatus === WORKFLOW_VERSION_STATUS.draft ||
       (requestedStatus === undefined && isVersionsFetching));
   // Judged on a settled list only, so a refetch after a write never flashes it.
-  const missingVersionMessage =
+  const missingVersion =
     isVersionsSuccess && !isVersionsFetching && !isVersionsStale
-      ? findMissingVersionMessage(versions, params.version)
+      ? findMissingVersion(versions, params.version)
       : null;
   const {
     data: details = null,
@@ -198,7 +176,7 @@ export function WorkflowDetailsPage(): ReactElement {
     refetch: refetchDetails,
   } = useQuery({
     ...workflowQueries.detail(workflowId, requestedVersion ?? undefined),
-    enabled: !holdDetails && !isVersionsStale && missingVersionMessage === null,
+    enabled: !holdDetails && !isVersionsStale && missingVersion === null,
   });
   const version = requestedVersion ?? details?.workflowVersion ?? null;
   const versionStatus = versions.find((entry) => entry.version === version)?.status ?? null;
@@ -242,30 +220,37 @@ export function WorkflowDetailsPage(): ReactElement {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {renderHeader()}
-      {(isVersionsPending || isVersionsStale) && (
-        <StatusRegion className="px-8 py-6">Loading workflow…</StatusRegion>
-      )}
+      {(isVersionsPending || isVersionsStale) && <Loader label="Loading workflow…" />}
       {isVersionsError && (
-        <VersionsFailure
-          workflowId={workflowId}
+        <LoadFailure
           error={versionsError}
-          backSearch={backSearch}
+          subject="workflow"
           onRetry={() => void refetchVersions()}
+          notFound={{
+            title: 'Workflow not found',
+            body: `No workflow has the ID ${workflowId}.`,
+            actions: (
+              <Button
+                as={Link}
+                to={{ pathname: ADMIN_ROUTES.workflows.root, search: backSearch }}
+                variant="primary"
+                size="lg"
+              >
+                Back to workflows
+              </Button>
+            ),
+          }}
         />
       )}
-      {isVersionsSuccess && missingVersionMessage !== null && (
-        <StatusRegion className="px-8 py-6">
-          {missingVersionMessage} Choose one from the version list.
-        </StatusRegion>
-      )}
-      {isVersionsSuccess && !isVersionsStale && missingVersionMessage === null && (
+      {isVersionsSuccess && missingVersion !== null && <MissingVersionState {...missingVersion} />}
+      {isVersionsSuccess && !isVersionsStale && missingVersion === null && (
         <VersionTabs
           key={version}
           value={params.view ?? 'compiled'}
           onValueChange={params.setView}
           canvas={
             version === null ? (
-              <StatusRegion className="px-8 py-6">Loading version…</StatusRegion>
+              <Loader label="Loading version…" />
             ) : (
               <VersionCanvas workflowId={workflowId} version={version} />
             )

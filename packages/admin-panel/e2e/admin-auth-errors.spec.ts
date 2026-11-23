@@ -15,16 +15,19 @@ const ENGINE_ONBOARDINGS_ROUTE = '**/v1/onboardings**';
 const REFUSALS = [
   {
     status: 401,
+    title: 'Unable to load onboardings',
     label: 'an expired or unacceptable token',
     message: 'Your session is no longer accepted by the engine. Sign in again.',
   },
   {
     status: 403,
+    title: 'No access to onboardings',
     label: 'an account with no admin role',
     message: 'Your account is signed in but is not assigned a role that may view onboardings.',
   },
   {
     status: 503,
+    title: 'Unable to load onboardings',
     label: 'an engine that cannot reach Entra',
     message:
       'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.',
@@ -62,9 +65,9 @@ test.describe('admin panel authentication failures', () => {
 
       await page.goto(APP_URL);
 
-      await expect(page.getByRole('status')).toHaveText(
-        `Unable to load onboardings: ${refusal.message}`,
-      );
+      const alert = page.getByRole('alert');
+      await expect(alert).toContainText(refusal.title);
+      await expect(alert).toContainText(refusal.message);
     });
   }
 
@@ -76,18 +79,21 @@ test.describe('admin panel authentication failures', () => {
 
     await page.goto(APP_URL);
 
-    const status = page.getByRole('status');
-    await expect(status).toContainText('not a problem with your account');
-    await expect(status).not.toContainText('Sign in again');
+    const alert = page.getByRole('alert');
+    await expect(alert).toContainText('not a problem with your account');
+    await expect(alert).not.toContainText('Sign in again');
   });
 
-  test('should show no onboarding table when the engine refuses the request', async ({ page }) => {
+  test('should keep the column headers and show no rows when the engine refuses the request', async ({
+    page,
+  }) => {
     await respondWith(page, 403);
 
     await page.goto(APP_URL);
 
-    await expect(page.getByRole('status')).toContainText('not assigned a role');
-    await expect(page.getByRole('table')).toHaveCount(0);
+    await expect(page.getByRole('alert')).toContainText('not assigned a role');
+    await expect(page.getByRole('columnheader', { name: 'Onboarding', exact: true })).toBeVisible();
+    await expect(page.getByRole('row')).toHaveCount(1);
   });
 
   test('should recover once the engine starts accepting the credential again', async ({ page }) => {
@@ -123,11 +129,11 @@ test.describe('admin panel authentication failures', () => {
     });
 
     await page.goto(APP_URL);
-    await expect(page.getByRole('status')).toContainText('not assigned a role');
+    await expect(page.getByRole('alert')).toContainText('not assigned a role');
 
     refuse = false;
     await page.getByRole('button', { name: 'Reload' }).click();
 
-    await expect(page.getByRole('status')).toHaveText('No onboardings were returned.');
+    await expect(page.getByRole('status')).toContainText('No onboardings yet');
   });
 });

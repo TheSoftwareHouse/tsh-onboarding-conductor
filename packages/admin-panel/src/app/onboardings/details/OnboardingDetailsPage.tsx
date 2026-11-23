@@ -1,19 +1,21 @@
 import type { ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useQueryStates } from 'nuqs';
-import { useLocation, useParams } from 'react-router';
+import { Link, useLocation, useParams } from 'react-router';
 import { auditQueries } from '@/api/audit/audit-queries';
 import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
+import { LoadFailure } from '@/components/ui/LoadFailure/LoadFailure';
+import { Button } from '@/components/ui/Button/Button';
+import { ErrorState } from '@/components/ui/ErrorState/ErrorState';
 import { FilterTab, FilterTabs } from '@/components/ui/FilterTabs/FilterTabs';
+import { Loader } from '@/components/ui/Loader/Loader';
+import { ADMIN_ROUTES } from '@/constants/routes';
 import { OnboardingActivityLog } from './components/OnboardingActivityLog/OnboardingActivityLog';
 import { OnboardingDetailsHeader } from './components/OnboardingDetailsHeader/OnboardingDetailsHeader';
 import { OnboardingPathStrip } from './components/OnboardingPathStrip/OnboardingPathStrip';
 import { OnboardingRunMeta } from './components/OnboardingRunMeta/OnboardingRunMeta';
 import { OnboardingScoresPanel } from './components/OnboardingScoresPanel/OnboardingScoresPanel';
-import {
-  useAdminOnboardingDetails,
-  type UseAdminOnboardingDetailsResult,
-} from './hooks/useAdminOnboardingDetails';
+import { useAdminOnboardingDetails } from './hooks/useAdminOnboardingDetails';
 import { useOnboardingReconcile } from './hooks/useOnboardingReconcile';
 import { useOnboardingReview } from './hooks/useOnboardingReview';
 import { detailsSearchParams, serializeDetailsTab } from './utils/details-search-params';
@@ -24,23 +26,6 @@ function stripTabParam(search: string): string {
   params.delete('tab');
   const remaining = params.toString();
   return remaining === '' ? '' : `?${remaining}`;
-}
-
-/** The page's live status line: what is happening to it or what could not be read; null otherwise. */
-function describeDetailsStatus(details: UseAdminOnboardingDetailsResult): string | null {
-  if (details.phase === 'loading') {
-    return 'Loading onboarding…';
-  }
-
-  if (details.phase === 'error') {
-    return `Unable to load onboarding: ${details.error ?? 'Request failed.'}`;
-  }
-
-  if (details.summary === null) {
-    return 'No onboarding matches this ID.';
-  }
-
-  return null;
 }
 
 /** Composes the details page: its own header band, the run-meta strip, and the History/Scores tabs. */
@@ -57,6 +42,7 @@ export function OnboardingDetailsPage(): ReactElement {
     definition,
     scores,
     transitionsTruncated,
+    error,
     refetch,
   } = details;
   const [{ tab }] = useQueryStates(detailsSearchParams, { shallow: false });
@@ -106,8 +92,28 @@ export function OnboardingDetailsPage(): ReactElement {
         onReviewSubmit={submit}
         isReconciling={isReconciling}
         onReconcile={reconcile}
-        statusMessage={describeDetailsStatus(details)}
       />
+      {phase === 'loading' && <Loader label="Loading onboarding…" />}
+      {phase === 'error' && (
+        <LoadFailure error={error} subject="onboarding" onRetry={handleReload} />
+      )}
+      {phase === 'ready' && summary === null && (
+        <ErrorState
+          kind="notFound"
+          title="Onboarding not found"
+          body="No onboarding matches this ID."
+          actions={
+            <Button
+              as={Link}
+              to={{ pathname: ADMIN_ROUTES.onboardings.root, search: stripTabParam(search) }}
+              variant="primary"
+              size="lg"
+            >
+              Back to onboardings
+            </Button>
+          }
+        />
+      )}
       {summary !== null && (
         <>
           <OnboardingRunMeta

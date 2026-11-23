@@ -55,7 +55,9 @@ describe('VersionCanvas', () => {
     mockedFetch.mockRejectedValue(new ApiError('Request failed with status 500.', { status: 500 }));
     renderCanvas();
 
-    expect(await screen.findByText(/Unable to load the document/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Unable to load the document' }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
@@ -63,6 +65,8 @@ describe('VersionCanvas', () => {
     mockedFetch.mockResolvedValue(stored({ id: 'kyc' }));
     renderCanvas();
 
-    expect(await screen.findByText(/Unable to draw this version/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'The canvas cannot draw this document' }),
+    ).toBeInTheDocument();
   });
 });

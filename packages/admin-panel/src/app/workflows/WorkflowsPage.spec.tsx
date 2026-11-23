@@ -126,7 +126,9 @@ async function renderReady(
   await waitFor(() => {
     expect(mockedFetchAdminWorkflows).toHaveBeenCalledTimes(1);
   });
-  await screen.findByRole('status');
+  await waitFor(() => {
+    expect(screen.queryByText('Loading workflows…')).not.toBeInTheDocument();
+  });
 }
 
 beforeEach(() => {
@@ -149,7 +151,8 @@ describe('WorkflowsPage', () => {
     expect(screen.getByRole('button', { name: 'Apply filters' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Reset filters' })).toBeDisabled();
-    expect(screen.queryByRole('region', { name: 'Workflows results' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('columnheader')).toHaveLength(7);
+    expect(screen.queryByRole('navigation', { name: 'Workflow pages' })).not.toBeInTheDocument();
   });
 
   it('renders the agreed columns and the id link for a row', async () => {
@@ -208,10 +211,14 @@ describe('WorkflowsPage', () => {
       2,
       defaultQueryFilters({ search: 'does-not-exist' }),
     );
-    expect(screen.getByRole('status')).toHaveTextContent('No workflows match "does-not-exist".');
+    const results = screen.getByRole('region', { name: 'Workflows results' });
+    expect(within(results).getByRole('status')).toHaveTextContent(
+      'No workflows match "does-not-exist"',
+    );
+    expect(within(results).getByRole('button', { name: 'Reset filters' })).toBeInTheDocument();
   });
 
-  it('shows "No workflows match these filters." for a non-search criterion that narrows to nothing', async () => {
+  it('shows the no-match state for a non-search criterion that narrows to nothing', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE]);
 
@@ -226,24 +233,47 @@ describe('WorkflowsPage', () => {
       2,
       defaultQueryFilters({ scope: 'fixtures' }),
     );
-    expect(screen.getByRole('status')).toHaveTextContent('No workflows match these filters.');
+    const results = screen.getByRole('region', { name: 'Workflows results' });
+    expect(within(results).getByRole('status')).toHaveTextContent(
+      'No workflows match these filters',
+    );
+    expect(within(results).getByRole('button', { name: 'Reset filters' })).toBeInTheDocument();
   });
 
-  it('shows "No workflows loaded." when nothing narrows an empty result', async () => {
+  it('resets the filters through the no-match state', async () => {
+    const user = userEvent.setup();
+    mockedFetchAdminWorkflows.mockResolvedValueOnce(page([]));
+    renderPage(undefined, '/workflows?search=zzz');
+    const results = screen.getByRole('region', { name: 'Workflows results' });
+    await within(results).findByText('No workflows match "zzz"');
+
+    mockedFetchAdminWorkflows.mockResolvedValueOnce(page([RECORD_ONE]));
+    await user.click(within(results).getByRole('button', { name: 'Reset filters' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminWorkflows).toHaveBeenNthCalledWith(2, DEFAULT_REQUEST);
+    });
+    expect(await screen.findByText('Showing 1–1 of 1 workflows.')).toBeVisible();
+  });
+
+  it('shows the empty state with a New draft action when nothing narrows an empty result', async () => {
     await renderReady([]);
 
-    expect(screen.getByRole('status')).toHaveTextContent('No workflows loaded.');
+    const results = screen.getByRole('region', { name: 'Workflows results' });
+    expect(within(results).getByRole('status')).toHaveTextContent('No workflows yet');
+    expect(within(results).getByRole('button', { name: 'New draft' })).toBeInTheDocument();
+    expect(screen.getAllByRole('columnheader')).toHaveLength(7);
   });
 
-  it('shows "No workflows on this page." past the last page', async () => {
+  it('shows the no-match state, without an action, past the last page', async () => {
     mockedFetchAdminWorkflows.mockResolvedValueOnce(
       page([], { page: 99, total: 5, totalPages: 1 }),
     );
     renderPage(undefined, '/workflows?page=99');
 
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('No workflows on this page.');
-    });
+    const results = screen.getByRole('region', { name: 'Workflows results' });
+    await within(results).findByText('No workflows on this page');
+    expect(within(results).queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('clears draft and applied filters via Reset filters and fetches unfiltered exactly once', async () => {
@@ -294,12 +324,23 @@ describe('WorkflowsPage', () => {
 
     renderPage();
 
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load workflows: Failed to fetch',
-      );
-    });
-    expect(screen.queryByRole('region', { name: 'Workflows results' })).not.toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Unable to load workflows');
+    expect(alert).toHaveTextContent('Failed to fetch');
+    expect(screen.getAllByRole('columnheader')).toHaveLength(7);
+  });
+
+  it('refetches when Retry is activated on a failure', async () => {
+    const user = userEvent.setup();
+    mockedFetchAdminWorkflows.mockRejectedValueOnce(new ApiError('Failed to fetch'));
+    renderPage();
+    await screen.findByRole('alert');
+
+    mockedFetchAdminWorkflows.mockResolvedValueOnce(page([RECORD_ONE]));
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('Showing 1–1 of 1 workflows.')).toBeVisible();
+    expect(mockedFetchAdminWorkflows).toHaveBeenCalledTimes(2);
   });
 
   it('repeats the applied query when Reload is activated', async () => {

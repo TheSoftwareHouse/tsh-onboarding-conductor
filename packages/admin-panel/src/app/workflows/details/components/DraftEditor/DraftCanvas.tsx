@@ -1,5 +1,7 @@
 import { useMemo, type ReactElement } from 'react';
-import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
+import { ErrorState } from '@/components/ui/ErrorState/ErrorState';
+import { CANVAS_ERROR_TITLE } from '../../constants/canvas-error';
+import { describeCanvasError } from '../../utils/describe-canvas-error';
 import { JSON_INDENT } from '../../constants/json-indent';
 import { parseDocument } from '../../utils/authored-document';
 import { AuthoredCanvas } from '../AuthoredCanvas/AuthoredCanvas';
@@ -30,9 +32,7 @@ export function DraftCanvas({
   const doc = useMemo(() => parseDocument(text), [text]);
 
   if (typeof doc === 'string') {
-    return (
-      <StatusRegion className="px-8 py-6">{`Fix the JSON to see the canvas: ${doc}`}</StatusRegion>
-    );
+    return <ErrorState title={CANVAS_ERROR_TITLE} body={describeCanvasError(doc)} />;
   }
 
   return (

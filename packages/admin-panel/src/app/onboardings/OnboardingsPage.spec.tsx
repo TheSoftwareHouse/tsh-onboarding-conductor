@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
@@ -173,7 +173,9 @@ async function renderReady(
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
   });
   expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, DEFAULT_REQUEST);
-  await screen.findByRole('status');
+  await waitFor(() => {
+    expect(screen.queryByText('Loading onboardings…')).not.toBeInTheDocument();
+  });
 }
 
 beforeEach(() => {
@@ -198,7 +200,8 @@ describe('OnboardingsPage', () => {
     expect(screen.getByRole('button', { name: 'Apply filters' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Reset filters' })).toBeDisabled();
-    expect(screen.queryByRole('region', { name: 'Onboardings results' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('columnheader')).toHaveLength(9);
+    expect(screen.queryByRole('navigation', { name: 'Onboarding pages' })).not.toBeInTheDocument();
   });
 
   it('issues exactly one request under StrictMode despite its development-only double effect invocation', async () => {
@@ -283,8 +286,13 @@ describe('OnboardingsPage', () => {
   it('shows a successful-empty state when the engine returns no records', async () => {
     await renderReady([]);
 
-    expect(screen.getByRole('status')).toHaveTextContent('No onboardings were returned.');
-    expect(screen.getByRole('cell', { name: 'No onboardings were returned.' })).toBeInTheDocument();
+    const results = screen.getByRole('region', { name: 'Onboardings results' });
+    expect(within(results).getByRole('status')).toHaveTextContent('No onboardings yet');
+    expect(within(results).getByRole('status')).toHaveTextContent(
+      'Onboardings appear here once an applicant starts a workflow.',
+    );
+    expect(within(results).getAllByRole('columnheader')).toHaveLength(9);
+    expect(within(results).queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('shows a failure state when the request fails', async () => {
@@ -292,12 +300,49 @@ describe('OnboardingsPage', () => {
 
     renderPage();
 
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load onboardings');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to fetch');
+    expect(screen.getAllByRole('columnheader')).toHaveLength(9);
+  });
+
+  it('shows no access for a 403 and offers no retry', async () => {
+    mockedFetchAdminOnboardings.mockRejectedValueOnce(new ApiError('Forbidden.', { status: 403 }));
+
+    renderPage();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No access to onboardings');
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  });
+
+  it('refetches the applied query when Retry is activated on a failure', async () => {
+    const user = userEvent.setup();
+    mockedFetchAdminOnboardings.mockRejectedValueOnce(new ApiError('Failed to fetch'));
+    renderPage();
+    await screen.findByRole('alert');
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
+    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers Reset filters on a no-match state and resets through it', async () => {
+    const user = userEvent.setup();
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([]));
+    renderPage(undefined, '/onboardings?workflowId=kyc-basic');
+    const results = screen.getByRole('region', { name: 'Onboardings results' });
+    expect(
+      await within(results).findByText('No onboardings match the current filters'),
+    ).toBeVisible();
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    await user.click(within(results).getByRole('button', { name: 'Reset filters' }));
+
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load onboardings: Failed to fetch',
-      );
+      expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, DEFAULT_REQUEST);
     });
-    expect(screen.queryByRole('region', { name: 'Onboardings results' })).not.toBeInTheDocument();
+    expect(await screen.findByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
   });
 
   it('keeps edits as draft only and does not fetch until Apply filters is submitted', async () => {
@@ -321,9 +366,7 @@ describe('OnboardingsPage', () => {
       2,
       defaultQueryFilters({ workflowId: 'does-not-exist' }),
     );
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'No onboardings match the current filters.',
-    );
+    expect(await screen.findByText('No onboardings match the current filters')).toBeInTheDocument();
   });
 
   it('refetches the same applied key once on resubmission without showing stale rows while pending', async () => {
@@ -363,7 +406,7 @@ describe('OnboardingsPage', () => {
     );
   });
 
-  it('does not submit invalid workflow version and keeps previously applied results', async () => {
+  it('does not submit invalid workflow version and hides the rows behind the refusal message', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE]);
 
@@ -378,7 +421,15 @@ describe('OnboardingsPage', () => {
         selector: '#onboarding-filters-error',
       }),
     ).toBeVisible();
-    expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
+    const results = screen.getByRole('region', { name: 'Onboardings results' });
+    expect(within(results).getByRole('status')).toHaveTextContent(
+      'Correct the refused filter to see results',
+    );
+    expect(within(results).getByRole('status')).toHaveTextContent(
+      'Enter a whole number greater than zero.',
+    );
+    expect(screen.queryByText(RECORD_ONE.onboardingId)).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Onboarding pages' })).not.toBeInTheDocument();
   });
 
   it('shows the fetch error state when the request for a newly applied criterion rejects', async () => {
@@ -391,16 +442,13 @@ describe('OnboardingsPage', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load onboardings: Request failed with status 400.',
-      );
-    });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load onboardings');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Request failed with status 400.');
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
       2,
       defaultQueryFilters({ workflowId: 'kyc-basic' }),
     );
-    expect(screen.queryByRole('region', { name: 'Onboardings results' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('columnheader')).toHaveLength(9);
   });
 
   it('repeats the applied query when Reload is activated after errors and payload failures', async () => {
@@ -413,17 +461,15 @@ describe('OnboardingsPage', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load onboardings: Request failed with status 500.',
-      );
+      expect(screen.getByRole('alert')).toHaveTextContent('Unable to load onboardings');
+      expect(screen.getByRole('alert')).toHaveTextContent('Request failed with status 500.');
     });
 
     mockedFetchAdminOnboardings.mockRejectedValueOnce(new ApiError('Failed to fetch'));
     await user.click(screen.getByRole('button', { name: 'Reload' }));
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load onboardings: Failed to fetch',
-      );
+      expect(screen.getByRole('alert')).toHaveTextContent('Unable to load onboardings');
+      expect(screen.getByRole('alert')).toHaveTextContent('Failed to fetch');
     });
 
     mockedFetchAdminOnboardings.mockRejectedValueOnce(
@@ -431,9 +477,8 @@ describe('OnboardingsPage', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Reload' }));
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load onboardings: Response payload is not an array.',
-      );
+      expect(screen.getByRole('alert')).toHaveTextContent('Unable to load onboardings');
+      expect(screen.getByRole('alert')).toHaveTextContent('Response payload is not an array.');
     });
 
     mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE, RECORD_TWO]));
@@ -819,11 +864,7 @@ describe('OnboardingsPage', () => {
       mockedFetchAdminOnboardings.mockRejectedValueOnce(new ApiError('Failed to fetch'));
       renderPage();
 
-      await waitFor(() => {
-        expect(screen.getByRole('status')).toHaveTextContent(
-          'Unable to load onboardings: Failed to fetch',
-        );
-      });
+      await screen.findByRole('alert');
       expect(screen.queryByRole('button', { name: /^Export/ })).not.toBeInTheDocument();
     });
 
@@ -838,7 +879,6 @@ describe('OnboardingsPage', () => {
       mockedFetchAdminOnboardings.mockResolvedValue(page([RECORD_ONE]));
       mockedFetchCsv.mockResolvedValueOnce(new Blob(['id']));
       renderPage(undefined, '/onboardings?workflowId=kyc-basic&page=2');
-      await screen.findByRole('status');
       await waitFor(() => {
         expect(screen.getByRole('status')).toHaveTextContent('Showing 1 of 1');
       });
