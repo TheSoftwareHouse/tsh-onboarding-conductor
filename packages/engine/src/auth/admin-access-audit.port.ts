@@ -31,6 +31,12 @@ export type AdminAccessAuditEvent =
       operator: AdminOperatorIdentity;
     }
   | {
+      /** A write from a page on an untrusted origin, refused before any session is read. */
+      outcome: 'origin_refused';
+      endpoint: AdminAccessEndpoint;
+      origin: string;
+    }
+  | {
       outcome: 'session_missing';
       endpoint: AdminAccessEndpoint;
       reason: string;

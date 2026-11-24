@@ -4,6 +4,7 @@ import { ApiErrorResponses } from '../openapi/api-error-responses.decorator';
 import { ADMIN_SESSION_AUTH } from '../openapi/openapi.constants';
 import { ADMIN_PERMISSION_METADATA, AdminSessionGuard } from './admin-session.guard';
 import type { AdminPermission } from './domain/admin-permissions';
+import { AdminOriginRefusedException } from './errors/admin-origin-refused.exception';
 import { AdminPermissionMissingException } from './errors/admin-permission-missing.exception';
 import { AdminSessionRequiredException } from './errors/admin-session-required.exception';
 import { AuthUnavailableException } from './errors/auth-unavailable.exception';
@@ -22,6 +23,7 @@ export function AdminRoute(permission: AdminPermission): MethodDecorator {
     ApiCookieAuth(ADMIN_SESSION_AUTH),
     ApiErrorResponses(
       AdminSessionRequiredException,
+      AdminOriginRefusedException,
       AdminPermissionMissingException,
       AuthUnavailableException,
     ),

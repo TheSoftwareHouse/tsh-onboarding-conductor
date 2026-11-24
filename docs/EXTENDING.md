@@ -910,7 +910,9 @@ Two things apply to the new provider automatically, and both are decisions to ma
 
 - **Invite-only.** The user-creation hook covers a social implicit sign-up, so a person with no
   pending invitation for their email is refused. The email the provider reports is what the
-  invitation is matched against, so accept only a provider whose email claim you trust.
+  invitation is matched against, so accept only a provider whose email claim you trust. Unlike
+  an email sign-up, which must send the mailed invitation's id, a social sign-up is trusted on the
+  provider's word alone.
 - **2FA.** The engine's TOTP is opt-in and needs a password to turn on, so a user who signs in
   only through the provider has no engine-side second factor. Require MFA at the provider.
 

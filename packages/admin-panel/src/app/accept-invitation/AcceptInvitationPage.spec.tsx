@@ -106,6 +106,8 @@ describe('AcceptInvitationPage', () => {
         name: 'Ann Kowalska',
         email: 'ann@tsh.io',
         password: 'password-1',
+        // The id from the mailed link: the engine refuses a sign-up that does not name it.
+        invitationId: 'inv-1',
       }),
     );
     await waitFor(() => expect(acceptInvitation).toHaveBeenCalledWith('inv-1'));

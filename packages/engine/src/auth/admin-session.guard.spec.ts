@@ -14,11 +14,14 @@ import {
   type AdminAuthenticatedRequest,
 } from './admin-session.guard';
 import type { AdminPermission } from './domain/admin-permissions';
+import { AdminOriginRefusedException } from './errors/admin-origin-refused.exception';
 import { AdminPermissionMissingException } from './errors/admin-permission-missing.exception';
 import { AdminSessionRequiredException } from './errors/admin-session-required.exception';
 import { AuthUnavailableException } from './errors/auth-unavailable.exception';
 
 const PERMISSION: AdminPermission = { resource: 'workflow', action: 'write' };
+const PANEL_ORIGIN = 'https://panel.tsh.io';
+const ENGINE_ORIGIN = 'https://engine.tsh.io';
 const ENDPOINT = { method: 'POST', path: '/v1/admin/workflows' };
 
 const MEMBER: AdminSession = {
@@ -41,12 +44,16 @@ function createSut({
   permitted = true,
   resolveError,
   permission = PERMISSION as AdminPermission | null,
+  method = 'POST',
+  origin,
 }: {
   enabled?: boolean;
   session?: AdminSession | null;
   permitted?: boolean;
   resolveError?: Error;
   permission?: AdminPermission | null;
+  method?: string;
+  origin?: string;
 } = {}) {
   const verifier = {
     resolve: resolveError
@@ -55,13 +62,22 @@ function createSut({
     hasPermission: jest.fn().mockResolvedValue(permitted),
   } satisfies AdminSessionVerifierPort;
   const audit = { record: jest.fn().mockResolvedValue(undefined) } satisfies AdminAccessAuditPort;
-  const configService = { get: jest.fn().mockReturnValue(enabled) } as unknown as ConfigService;
+  const configService = {
+    get: jest.fn().mockReturnValue(enabled),
+    getOrThrow: jest.fn(
+      (key: string) =>
+        ({
+          ADMIN_PANEL_ORIGIN: PANEL_ORIGIN,
+          BETTER_AUTH_URL: `${ENGINE_ORIGIN}/v1/auth`,
+        })[key],
+    ),
+  } as unknown as ConfigService;
   const reflector = {
     get: jest.fn().mockReturnValue(permission ?? undefined),
   } as unknown as Reflector;
   const request = {
-    headers: { cookie: 'session=abc' },
-    method: 'POST',
+    headers: { cookie: 'session=abc', ...(origin === undefined ? {} : { origin }) },
+    method,
     path: '/v1/admin/workflows',
   } as unknown as AdminAuthenticatedRequest;
   const context = {
@@ -213,6 +229,69 @@ describe('AdminSessionGuard', () => {
 
     await expect(sut.canActivate(context)).resolves.toBe(true);
     await expect(sut.onModuleDestroy()).resolves.toBeUndefined();
+  });
+});
+
+describe('AdminSessionGuard origin check', () => {
+  it.each([
+    ['the admin panel', PANEL_ORIGIN],
+    ['the engine serving the panel itself', ENGINE_ORIGIN],
+  ])('lets a write from %s through to the session check', async (_label, origin) => {
+    const { sut, verifier, context } = createSut({ origin });
+
+    await expect(sut.canActivate(context)).resolves.toBe(true);
+    expect(verifier.resolve).toHaveBeenCalled();
+  });
+
+  it('lets a write without Origin through, since no browser sent it', async () => {
+    const { sut, context } = createSut({ origin: undefined });
+
+    await expect(sut.canActivate(context)).resolves.toBe(true);
+  });
+
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
+    'answers 403 and audits origin_refused for a %s from another origin, before reading the session',
+    async (method) => {
+      const { sut, verifier, audit, context } = createSut({
+        method,
+        origin: 'https://evil.tsh.io',
+      });
+
+      await expect(sut.canActivate(context)).rejects.toBeInstanceOf(AdminOriginRefusedException);
+      expect(verifier.resolve).not.toHaveBeenCalled();
+      expect(recorded(audit)).toEqual({
+        outcome: 'origin_refused',
+        endpoint: { ...ENDPOINT, method },
+        origin: 'https://evil.tsh.io',
+      });
+    },
+  );
+
+  it('refuses the opaque "null" origin a sandboxed page sends', async () => {
+    const { sut, context } = createSut({ origin: 'null' });
+
+    await expect(sut.canActivate(context)).rejects.toBeInstanceOf(AdminOriginRefusedException);
+  });
+
+  it('refuses a look-alike that only shares a prefix with the panel', async () => {
+    const { sut, context } = createSut({ origin: `${PANEL_ORIGIN}.evil.io` });
+
+    await expect(sut.canActivate(context)).rejects.toBeInstanceOf(AdminOriginRefusedException);
+  });
+
+  it.each(['GET', 'HEAD', 'OPTIONS'])(
+    'does not judge the origin of a %s, which changes nothing',
+    async (method) => {
+      const { sut, context } = createSut({ method, origin: 'https://evil.tsh.io' });
+
+      await expect(sut.canActivate(context)).resolves.toBe(true);
+    },
+  );
+
+  it('does not judge the origin while admin auth is disabled', async () => {
+    const { sut, context } = createSut({ enabled: false, origin: 'https://evil.tsh.io' });
+
+    await expect(sut.canActivate(context)).resolves.toBe(true);
   });
 });
 

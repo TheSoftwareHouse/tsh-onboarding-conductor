@@ -24,12 +24,16 @@ import {
   type AdminSessionVerifierPort,
 } from './admin-session-verifier.port';
 import { hasSuperadminRole, type AdminPermission } from './domain/admin-permissions';
+import { AdminOriginRefusedException } from './errors/admin-origin-refused.exception';
 import { AdminPermissionMissingException } from './errors/admin-permission-missing.exception';
 import { AdminSessionRequiredException } from './errors/admin-session-required.exception';
 import { AuthUnavailableException } from './errors/auth-unavailable.exception';
 
 /** Metadata key `AdminRoute(permission)` writes on a handler and this guard reads. */
 export const ADMIN_PERMISSION_METADATA = 'admin:permission';
+
+/** Methods that change nothing, so a forged one can do no harm. */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 const MAX_LOGGED_VALUE_LENGTH = 200;
 
@@ -92,11 +96,15 @@ function toOperator(session: AdminSession): AdminOperatorIdentity {
  * Protects the admin endpoints with a better-auth session. Decision order:
  *
  * 1. `ADMIN_AUTH_ENABLED` off: record `unauthenticated` and let the request through.
- * 2. No valid session: 401 `ADMIN_SESSION_REQUIRED`.
- * 3. A `superadmin` platform role is granted; otherwise the member's role in the active
+ * 2. A write (any method but GET, HEAD or OPTIONS) whose `Origin` is neither the admin panel's
+ *    nor the engine's own: 403 `ADMIN_ORIGIN_REFUSED`. The session is a `SameSite=Lax` cookie, so
+ *    a page on another subdomain of the same site could otherwise post a form that carries it.
+ *    A request without `Origin` comes from no browser and passes on to the session check.
+ * 3. No valid session: 401 `ADMIN_SESSION_REQUIRED`.
+ * 4. A `superadmin` platform role is granted; otherwise the member's role in the active
  *    organization must hold the route's permission, else 403 `ADMIN_PERMISSION_MISSING`
  *    (also when there is no active organization, or the route declares no permission).
- * 4. The auth store unreachable at any step: 503 `AUTH_UNAVAILABLE`.
+ * 5. The auth store unreachable at any step: 503 `AUTH_UNAVAILABLE`.
  *
  * Every decision — including the successful ones — is written to the audit log. Where a decision
  * is logged as well as audited, the log event is the upper-snake form of the audit action —
@@ -139,6 +147,21 @@ export class AdminSessionGuard implements CanActivate, OnModuleDestroy {
       this.recordAccess({ outcome: 'unauthenticated', endpoint });
 
       return true;
+    }
+
+    const origin = request.headers.origin;
+
+    if (
+      !SAFE_METHODS.has(endpoint.method) &&
+      origin !== undefined &&
+      !this.findTrustedOrigins().has(origin)
+    ) {
+      this.logger.warn(
+        `AUTH_ORIGIN_REFUSED method=${quoteForLog(endpoint.method)} origin=${quoteForLog(origin)}`,
+      );
+      this.recordAccess({ outcome: 'origin_refused', endpoint, origin: clipValue(origin) });
+
+      throw new AdminOriginRefusedException();
     }
 
     const permission = this.reflector.get<AdminPermission | undefined>(
@@ -216,6 +239,14 @@ export class AdminSessionGuard implements CanActivate, OnModuleDestroy {
     this.recordAccess({ outcome: 'granted', endpoint, operator });
 
     return true;
+  }
+
+  /** The origins a browser write may come from: the admin panel's, and the engine's own, which serves the panel too. */
+  private findTrustedOrigins(): ReadonlySet<string> {
+    return new Set([
+      this.configService.getOrThrow<string>('ADMIN_PANEL_ORIGIN'),
+      new URL(this.configService.getOrThrow<string>('BETTER_AUTH_URL')).origin,
+    ]);
   }
 
   /**

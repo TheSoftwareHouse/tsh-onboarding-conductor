@@ -43,7 +43,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -57,6 +57,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -164,7 +165,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -178,6 +179,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -287,7 +289,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -301,6 +303,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -415,7 +418,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -429,6 +432,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -544,7 +548,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -558,6 +562,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -776,7 +781,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -790,6 +795,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -944,7 +950,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -958,6 +964,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1125,7 +1132,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1139,6 +1146,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1265,7 +1273,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1279,6 +1287,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1429,7 +1438,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1443,6 +1452,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1619,7 +1629,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1633,6 +1643,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1733,7 +1744,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1747,6 +1758,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -1872,7 +1884,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1886,6 +1898,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -2056,7 +2069,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2070,6 +2083,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -2248,7 +2262,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2262,6 +2276,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -2429,7 +2444,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2443,6 +2458,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -2616,7 +2632,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2630,6 +2646,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -2800,7 +2817,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2814,6 +2831,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3019,7 +3037,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3033,6 +3051,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3246,7 +3265,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3260,6 +3279,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3425,7 +3445,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3439,6 +3459,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3529,7 +3550,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3543,6 +3564,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3632,7 +3654,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3646,6 +3668,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3745,7 +3768,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3759,6 +3782,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -3937,7 +3961,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3951,6 +3975,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -4116,7 +4141,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4130,6 +4155,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -4246,7 +4272,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4260,6 +4286,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -4816,7 +4843,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4830,6 +4857,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -5474,7 +5502,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5488,6 +5516,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -5933,7 +5962,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "text/csv": {
                 "schema": {
@@ -5947,6 +5976,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -6047,7 +6077,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6061,6 +6091,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -6186,7 +6217,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6200,6 +6231,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -6343,7 +6375,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6357,6 +6389,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -6508,7 +6541,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6522,6 +6555,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }
@@ -6737,7 +6771,7 @@
             }
           },
           "403": {
-            "description": "`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
+            "description": "`ADMIN_ORIGIN_REFUSED`: A write sent from a page on another origin. The session cookie travels with any same-site request, so the origin is what tells the panel's own write from a forged one.\n\n`ADMIN_PERMISSION_MISSING`: The session is valid but neither the platform role nor the active organization grants the permission this route needs; signing in again cannot fix this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6751,6 +6785,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
+                            "ADMIN_ORIGIN_REFUSED",
                             "ADMIN_PERMISSION_MISSING"
                           ]
                         }

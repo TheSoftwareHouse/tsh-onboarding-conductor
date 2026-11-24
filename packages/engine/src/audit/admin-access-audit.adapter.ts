@@ -44,6 +44,15 @@ export function toAdminAccessAuditInput(event: AdminAccessAuditEvent): AdminAcce
         metadata: operatorMetadata(event.endpoint.method, event.operator),
       };
 
+    case 'origin_refused':
+      return {
+        ...base,
+        action: 'auth.origin_refused',
+        actorType: 'anonymous',
+        actorId: ADMIN_ACCESS_UNKNOWN_ACTOR,
+        metadata: { method: event.endpoint.method, origin: event.origin },
+      };
+
     case 'session_missing':
       return {
         ...base,

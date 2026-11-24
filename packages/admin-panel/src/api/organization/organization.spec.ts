@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/api/api-error';
-import { fetchActiveOrganization, inviteMember, removeMember } from './organization';
+import { fetchActiveOrganization, inviteMember, removeMember, signUpInvitee } from './organization';
 
-const { mockedGetFullOrganization, mockedInviteMember, mockedRemoveMember } = vi.hoisted(() => ({
-  mockedGetFullOrganization: vi.fn(),
-  mockedInviteMember: vi.fn(),
-  mockedRemoveMember: vi.fn(),
-}));
+const { mockedGetFullOrganization, mockedInviteMember, mockedRemoveMember, mockedSignUpEmail } =
+  vi.hoisted(() => ({
+    mockedSignUpEmail: vi.fn(),
+    mockedGetFullOrganization: vi.fn(),
+    mockedInviteMember: vi.fn(),
+    mockedRemoveMember: vi.fn(),
+  }));
 
 vi.mock('@/services/auth/auth-client', () => ({
   authClient: {
+    signUp: { email: mockedSignUpEmail },
     organization: {
       getFullOrganization: mockedGetFullOrganization,
       inviteMember: mockedInviteMember,
@@ -62,5 +65,19 @@ describe('organization', () => {
       status: 403,
       code: 'FORBIDDEN',
     });
+  });
+
+  it('sends the invitation id with the sign-up, which the engine requires', async () => {
+    mockedSignUpEmail.mockResolvedValue({ data: { user: { id: 'u-1' } }, error: null });
+    const values = {
+      name: 'Ann',
+      email: 'a@tsh.io',
+      password: 'password-1',
+      invitationId: 'inv-1',
+    };
+
+    await signUpInvitee(values);
+
+    expect(mockedSignUpEmail).toHaveBeenCalledWith(values);
   });
 });

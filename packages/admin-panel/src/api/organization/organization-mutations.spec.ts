@@ -82,7 +82,12 @@ describe('organizationMutations', () => {
   });
 
   it('signs an invitee up across the module boundary', async () => {
-    const values = { name: 'Ann', email: 'a@tsh.io', password: 'password-1' };
+    const values = {
+      name: 'Ann',
+      email: 'a@tsh.io',
+      password: 'password-1',
+      invitationId: 'inv-1',
+    };
 
     await organizationMutations.signUpInvitee().mutationFn?.(values, CONTEXT);
 

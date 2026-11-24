@@ -61,6 +61,11 @@ export interface InviteeSignUp {
   name: string;
   email: string;
   password: string;
+  /**
+   * The id from the mailed invitation link. The engine creates the account only when it names a
+   * pending invitation for this address, so knowing the address alone cannot claim it.
+   */
+  invitationId: string;
 }
 
 export function signUpInvitee(values: InviteeSignUp) {

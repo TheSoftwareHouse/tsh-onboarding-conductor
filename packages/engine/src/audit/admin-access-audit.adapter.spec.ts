@@ -48,6 +48,22 @@ describe('toAdminAccessAuditInput', () => {
     });
   });
 
+  it('keeps a refused origin anonymous and records the origin', () => {
+    expect(
+      toAdminAccessAuditInput({
+        outcome: 'origin_refused',
+        endpoint: { method: 'POST', path: '/v1/onboardings' },
+        origin: 'https://evil.tsh.io',
+      }),
+    ).toEqual({
+      action: 'auth.origin_refused',
+      actorType: 'anonymous',
+      actorId: 'unknown',
+      resourceId: '/v1/onboardings',
+      metadata: { method: 'POST', origin: 'https://evil.tsh.io' },
+    });
+  });
+
   it('records the permission a refusal was measured against', () => {
     expect(
       toAdminAccessAuditInput({

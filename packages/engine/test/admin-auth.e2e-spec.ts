@@ -177,6 +177,44 @@ describe('Admin endpoint authentication (e2e)', () => {
     expect(response.body.code).toBe('ADMIN_PERMISSION_MISSING');
   });
 
+  describe('cross-site writes', () => {
+    it('refuses a write carrying a valid session cookie from another origin with 403 ADMIN_ORIGIN_REFUSED', async () => {
+      // What a forged form post from a sibling subdomain looks like: the Lax cookie rides along.
+      const operator = await createOperator(app, { organizationRole: 'owner', twoFactor: true });
+
+      const response = await request(app.getHttpServer())
+        .post(WRITE_ROUTE)
+        .set('Cookie', operator.cookie)
+        .set('Origin', 'https://evil.example.com')
+        .expect(403);
+
+      expect(response.body.code).toBe('ADMIN_ORIGIN_REFUSED');
+    });
+
+    it('judges a write from the admin panel by its session as before', async () => {
+      const operator = await createOperator(app, { organizationRole: 'member', twoFactor: true });
+
+      const response = await request(app.getHttpServer())
+        .post(WRITE_ROUTE)
+        .set('Cookie', operator.cookie)
+        .set('Origin', PANEL_ORIGIN)
+        .expect(403);
+
+      // Past the origin check: refused only for the member's missing permission.
+      expect(response.body.code).toBe('ADMIN_PERMISSION_MISSING');
+    });
+
+    it('does not judge the origin of a read', async () => {
+      const operator = await createOperator(app, { organizationRole: 'member', twoFactor: true });
+
+      await request(app.getHttpServer())
+        .get('/v1/onboardings')
+        .set('Cookie', operator.cookie)
+        .set('Origin', 'https://evil.example.com')
+        .expect(200);
+    });
+  });
+
   describe('better-auth admin and organization endpoints', () => {
     it('lets a credential superadmin without TOTP change a role', async () => {
       const operator = await createOperator(app, { platformRole: 'superadmin' });
@@ -247,24 +285,70 @@ describe('Admin endpoint authentication (e2e)', () => {
       expect(rowCount).toBe(0);
     });
 
-    it('accepts email sign-up when a pending invitation exists', async () => {
+    async function inviteNewAddress(): Promise<{ email: string; invitationId: string }> {
       const inviter = await createOperator(app, { organizationRole: 'owner' });
       const email = `${randomUUID()}@${OPERATOR_EMAIL_DOMAIN}`;
+      const invitationId = randomUUID();
       await pool.query(
         `INSERT INTO auth."invitation" ("id", "organizationId", "email", "role", "status", "expiresAt", "inviterId")
          VALUES ($1, $2, $3, 'member', 'pending', now() + interval '1 day', $4)`,
-        [randomUUID(), inviter.organizationId, email, inviter.userId],
+        [invitationId, inviter.organizationId, email, inviter.userId],
       );
+
+      return { email, invitationId };
+    }
+
+    async function findUser(email: string) {
+      const { rows } = await pool.query(
+        'SELECT "emailVerified" FROM auth."user" WHERE "email" = $1',
+        [email],
+      );
+
+      return rows[0] as { emailVerified: boolean } | undefined;
+    }
+
+    it('accepts email sign-up that names its invitation, and marks the address verified', async () => {
+      const { email, invitationId } = await inviteNewAddress();
 
       await request(app.getHttpServer())
         .post('/v1/auth/sign-up/email')
-        .send({ email, password: OPERATOR_PASSWORD, name: 'Invitee' })
+        .send({ email, password: OPERATOR_PASSWORD, name: 'Invitee', invitationId })
         .expect(200);
 
-      const { rowCount } = await pool.query('SELECT 1 FROM auth."user" WHERE "email" = $1', [
-        email,
-      ]);
-      expect(rowCount).toBe(1);
+      expect(await findUser(email)).toEqual({ emailVerified: true });
+    });
+
+    it('refuses email sign-up that knows an invited address but not the mailed invitation', async () => {
+      // Taking over an invitation needs only the address without this check.
+      const { email } = await inviteNewAddress();
+
+      await request(app.getHttpServer())
+        .post('/v1/auth/sign-up/email')
+        .send({ email, password: OPERATOR_PASSWORD, name: 'Squatter' })
+        .expect(403);
+      await request(app.getHttpServer())
+        .post('/v1/auth/sign-up/email')
+        .send({ email, password: OPERATOR_PASSWORD, name: 'Squatter', invitationId: randomUUID() })
+        .expect(403);
+
+      expect(await findUser(email)).toBeUndefined();
+    });
+
+    it("refuses email sign-up that names another address's invitation", async () => {
+      const invited = await inviteNewAddress();
+      const email = `${randomUUID()}@${OPERATOR_EMAIL_DOMAIN}`;
+
+      await request(app.getHttpServer())
+        .post('/v1/auth/sign-up/email')
+        .send({
+          email,
+          password: OPERATOR_PASSWORD,
+          name: 'Squatter',
+          invitationId: invited.invitationId,
+        })
+        .expect(403);
+
+      expect(await findUser(email)).toBeUndefined();
     });
   });
 

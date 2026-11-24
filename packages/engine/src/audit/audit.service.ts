@@ -151,6 +151,7 @@ const ADMIN_ACCESS_ACTOR_ALLOWLIST: Record<AdminAccessAction, AdminAccessActorTy
   'auth.two_factor_required': 'operator',
   'auth.permission_missing': 'operator',
   'auth.role_missing': 'operator',
+  'auth.origin_refused': 'anonymous',
   'auth.session_missing': 'anonymous',
   'auth.token_rejected': 'anonymous',
   'auth.verification_unavailable': 'anonymous',

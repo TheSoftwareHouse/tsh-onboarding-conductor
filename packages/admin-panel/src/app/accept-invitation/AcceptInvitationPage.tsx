@@ -72,7 +72,7 @@ function SignUpInvitation({ invitationId }: { invitationId: string }): ReactElem
 
   const submit = handleSubmit(async (values) => {
     try {
-      await signUp.mutateAsync(values);
+      await signUp.mutateAsync({ ...values, invitationId });
       await accept.mutateAsync(invitationId);
     } catch (error) {
       showErrorToast(

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
 import {
@@ -9,8 +10,13 @@ import {
 } from '../domain/admin-permissions';
 import type { AuthMailer } from '../auth-mailer';
 import { findActiveOrganizationId } from './active-organization.hook';
+import { buildInvitationLink } from './invitation-link';
 import { EndpointGuardRefusal, findEndpointGuardRefusal } from './auth-endpoint-guards.hook';
-import { INVITE_ONLY_REFUSAL_MESSAGE, isUserCreationAllowed } from './invite-only.hook';
+import {
+  INVITE_ONLY_REFUSAL_MESSAGE,
+  UserCreationVerdict,
+  judgeUserCreation,
+} from './invite-only.hook';
 import {
   loadBetterAuth,
   type BetterAuthInstance,
@@ -20,6 +26,8 @@ import {
 type AuthPlugins = Parameters<BetterAuthRuntime['betterAuth']>[0]['plugins'];
 
 export const AUTH_BASE_PATH = '/v1/auth';
+
+const logger = new Logger('BetterAuth');
 
 /** better-auth's tables live in their own Postgres schema, created by migration 0003. */
 const AUTH_SCHEMA_SEARCH_PATH = '-c search_path=auth';
@@ -38,11 +46,12 @@ function createStoreLookups(pool: Pool) {
   return {
     async findInvitations(email: string) {
       const { rows } = await pool.query(
-        'SELECT "status", "expiresAt" FROM "invitation" WHERE lower("email") = lower($1)',
+        'SELECT "id", "status", "expiresAt" FROM "invitation" WHERE lower("email") = lower($1)',
         [email],
       );
 
       return rows.map((row) => ({
+        id: row.id as string,
         status: row.status as string,
         expiresAt: row.expiresAt as Date,
       }));
@@ -130,9 +139,16 @@ export async function createBetterAuth(
     emailAndPassword: {
       enabled: true,
       revokeSessionsOnPasswordReset: true,
-      // Not awaited: a send that takes longer for a known address would reveal which exist.
+      // Not awaited: a send that takes longer for a known address would reveal which exist. A
+      // failure is still logged, or a broken AUTH_SMTP_URL shows only as resets that never arrive.
       sendResetPassword: async ({ user, url }) => {
-        void mailer.sendPasswordReset(user.email, url).catch(() => undefined);
+        void mailer.sendPasswordReset(user.email, url).catch((error: unknown) => {
+          logger.error(
+            `AUTH_PASSWORD_RESET_MAIL_FAILED userId=${JSON.stringify(user.id)} reason=${JSON.stringify(
+              error instanceof Error ? error.message : 'unknown',
+            )}`,
+          );
+        });
       },
     },
     databaseHooks: {
@@ -141,11 +157,24 @@ export async function createBetterAuth(
           before: async (user, context) => {
             // A `request` exists only for a call that came in over HTTP; `auth.api.*` called from
             // the engine (seed, admin createUser) has none.
-            const allowed = await isUserCreationAllowed(user.email, !context?.request, store);
+            const verdict = await judgeUserCreation(
+              {
+                email: user.email,
+                path: context?.request ? context.path : null,
+                invitationId: (context?.body as { invitationId?: unknown } | undefined)
+                  ?.invitationId,
+              },
+              store,
+            );
 
-            if (!allowed) {
+            if (verdict === UserCreationVerdict.REFUSED) {
               throw new api.APIError('FORBIDDEN', { message: INVITE_ONLY_REFUSAL_MESSAGE });
             }
+
+            // Naming the mailed invitation proves the address, so the account starts verified.
+            return verdict === UserCreationVerdict.ALLOWED_EMAIL_PROVEN
+              ? { data: { emailVerified: true } }
+              : undefined;
           },
         },
       },
@@ -185,12 +214,15 @@ export async function createBetterAuth(
     plugins: [
       plugins.twoFactor({ issuer: configService.getOrThrow<string>('ENVIRONMENT_NAME') }),
       plugins.organization({
-        sendInvitationEmail: ({ id, email, organization, inviter }) =>
+        sendInvitationEmail: ({ id, email, organization, inviter }, request) =>
           mailer.sendInvitation(
             email,
             organization.name,
             inviter.user.name,
-            `${baseURL}/accept-invitation/${id}`,
+            buildInvitationLink(id, request?.headers.get('origin'), {
+              engineUrl: baseURL,
+              panelOrigin: configService.getOrThrow<string>('ADMIN_PANEL_ORIGIN'),
+            }),
           ),
         ac: organizationAc,
         roles: organizationRoles,

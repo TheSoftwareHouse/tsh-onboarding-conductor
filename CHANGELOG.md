@@ -79,6 +79,18 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ### Fixed
 
+- **Security:** Admin authentication — An email sign-up must send the id of the invitation mailed
+  to its address (`invitationId`); knowing an invitee's address is no longer enough to register it
+  first and accept the invitation as them. The panel's invitation page sends it, and the account
+  starts with a verified email.
+- **Security:** Engine — An admin write (anything but `GET`, `HEAD` or `OPTIONS`) whose `Origin` is
+  neither `ADMIN_PANEL_ORIGIN` nor the engine's own is refused with `403 ADMIN_ORIGIN_REFUSED` and
+  audited as `auth.origin_refused`, so a page elsewhere on the same site cannot forge one with the
+  `SameSite=Lax` session cookie. A request without `Origin` is not a browser's and is judged by its
+  session as before.
+- Admin authentication — The invitation email links to the panel the inviter used, so it works
+  when the panel runs apart from the engine (`pnpm dev`), and a failed password-reset email is
+  logged as `AUTH_PASSWORD_RESET_MAIL_FAILED` instead of disappearing.
 - Admin panel — Cached reads no longer outlive the session that fetched them. Signing out, a
   session that expires or is revoked, or a sign-out in another tab clears the cache; another
   operator, a changed platform role or a switch of the active organization resets every query, and

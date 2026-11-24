@@ -100,6 +100,7 @@ export type WebhookAction = (typeof WEBHOOK_ACTIONS)[number];
  */
 export const ADMIN_ACCESS_ACTIONS = [
   'auth.access_granted',
+  'auth.origin_refused',
   'auth.session_missing',
   'auth.permission_missing',
   'auth.verification_unavailable',
@@ -307,6 +308,7 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
 
   // Admin access decisions.
   'auth.access_granted': 'success',
+  'auth.origin_refused': 'rejected',
   'auth.session_missing': 'rejected',
   'auth.two_factor_required': 'rejected',
   'auth.permission_missing': 'rejected',
@@ -498,6 +500,8 @@ export type AdminAccessAuditMetadata = {
   organizationId?: string | null;
   /** The `resource:action` the route demanded, on a `permission_missing` row. */
   requiredPermission?: string;
+  /** The page's origin, on an `origin_refused` row. */
+  origin?: string;
   // Keys of the retired bearer-token guard, present only on rows written before better-auth.
   tenantId?: string | null;
   userPrincipalName?: string | null;

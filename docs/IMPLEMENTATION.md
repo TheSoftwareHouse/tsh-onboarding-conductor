@@ -2983,6 +2983,7 @@ enum:
 | `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 410       |
 | `ADMIN_SESSION_REQUIRED` — an admin route with no valid session (Authentication, below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | 401       |
 | `ADMIN_PERMISSION_MISSING` — an admin route for an operator whose role lacks the route's permission                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 403       |
+| `ADMIN_ORIGIN_REFUSED` — an admin write from a page on an untrusted `Origin` (Authentication, below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | 403       |
 | `AUTH_UNAVAILABLE` — the `auth` schema could not be reached                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | 503       |
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                                                                                                                                                                                                                                                                                    | 503       |
 | `OTP_DELIVERY_FAILED`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 500       |
@@ -3122,11 +3123,16 @@ publish of that family notify the client's endpoint.
 **Invite-only.** `databaseHooks.user.create.before` (`src/auth/better-auth/invite-only.hook.ts`)
 refuses to create a user unless a pending, unexpired invitation exists for that email (matched
 case-insensitively) or the call is server-side — the seed has no HTTP request in the hook context.
+An email sign-up (`/sign-up/email`) must also name that invitation by sending its id as
+`invitationId`: the id travels only in the invitation email, so knowing an invitee's address is not
+enough to register it first and accept the invitation as them. Naming it proves the mailbox, so the
+account is created with `emailVerified: true`. A Microsoft sign-up has no id to send; the provider
+vouches for the address, and any pending invitation for it is enough.
 The admin plugin's `createUser` is refused over HTTP (`/v1/auth/admin/create-user`) unless the email
 has a pending invitation, so accounts stay invite-only; only a server-side call bypasses the rule. It covers email sign-up and Microsoft implicit sign-up. The
 refusal is `403` with the fixed message `Sign-up is by invitation only.`, which does not reveal
 whether an invitation exists. Email sign-up stays technically enabled so an invitee can create a
-password; the panel's `/accept-invitation/:id` page drives it.
+password; the panel's `/accept-invitation/:id` page drives it and sends the id from its URL.
 
 **Active organization.** `databaseHooks.session.create.before`
 (`active-organization.hook.ts`) gives a new session the user's oldest `member` row as its
@@ -3147,10 +3153,14 @@ bootstrap. With `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD` set and n
 the password. A second boot finds the superadmin and does nothing. The seeded user is an ordinary
 credential user, with two-factor off until it turns it on.
 
-**Mail.** `AuthMailer` (`src/auth/auth-mailer.ts`) sends the invitation
-(`<BETTER_AUTH_URL>/accept-invitation/<invitation id>`) and the password-reset link through
-`nodemailer` on `AUTH_SMTP_URL` and `AUTH_MAIL_FROM`; locally that is MailHog. It is not a
-connector. The reset mail is not awaited, so response time does not reveal which addresses exist.
+**Mail.** `AuthMailer` (`src/auth/auth-mailer.ts`) sends the invitation and the password-reset
+link through `nodemailer` on `AUTH_SMTP_URL` and `AUTH_MAIL_FROM`; locally that is MailHog. It is
+not a connector. The invitation links to `<origin>/accept-invitation/<invitation id>`, where the
+origin is the one the inviter's request came from when that is `ADMIN_PANEL_ORIGIN` (a panel served
+apart from the engine, such as `pnpm dev`), and `BETTER_AUTH_URL` otherwise
+(`src/auth/better-auth/invitation-link.ts`); an untrusted `Origin` never reaches the link. The reset
+mail is not awaited, so response time does not reveal which addresses exist; a failed send is
+logged as `AUTH_PASSWORD_RESET_MAIL_FAILED` with the user id.
 
 Configuration (`.env.dist` documents each inline): `ADMIN_AUTH_ENABLED` (default `true`; `false` is
 a local-only escape hatch the engine refuses at startup once `NODE_ENV=production`). With it on,
@@ -3173,24 +3183,26 @@ actor; the guard's own `auth.*` row names the operator who called.
 
 A request to a guarded route is refused as:
 
-| Status                  | Code                       | When                                                                                                         |
-| ----------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| 401 Unauthorized        | `ADMIN_SESSION_REQUIRED`   | No cookie, or the session is expired or revoked                                                              |
-| 403 Forbidden           | `ADMIN_PERMISSION_MISSING` | The role holds no such permission, or the session has no active organization; signing in again cannot fix it |
-| 503 Service Unavailable | `AUTH_UNAVAILABLE`         | The `auth` schema could not be reached, so the session was never judged                                      |
+| Status                  | Code                       | When                                                                                                                                                                                                                                                                                                                  |
+| ----------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 403 Forbidden           | `ADMIN_ORIGIN_REFUSED`     | A write (not GET, HEAD or OPTIONS) whose `Origin` is neither `ADMIN_PANEL_ORIGIN` nor the engine's own (`BETTER_AUTH_URL`); checked before the session, so a forged same-site form post carrying the `SameSite=Lax` cookie is refused. A request without `Origin` is not a browser's and goes on to the session check |
+| 401 Unauthorized        | `ADMIN_SESSION_REQUIRED`   | No cookie, or the session is expired or revoked                                                                                                                                                                                                                                                                       |
+| 403 Forbidden           | `ADMIN_PERMISSION_MISSING` | The role holds no such permission, or the session has no active organization; signing in again cannot fix it                                                                                                                                                                                                          |
+| 503 Service Unavailable | `AUTH_UNAVAILABLE`         | The `auth` schema could not be reached, so the session was never judged                                                                                                                                                                                                                                               |
 
 Every decision on these routes, granted or refused, is written to the admin access audit trail
 (`packages/engine/src/auth/admin-access-audit.port.ts`), so it answers who read admin data, not only
 who was turned away:
 
-| Audit action                    | Written when                                                 |
-| ------------------------------- | ------------------------------------------------------------ |
-| `auth.access_granted`           | The route was allowed                                        |
-| `auth.session_missing`          | No valid session (replaces `auth.token_rejected`)            |
-| `auth.two_factor_required`      | Legacy: written while TOTP was mandatory, no longer written  |
-| `auth.permission_missing`       | The role lacks the permission (replaces `auth.role_missing`) |
-| `auth.verification_unavailable` | The auth store was unreachable                               |
-| `auth.access_unauthenticated`   | `ADMIN_AUTH_ENABLED=false` let the request through           |
+| Audit action                    | Written when                                                  |
+| ------------------------------- | ------------------------------------------------------------- |
+| `auth.access_granted`           | The route was allowed                                         |
+| `auth.origin_refused`           | A write from an untrusted `Origin`; metadata carries `origin` |
+| `auth.session_missing`          | No valid session (replaces `auth.token_rejected`)             |
+| `auth.two_factor_required`      | Legacy: written while TOTP was mandatory, no longer written   |
+| `auth.permission_missing`       | The role lacks the permission (replaces `auth.role_missing`)  |
+| `auth.verification_unavailable` | The auth store was unreachable                                |
+| `auth.access_unauthenticated`   | `ADMIN_AUTH_ENABLED=false` let the request through            |
 
 The row's `actorId` is the operator's user id and its metadata carries `method`, `email`,
 `platformRole`, `organizationId` and, for a refusal, `requiredPermission` (`connector:write`). It
