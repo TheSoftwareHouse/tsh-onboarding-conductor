@@ -97,6 +97,21 @@ test.describe('admin panel sign-in gate @auth-enabled', () => {
     await expect(page.getByRole('table')).toHaveCount(0);
   });
 
+  test('should return to the sign-in form when the engine answers 401 for a lost session', async ({
+    context,
+    page,
+  }) => {
+    await signInWithTwoFactor(page, OPERATOR_EMAIL);
+    await expect(page.getByRole('table')).toBeVisible();
+
+    // The session ends outside the panel (expired or revoked); the next read is what notices.
+    await context.clearCookies();
+    await page.getByRole('button', { name: 'Reload' }).click();
+
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+    await expect(page.getByRole('table')).toHaveCount(0);
+  });
+
   test('should let an account without a second factor in, and turn it on and off from Account', async ({
     page,
   }) => {

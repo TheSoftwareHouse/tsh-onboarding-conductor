@@ -10,6 +10,8 @@ export const ENGINE_ONBOARDINGS_ROUTE = '**/v1/onboardings**';
 export const OPERATOR_EMAIL = 'operator@example.com';
 export const ENROLLING_EMAIL = 'enrolling@example.com';
 export const VIEWER_EMAIL = 'viewer@example.com';
+/** Belongs to the organizations Alpha (every onboarding) and Beta (one onboarding). */
+export const SWITCHER_EMAIL = 'switcher@example.com';
 export const PASSWORD = 'correct-horse-battery';
 export const TOTP_CODE = '123456';
 export const TOTP_SECRET = 'JBSWY3DPEHPK3PXP';

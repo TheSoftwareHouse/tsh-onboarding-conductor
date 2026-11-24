@@ -1,5 +1,4 @@
 import '@testing-library/jest-dom/vitest';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,15 +50,7 @@ const ORGANIZATIONS = [
 ];
 
 function renderSwitcher() {
-  const queryClient = new QueryClient();
-  const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
-  const view = render(
-    <QueryClientProvider client={queryClient}>
-      <OrganizationSwitcher />
-    </QueryClientProvider>,
-  );
-
-  return { ...view, invalidate };
+  return render(<OrganizationSwitcher />);
 }
 
 beforeEach(() => {
@@ -97,24 +88,23 @@ describe('OrganizationSwitcher', () => {
     expect(screen.getByRole('option', { name: 'Beta' })).toBeInTheDocument();
   });
 
-  it('switches the active organization and drops the cached reads', async () => {
-    const { invalidate } = renderSwitcher();
+  it('switches the active organization', async () => {
+    renderSwitcher();
 
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Organization' }), 'org-2');
 
     await waitFor(() => expect(mockedSetActive).toHaveBeenCalledWith({ organizationId: 'org-2' }));
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
+    expect(mockedErrorToast).not.toHaveBeenCalled();
   });
 
-  it('reports a refused switch and keeps the cache', async () => {
+  it('reports a refused switch', async () => {
     mockedSetActive.mockResolvedValue({ data: null, error: { message: 'Not a member' } });
-    const { invalidate } = renderSwitcher();
+    renderSwitcher();
 
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Organization' }), 'org-2');
 
     await waitFor(() =>
       expect(mockedErrorToast).toHaveBeenCalledWith('Organization not switched', 'Not a member'),
     );
-    expect(invalidate).not.toHaveBeenCalled();
   });
 });

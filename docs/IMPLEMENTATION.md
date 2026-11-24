@@ -4191,6 +4191,17 @@ Decisions worth keeping:
   a two-click confirm: choosing a schedule is not itself the destructive act, and the sentence
   under it says when the rotation it causes falls due — at once, when the chosen interval is
   shorter than the active key's current age.
+- **The cache belongs to one session.** `SessionCacheGuard` (mounted by `AuthProvider` under
+  `QueryProvider`, while sign-in is on) reads the scope of every cached read — the operator, their
+  platform role and the active organization — from better-auth's session. When the session ends
+  (sign-out, expiry, revocation, a sign-out broadcast from another tab) it calls
+  `queryClient.clear()`; when the scope changes (another operator, a role change, an organization
+  switch) it calls `resetQueries()` and notifies better-auth's `$listOrg`, which better-auth itself
+  refreshes only after an organization is created, updated or deleted. A `401` from any read or
+  write reaches `handleUnauthorized` (`src/services/auth/session-cache.ts`) through the query and
+  mutation caches' `onError`: it removes the inactive queries and re-reads the session, and if that
+  session is gone the gate shows the sign-in form and the guard clears the rest. Without this the
+  no-refetch-on-mount rule above would show the next operator the previous one's rows.
 - **Zod-validated, explicitly projected responses.** `projectAdminOnboardingSummary` copies exactly
   the lifecycle-safe fields and drops everything else, so a future engine field (notably `context`)
   cannot reach the browser by accident.
@@ -4223,7 +4234,11 @@ Decisions worth keeping:
   spawned as its own CLI — resolved from `@playwright/test` and run with the Node executable
   already running the harness — rather than through the package manager, because
   `node $npm_execpath exec playwright` assumes the package manager is a JavaScript file and a
-  standalone pnpm (`@pnpm/exe`) is a native binary.
+  standalone pnpm (`@pnpm/exe`) is a native binary. The fixture also stands in for better-auth's
+  cookie session: its accounts (an operator, a viewer without the admin permission, one still to
+  enrol in two-factor, and `switcher@example.com` in two organizations, whose second sees only one
+  onboarding) let `admin-session-cache.spec.ts` prove that no cached read outlives the session,
+  operator or organization it was fetched for.
 
 - **Configuration is read at runtime, not baked in at build time.** Vite inlines
   `import.meta.env.VITE_*` when the panel is built, which would otherwise mean one image per

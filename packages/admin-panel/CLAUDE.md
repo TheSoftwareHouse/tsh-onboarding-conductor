@@ -133,6 +133,11 @@ A domain is one or more fetch/write modules plus exactly one `<domain>Queries` f
   the write deleted, once the editor unmounts (`useRemoveVersionOnUnmount`), never while it is
   still mounted.
 - This tier never imports from `src/app/` (ADR 0022).
+- The cache is scoped to the session: `SessionCacheGuard` clears it when the session ends and resets
+  it when the operator, platform role or active organization changes; a 401 reaches
+  `handleUnauthorized` through `createQueryClient`'s `onUnauthorized`. Never invalidate or clear the
+  whole cache on an auth change yourself — a new auth action that changes the session must signal
+  better-auth's `$sessionSignal`, and the guard does the rest.
 - A read's loading, failure and empty states go through `Loader` / `EmptyState` / `ErrorState` / `LoadFailure` (ADR 0052), never a bare `StatusRegion`.
 
 ## Structure

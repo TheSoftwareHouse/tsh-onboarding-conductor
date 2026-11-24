@@ -7,7 +7,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { createQueryClient } from './create-query-client';
-import type { ApiError } from '@/services/api/api-error';
+import { ApiError as ApiErrorClass, type ApiError } from '@/services/api/api-error';
 import { mutationOptions, type AppMutationMeta, type InvalidationMeta } from './mutation-options';
 
 interface Deferred {
@@ -148,5 +148,48 @@ describe('createQueryClient', () => {
     ).rejects.toThrow('no');
 
     expect(queryFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createQueryClient onUnauthorized', () => {
+  function refusal(status: number): ApiErrorClass {
+    return new ApiErrorClass('refused', { status });
+  }
+
+  it('reports a read the engine refused with a 401', async () => {
+    const onUnauthorized = vi.fn();
+    const client = createQueryClient({ onUnauthorized });
+
+    await client
+      .fetchQuery({ queryKey: ['doc'], queryFn: () => Promise.reject(refusal(401)) })
+      .catch(() => undefined);
+
+    expect(onUnauthorized).toHaveBeenCalledWith(client);
+  });
+
+  it('reports a write the engine refused with a 401', async () => {
+    const onUnauthorized = vi.fn();
+    const client = createQueryClient({ onUnauthorized });
+    const observer = new MutationObserver(client, {
+      mutationFn: () => Promise.reject(refusal(401)),
+    });
+
+    await observer.mutate().catch(() => undefined);
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores every other failure', async () => {
+    const onUnauthorized = vi.fn();
+    const client = createQueryClient({ onUnauthorized });
+
+    await client
+      .fetchQuery({ queryKey: ['a'], queryFn: () => Promise.reject(refusal(403)) })
+      .catch(() => undefined);
+    await client
+      .fetchQuery({ queryKey: ['b'], queryFn: () => Promise.reject(new Error('offline')) })
+      .catch(() => undefined);
+
+    expect(onUnauthorized).not.toHaveBeenCalled();
   });
 });

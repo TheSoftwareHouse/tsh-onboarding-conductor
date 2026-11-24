@@ -61,7 +61,24 @@ const ACCOUNTS = {
   'operator@example.com': { id: 'user-operator', twoFactorEnabled: true, hasPermission: true },
   'enrolling@example.com': { id: 'user-enrolling', twoFactorEnabled: false, hasPermission: true },
   'viewer@example.com': { id: 'user-viewer', twoFactorEnabled: true, hasPermission: false },
+  // Belongs to two organizations, so the panel offers its organization switcher.
+  'switcher@example.com': {
+    id: 'user-switcher',
+    twoFactorEnabled: true,
+    hasPermission: true,
+    organizations: [
+      { id: 'org-alpha', name: 'Alpha', slug: 'alpha' },
+      { id: 'org-beta', name: 'Beta', slug: 'beta' },
+    ],
+  },
 };
+
+/** The one organization whose onboarding list differs: it holds only the special record. */
+const NARROW_ORGANIZATION_ID = 'org-beta';
+
+function organizationsOf(email) {
+  return ACCOUNTS[email].organizations ?? [];
+}
 
 const sessions = new Map();
 const pendingChallenges = new Map();
@@ -69,7 +86,13 @@ const pendingChallenges = new Map();
 let enforceAuth = false;
 
 function createSession(email, twoFactorEnabled) {
-  return { email, twoFactorEnabled, hasPermission: ACCOUNTS[email].hasPermission };
+  return {
+    email,
+    twoFactorEnabled,
+    hasPermission: ACCOUNTS[email].hasPermission,
+    // As the engine's session hook does: a new session acts in the user's first organization.
+    activeOrganizationId: organizationsOf(email)[0]?.id ?? null,
+  };
 }
 
 function readCookie(request, name) {
@@ -118,7 +141,7 @@ function toSessionPayload(token, session) {
       id: `session-${token}`,
       token,
       userId: ACCOUNTS[session.email].id,
-      activeOrganizationId: null,
+      activeOrganizationId: session.activeOrganizationId,
       expiresAt: '2099-01-01T00:00:00.000Z',
       createdAt: '2026-07-01T00:00:00.000Z',
       updatedAt: '2026-07-01T00:00:00.000Z',
@@ -167,8 +190,24 @@ async function respondToAuth(request, response, pathname) {
       return true;
 
     case 'GET /organization/list':
-      sendJson(response, 200, []);
+      sendJson(response, 200, session ? organizationsOf(session.email) : []);
       return true;
+
+    case 'POST /organization/set-active': {
+      const { organizationId } = await readJsonBody(request);
+      const organization = session
+        ? organizationsOf(session.email).find((candidate) => candidate.id === organizationId)
+        : undefined;
+
+      if (!organization) {
+        sendAuthError(response, 403, 'NOT_A_MEMBER', 'You are not a member of this organization');
+        return true;
+      }
+
+      session.activeOrganizationId = organization.id;
+      sendJson(response, 200, { ...organization, members: [], invitations: [] });
+      return true;
+    }
 
     case 'GET /list-accounts':
       sendJson(response, 200, session ? [{ id: 'account-1', providerId: 'credential' }] : []);
@@ -344,10 +383,12 @@ function createRecord(sequence) {
   };
 }
 
+const SPECIAL_RECORD_ID = '018f1e2a-eeee-7000-8000-00000000000e';
+
 const RESPONSES = [
   ...Array.from({ length: 39 }, (_, sequence) => createRecord(sequence)),
   {
-    onboardingId: '018f1e2a-eeee-7000-8000-00000000000e',
+    onboardingId: SPECIAL_RECORD_ID,
     workflowId: 'kyc basic / encoding?',
     workflowVersion: 7,
     status: 'approved',
@@ -599,7 +640,12 @@ async function respondToGet(request, response) {
     throw new Error(`Fixture received an unsupported query string: ${requestUrl.search}`);
   }
 
-  const filtered = RESPONSES.filter((record) => matchesQuery(record, query));
+  // Onboardings are scoped to the active organization: the narrow one sees only one record.
+  const narrow = findSession(request)?.activeOrganizationId === NARROW_ORGANIZATION_ID;
+  const filtered = RESPONSES.filter(
+    (record) =>
+      matchesQuery(record, query) && (!narrow || record.onboardingId === SPECIAL_RECORD_ID),
+  );
 
   if (RESPONSE_DELAY_MS > 0) {
     await delay(RESPONSE_DELAY_MS);

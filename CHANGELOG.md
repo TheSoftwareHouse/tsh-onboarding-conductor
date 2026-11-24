@@ -79,6 +79,12 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ### Fixed
 
+- Admin panel — Cached reads no longer outlive the session that fetched them. Signing out, a
+  session that expires or is revoked, or a sign-out in another tab clears the cache; another
+  operator, a changed platform role or a switch of the active organization resets every query, and
+  the organization switcher reloads its list. A `401` from any read or write drops the reads not on
+  screen and re-reads the session, so a lost session returns to the sign-in form. Before, the next
+  operator could see the previous one's data.
 - Docs — The API reference no longer lists an archived 0.1 version while 0.1 is still the current version.
 
 ## 0.1.2 — 2026-10-16
