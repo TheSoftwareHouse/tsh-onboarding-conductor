@@ -18,7 +18,7 @@ export class AuditController {
   ) {}
 
   @Get()
-  @AdminRoute()
+  @AdminRoute({ resource: 'audit', action: 'read' })
   @ApiOperation({
     operationId: 'listAuditEvents',
     summary: 'List audit events',

@@ -133,6 +133,11 @@ A domain is one or more fetch/write modules plus exactly one `<domain>Queries` f
   the write deleted, once the editor unmounts (`useRemoveVersionOnUnmount`), never while it is
   still mounted.
 - This tier never imports from `src/app/` (ADR 0022).
+- The cache is scoped to the session: `SessionCacheGuard` clears it when the session ends and resets
+  it when the operator, platform role or active organization changes; a 401 reaches
+  `handleUnauthorized` through `createQueryClient`'s `onUnauthorized`. Never invalidate or clear the
+  whole cache on an auth change yourself — a new auth action that changes the session must signal
+  better-auth's `$sessionSignal`, and the guard does the rest.
 - A read's loading, failure and empty states go through `Loader` / `EmptyState` / `ErrorState` / `LoadFailure` (ADR 0052), never a bare `StatusRegion`.
 
 ## Structure
@@ -145,7 +150,7 @@ A nested route nests as a folder named for what it shows: `/onboardings/:onboard
 `src/app/onboardings/details/`.
 
 Outside the routes: `src/components/ui/` (shared components), `src/services/` (external
-boundaries — `auth/` wraps MSAL, `api/` wraps axios), `src/api/<domain>/`, and `src/config/`,
+boundaries — `auth/` wraps the better-auth client, `api/` wraps axios), `src/api/<domain>/`, and `src/config/`,
 `src/constants/`, `src/lib/`. `src/app/providers/` and `src/app/layout/` are the app shell. The
 shell mounts no header: **every page renders its own `PageHeader`**.
 

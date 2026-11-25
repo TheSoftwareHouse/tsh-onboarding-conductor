@@ -39,10 +39,29 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 - Admin panel — The Onboardings Workflow and Workflow version filters are pickers fed by the engine's workflow lists instead of text fields; the version is cleared when the workflow changes.
 - Admin panel — Filter selects (Onboardings, Workflows, Logs) use the panel's own `Select` instead of the browser's native select.
-- **Breaking:** Engine — `POST /v1/onboardings/:id/review/:action`, the manual review decision,
-  now requires the same Microsoft Entra ID bearer token as the other admin routes; a caller that
-  posted it without a token now gets `401`. It was the one operator action outside the guard. The
-  admin panel already sent the token, so it needs no change.
+- **Breaking:** Admin authentication — Operators now sign in through better-auth, built into the
+  engine, instead of Microsoft Entra ID bearer tokens. Admin routes (`/v1/admin/*`, the operator
+  reads, export and agreement link on `/v1/onboardings`, the pending-connector reconcile and the
+  manual review decision) need a better-auth session cookie, not an `Authorization: Bearer` header,
+  and a caller that sends only a token gets `401 ADMIN_SESSION_REQUIRED`. Each route also needs a
+  permission (`onboarding:read`, `workflow:publish`, `connector:write` and so on) held by the
+  operator's role in their active organization, or the platform `superadmin` role; a role without
+  it gets `403 ADMIN_PERMISSION_MISSING`. Two-factor authentication (TOTP) is optional: each
+  operator turns it on or off on the panel's new Account page, and an operator who has it is asked
+  for a code at sign-in. Accounts are by invitation only, and the first
+  superadmin is seeded from `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD`. A BFF or script
+  that used an Entra client-credentials token needs an operator account instead; there is no API
+  key. Removed: `ADMIN_SSO_PROVIDER`, `AZURE_TENANT_ID`, `AZURE_API_AUDIENCE`,
+  `ADMIN_REQUIRED_ROLES`, `VITE_SSO_PROVIDER`, `VITE_AZURE_CLIENT_ID`, `VITE_AZURE_TENANT_ID`,
+  `VITE_AZURE_API_SCOPE` and `VITE_AZURE_REDIRECT_URI`. Added, required while
+  `ADMIN_AUTH_ENABLED=true`: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `AUTH_SMTP_URL` and
+  `AUTH_MAIL_FROM`; optional: `AUTH_SUPERADMIN_EMAIL`, `AUTH_SUPERADMIN_PASSWORD` and the Microsoft
+  triple `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET`, `AUTH_MICROSOFT_TENANT_ID`.
+  Microsoft sign-in is now optional and skips the engine's TOTP step, so require MFA in the tenant.
+  Migration `0003` creates the `auth` schema; the audit actions `auth.token_rejected` and
+  `auth.role_missing` are replaced by `auth.session_missing` and `auth.permission_missing`, and the audit identity is now `userId`, `email`, `platformRole` and
+  `organizationId`. The manual review route, which was open until 2026-11-01, is part of this
+  surface. CORS now allows credentials and `POST`, and no longer allows `Authorization`.
 - Admin panel — Every page shows loading, error and empty states through one set of components:
   a spinner that appears after 150 ms, "Unable to load …" with Retry, "No access to …", not-found
   pages with a link back, and empty and no-match messages under the table's column headers.
@@ -60,6 +79,24 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ### Fixed
 
+- **Security:** Admin authentication — An email sign-up must send the id of the invitation mailed
+  to its address (`invitationId`); knowing an invitee's address is no longer enough to register it
+  first and accept the invitation as them. The panel's invitation page sends it, and the account
+  starts with a verified email.
+- **Security:** Engine — An admin write (anything but `GET`, `HEAD` or `OPTIONS`) whose `Origin` is
+  neither `ADMIN_PANEL_ORIGIN` nor the engine's own is refused with `403 ADMIN_ORIGIN_REFUSED` and
+  audited as `auth.origin_refused`, so a page elsewhere on the same site cannot forge one with the
+  `SameSite=Lax` session cookie. A request without `Origin` is not a browser's and is judged by its
+  session as before.
+- Admin authentication — The invitation email links to the panel the inviter used, so it works
+  when the panel runs apart from the engine (`pnpm dev`), and a failed password-reset email is
+  logged as `AUTH_PASSWORD_RESET_MAIL_FAILED` instead of disappearing.
+- Admin panel — Cached reads no longer outlive the session that fetched them. Signing out, a
+  session that expires or is revoked, or a sign-out in another tab clears the cache; another
+  operator, a changed platform role or a switch of the active organization resets every query, and
+  the organization switcher reloads its list. A `401` from any read or write drops the reads not on
+  screen and re-reads the session, so a lost session returns to the sign-in form. Before, the next
+  operator could see the previous one's data.
 - Docs — The API reference no longer lists an archived 0.1 version while 0.1 is still the current version.
 
 ## 0.1.2 — 2026-10-16

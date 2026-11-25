@@ -141,14 +141,18 @@ const WEBHOOK_RESOURCE_ALLOWLIST: Record<WebhookAction, readonly WebhookResource
 };
 
 /**
- * Which actor type each admin access outcome may claim. An `access_granted` or `role_missing` row
- * means the token was verified and therefore names a real operator; the rest never got that far
+ * Which actor type each admin access outcome may claim. An `access_granted` or `permission_missing` row
+ * (or the legacy `role_missing` and `two_factor_required`) means the session was verified and therefore names a real operator; the rest never got that far
  * and must stay anonymous. Asserting the pairing keeps a coding mistake from attributing an
  * unverified request to a named person.
  */
 const ADMIN_ACCESS_ACTOR_ALLOWLIST: Record<AdminAccessAction, AdminAccessActorType> = {
   'auth.access_granted': 'operator',
+  'auth.two_factor_required': 'operator',
+  'auth.permission_missing': 'operator',
   'auth.role_missing': 'operator',
+  'auth.origin_refused': 'anonymous',
+  'auth.session_missing': 'anonymous',
   'auth.token_rejected': 'anonymous',
   'auth.verification_unavailable': 'anonymous',
   'auth.access_unauthenticated': 'anonymous',
@@ -767,6 +771,18 @@ export class AuditService {
   private filterAdminAccessMetadata(metadata: AdminAccessAuditMetadata): AdminAccessAuditMetadata {
     const safeMetadata: AdminAccessAuditMetadata = { method: metadata.method };
 
+    if (metadata.email != null) {
+      safeMetadata.email = metadata.email;
+    }
+    if (metadata.platformRole != null) {
+      safeMetadata.platformRole = metadata.platformRole;
+    }
+    if (metadata.organizationId != null) {
+      safeMetadata.organizationId = metadata.organizationId;
+    }
+    if (metadata.requiredPermission !== undefined) {
+      safeMetadata.requiredPermission = metadata.requiredPermission;
+    }
     if (metadata.tenantId != null) {
       safeMetadata.tenantId = metadata.tenantId;
     }

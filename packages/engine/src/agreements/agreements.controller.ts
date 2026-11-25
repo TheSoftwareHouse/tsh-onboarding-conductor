@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Post, Query, Req } from '@nestjs/common';
 import { ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AdminRoute } from '../auth/admin-route.decorator';
-import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
+import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/admin-session.guard';
 import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-responses.decorator';
 import { API_TAGS } from '../openapi/openapi.constants';
 import { toPaginatedMeta } from '../pagination';
@@ -28,7 +28,7 @@ export class AgreementsController {
   constructor(private readonly agreementsService: AgreementsService) {}
 
   @Post()
-  @AdminRoute()
+  @AdminRoute({ resource: 'agreement', action: 'write' })
   @ApiOperation({
     operationId: 'publishAgreement',
     summary: 'Publish the next version of an agreement family',
@@ -55,14 +55,14 @@ export class AgreementsController {
     const published = await this.agreementsService.publish(
       dto.key,
       dto.type,
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
 
     return toPublishAgreementResponse(published);
   }
 
   @Get()
-  @AdminRoute()
+  @AdminRoute({ resource: 'agreement', action: 'read' })
   @ApiOperation({
     operationId: 'listAgreements',
     summary: 'List published agreement versions',

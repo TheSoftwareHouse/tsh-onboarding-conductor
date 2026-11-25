@@ -9,7 +9,7 @@ description: Start an onboarding, read the step to render, submit its data. Thre
 
 ## Publish the agreement it declares
 
-`base` declares one agreement family, `base-terms`, collected on its `accept_terms` step. An onboarding cannot start on a workflow whose declared family has no published version: the start answers `503 AGREEMENT_NOT_PUBLISHED`. So publish version 1 once, before the first start. The route is an operator one; a fresh clone runs with `ADMIN_AUTH_ENABLED=false`, so no token is needed locally.
+`base` declares one agreement family, `base-terms`, collected on its `accept_terms` step. An onboarding cannot start on a workflow whose declared family has no published version: the start answers `503 AGREEMENT_NOT_PUBLISHED`. So publish version 1 once, before the first start. The route is an operator one; a fresh clone runs with `ADMIN_AUTH_ENABLED=false`, so no session is needed locally.
 
 ```bash
 $ curl -X POST localhost:3000/v1/admin/agreements \

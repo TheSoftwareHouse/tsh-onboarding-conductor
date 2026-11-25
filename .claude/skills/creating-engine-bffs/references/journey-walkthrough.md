@@ -334,8 +334,9 @@ HTTP 200
 
 That `200` is not permission — it is `ADMIN_AUTH_ENABLED=false`, the shipped default in `.env.dist`
 and a local-only escape hatch the engine refuses to start with once `NODE_ENV=production`. The same
-call answers `401` wherever auth is on, and `403` for a token whose roles miss
-`ADMIN_REQUIRED_ROLES`. A BFF built against a local engine can therefore proxy an admin route,
+call answers `401 ADMIN_SESSION_REQUIRED` wherever auth is on without a better-auth session cookie,
+and `403 ADMIN_PERMISSION_MISSING`
+for one whose role or org permission does not cover the route. A BFF built against a local engine can therefore proxy an admin route,
 pass every local test, and fail in every real environment.
 
 Set `ADMIN_AUTH_ENABLED=true` in `.env` before trusting any local result about what a BFF may

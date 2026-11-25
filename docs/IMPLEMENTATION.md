@@ -1192,7 +1192,7 @@ business outcome the operator needs to see in the list and the audit log, not a 
 ### Manual review
 
 `POST /v1/onboardings/:id/review/:action` with `action ∈ {approve, reject, invalid}` fires
-`manual.<action>`. An operator route, behind the admin bearer guard (§11). Same locking and audit discipline; the audit action is
+`manual.<action>`. An operator route, behind the admin session guard (§11), needing `onboarding:review`. Same locking and audit discipline; the audit action is
 `onboarding.manual_review_decision` and carries the trigger. An unsupported action is rejected by
 `UnsupportedManualReviewActionPipe`, which also writes a `rejected_attempt` audit record before
 throwing — so an operator's bad request is still evidence. A manual decision passes the
@@ -1489,7 +1489,7 @@ any `psql` session exposes every connector credential in clear (see decision rec
 0025). There is no cache: every execution re-reads the row, so a credential submitted over the admin API takes
 effect on the next call on every instance without a restart.
 
-Five guarded routes, all behind `AzureJwtGuard`, form the admin surface:
+Five guarded routes, all behind `@AdminRoute(...)` (`connector:read` for the two reads, `connector:write` for the rest), form the admin surface:
 
 | Method | Path                                | Does                                                    |
 | ------ | ----------------------------------- | ------------------------------------------------------- |
@@ -2981,6 +2981,10 @@ enum:
 | `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 400       |
 | `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 401 / 503 |
 | `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 410       |
+| `ADMIN_SESSION_REQUIRED` — an admin route with no valid session (Authentication, below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | 401       |
+| `ADMIN_PERMISSION_MISSING` — an admin route for an operator whose role lacks the route's permission                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 403       |
+| `ADMIN_ORIGIN_REFUSED` — an admin write from a page on an untrusted `Origin` (Authentication, below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | 403       |
+| `AUTH_UNAVAILABLE` — the `auth` schema could not be reached                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | 503       |
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                                                                                                                                                                                                                                                                                    | 503       |
 | `OTP_DELIVERY_FAILED`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 500       |
 
@@ -3000,62 +3004,248 @@ echo a submitted or allowed value, e.g. `@IsIn`) as an instance property outside
 body, for `ApiFailureAuditFilter` to read into the `api.*` audit row (§8). No new code is exposed
 to callers, so the error-code table above gains no `VALIDATION_FAILED` entry.
 
-### Authentication — Microsoft Entra ID on the admin surface
+### Authentication — better-auth on the admin surface
 
-Every route under `/v1/admin/`, the admin onboarding reads (`GET /v1/onboardings`,
-`GET /v1/onboardings/export`, `GET /v1/onboardings/:id`, `GET /v1/onboardings/:id/transitions`) and the
-operator's manual review decision (`POST /v1/onboardings/:id/review/:action`) require a verified Microsoft Entra
-ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`) through
-the `AdminRoute()` decorator (`packages/engine/src/auth/admin-route.decorator.ts`), which applies the
-guard and writes its contract into the OpenAPI document in one step. Every other route — the
-customer-facing onboarding flow and provider webhooks —
-stays open: there is no Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
-`ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only
-`GET`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`) is that
+Operators sign in through better-auth, mounted in the engine
+([0053](decisions/0053-better-auth-for-admin-authentication.md)). The panel signs in with email and
+password, plus a TOTP code for an operator who turned two-factor on, or with Microsoft when it is configured. The session is an
+httpOnly cookie (`better-auth.session_token`, `SameSite=Lax`, `Secure` when `NODE_ENV=production`),
+not a bearer token. Every route under `/v1/admin/`, the operator routes on onboardings (the reads,
+the export, the agreement link, the pending-connector reconcile) and the manual review decision
+(`POST /v1/onboardings/:id/review/:action`) require a session whose operator holds the route's
+permission. Every other route — the customer-facing onboarding flow and provider webhooks — stays
+open: there is no operator identity for an end customer or a provider to hold, so CORS (`main.ts`
+allows exactly `ADMIN_PANEL_ORIGIN`, plus origin-less requests, with `credentials: true`,
+`Content-Type` as the only allowed header and `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`) is that
 surface's only constraint, and it constrains browsers, not clients.
 
-The agreement routes follow the same split. Publishing, listing published versions, reading one
-onboarding's agreements and linking one to it are operator actions marked `@AdminRoute()`;
-`POST /v1/onboardings/:id/agreements/:agreementId/accept` does not, because it serves the end user's
-own onboarding flow, which holds no Entra identity. It is also not gated on the onboarding's
-lifecycle status — an approved customer still has to be able to accept a new version of the terms.
-It is gated on the link already existing: a pair no start, submit, publish or operator link ever
-created is `404 AGREEMENT_NOT_FOUND`. Without that, the unguarded route would be a second way to
-create a link, and anyone holding an onboarding id could attach any published version to it and
-make the next publish of that family notify the client's endpoint.
+**Mount.** `AuthModule.configure()` applies `BetterAuthMiddleware`
+(`packages/engine/src/auth/better-auth/better-auth.middleware.ts`) to `v1/auth/{*path}`, so the
+handler lives at `/v1/auth/*` (every path outside `/v1` is the panel's `index.html`). It needs an
+unparsed body, so `main.ts`'s JSON and urlencoded parsers skip `/v1/auth`, as they skip
+`/v1/webhooks`. Under Nest's middleware Express has already split the path into `baseUrl` and a
+`url` without the query string, and better-call rebuilds the request from those two, so the
+middleware restores `req.url` from `req.originalUrl` (and empties `baseUrl`) before handing over;
+without it every query parameter of a `GET` under `/v1/auth` — the users list's role filter,
+search and paging — is silently dropped. Mounting in the module instead of `main.ts` means the e2e suites, which build the
+app through `Test.createTestingModule`, get it too. With `ADMIN_AUTH_ENABLED=false` no instance and
+no middleware exist. There is no global guard: the library's Nest wrapper registers one, which
+would lock the public flow, so it is not used.
 
-The spec's API-key scheme (`osk_live_…`, argon2id-hashed, scoped) is unbuilt; Entra SSO is what
-shipped instead (`feat: add azure sso for admin panel`).
+**ESM loader rule.** `better-auth` (pinned `1.7.25`) is ESM-only and the engine emits CommonJS, so a
+static `import` or a plain `import()` becomes a `require()` that fails. Exactly one module names the
+specifier, `src/auth/better-auth/load-better-auth.ts`: it loads the package through a dynamic
+`import()` the TypeScript emitter cannot rewrite (the mechanism `file-type` already uses in
+`src/storage/s3-object-storage.service.ts`), with `import type` for the types. Everything else takes
+runtime exports from `loadBetterAuth()` and depends on the `ADMIN_SESSION_VERIFIER` port, so unit
+specs never load the library; `load-better-auth.spec.ts` scans `src/` and fails if a second module
+names it.
+
+**Storage.** better-auth's tables (`user`, `session`, `account`, `verification`, `twoFactor`,
+`organization`, `member`, `invitation`) live in their own Postgres schema, `auth`, created by
+migration `0003_better_auth_schema.ts` with better-auth's own camelCase columns and no TypeORM
+entities. The instance reads them through its own `pg` pool (`search_path=auth`), closed on
+shutdown. `better-auth migrate` is never run, and `advanced.database.validateSchema` is off, so the
+library never diffs or touches the schema at runtime. Engine data carries no organization: an
+organization groups operators and grants permissions, and nothing in a query filters by it.
+
+**Guard.** `@AdminRoute(permission)` (`src/auth/admin-route.decorator.ts`) applies
+`AdminSessionGuard` (`src/auth/admin-session.guard.ts`), stores the permission as metadata and writes
+the cookie security scheme and the three refusals into the OpenAPI document in one step, so the two
+cannot disagree. The guard decides in this order:
+
+1. `ADMIN_AUTH_ENABLED=false`: record `unauthenticated` and let the request through.
+2. No valid session: `401 ADMIN_SESSION_REQUIRED`.
+3. Platform role `superadmin`: granted. Otherwise the member's role in the session's active
+   organization must hold the route's permission; no active organization, or a role without the
+   permission, is `403 ADMIN_PERMISSION_MISSING`.
+4. The `auth` schema unreachable at any step: `503 AUTH_UNAVAILABLE`, so an engine-side fault never
+   sends operators off to sign in again.
+
+**2FA (decision 5).** TOTP is opt-in: each operator turns it on or off for their own account
+(better-auth's `/two-factor/enable`, `/verify-totp` and `/disable`, all behind the password), and no
+route refuses an operator without it. Once it is on, a password sign-in answers `twoFactorRedirect`
+and the session starts only after the code. A user whose only account is `microsoft` has no
+password, so cannot turn it on: the tenant's Conditional Access is their only MFA, and the engine
+neither sees nor checks it. A deployment that enables Microsoft sign-in must require MFA in that
+tenant. The tenant id is a
+concrete GUID, never `common`, `organizations` or `consumers`, and the invitation match uses the
+Microsoft email claim, which is only safe inside one tenant.
+
+**Permissions.** One statement set, `ADMIN_PERMISSION_STATEMENTS`
+(`src/auth/domain/admin-permissions.ts`), is the contract between `@AdminRoute(...)` and the
+organization plugin's access control:
+
+| Resource     | Actions                    |
+| ------------ | -------------------------- |
+| `onboarding` | `read`, `review`, `export` |
+| `workflow`   | `read`, `write`, `publish` |
+| `connector`  | `read`, `write`            |
+| `encryption` | `read`, `write`            |
+| `audit`      | `read`                     |
+| `agreement`  | `read`, `write`            |
+
+| Role                          | Holds                                                                                            |
+| ----------------------------- | ------------------------------------------------------------------------------------------------ |
+| Organization `owner`, `admin` | Every permission above, plus the library's organization and member / invitation management       |
+| Organization `member`         | Every `read`, plus `onboarding:review`; no `write`, `publish` or `export`                        |
+| Platform `superadmin`         | Bypasses the organization check; user management without `impersonate`; may create organizations |
+
+`agreement:write` was added during the build: the first mapping left the two agreement writes
+behind `agreement:read`, which `member` holds. Route to permission, as the `@AdminRoute(` call sites
+state it:
+
+| Permission          | Routes                                                                                                                                                                                 |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboarding:read`   | `GET /v1/onboardings`, `GET /v1/onboardings/:id`, `…/:id/transitions`, `…/:id/agreements`                                                                                              |
+| `onboarding:export` | `GET /v1/onboardings/export`                                                                                                                                                           |
+| `onboarding:review` | `POST /v1/onboardings/:id/review/:action`, `POST /v1/onboardings/:id/pending-connector/reconcile`                                                                                      |
+| `workflow:read`     | `GET /v1/admin/workflows` and its `:workflowId`, `/versions`, `/versions/:version` and `/document` reads, `POST /v1/admin/workflows/compile`, `GET /v1/admin/step-types` and `/schema` |
+| `workflow:write`    | `POST /v1/admin/workflows`, `PUT` / `DELETE …/versions/:version`, `PUT` / `DELETE …/steps/:stepName/connector`                                                                         |
+| `workflow:publish`  | `POST /v1/admin/workflows/:workflowId/versions/:version/publish`                                                                                                                       |
+| `connector:read`    | `GET /v1/admin/connectors`, `GET /v1/admin/connectors/:connectorId`                                                                                                                    |
+| `connector:write`   | `PUT`, `PATCH`, `DELETE /v1/admin/connectors/:connectorId`                                                                                                                             |
+| `encryption:read`   | `GET /v1/admin/encryption`                                                                                                                                                             |
+| `encryption:write`  | `PATCH /v1/admin/encryption`, `PATCH …/rotation`, `POST …/keys`, `POST …/reencryption`                                                                                                 |
+| `audit:read`        | `GET /v1/admin/audit`                                                                                                                                                                  |
+| `agreement:read`    | `GET /v1/admin/agreements`                                                                                                                                                             |
+| `agreement:write`   | `POST /v1/admin/agreements`, `POST /v1/onboardings/:id/agreements`                                                                                                                     |
+
+That is 35 `@AdminRoute(` call sites. The agreement routes follow the same split:
+`POST /v1/onboardings/:id/agreements/:agreementId/accept` carries no `@AdminRoute`, because it serves
+the end user's own onboarding flow. It is also not gated on the onboarding's lifecycle status — an
+approved customer still has to be able to accept a new version of the terms. It is gated on the
+link already existing: a pair no start, submit, publish or operator link ever created is
+`404 AGREEMENT_NOT_FOUND`. Without that, the unguarded route would be a second way to create a link,
+and anyone holding an onboarding id could attach any published version to it and make the next
+publish of that family notify the client's endpoint.
+
+**Invite-only.** `databaseHooks.user.create.before` (`src/auth/better-auth/invite-only.hook.ts`)
+refuses to create a user unless a pending, unexpired invitation exists for that email (matched
+case-insensitively) or the call is server-side — the seed has no HTTP request in the hook context.
+An email sign-up (`/sign-up/email`) must also name that invitation by sending its id as
+`invitationId`: the id travels only in the invitation email, so knowing an invitee's address is not
+enough to register it first and accept the invitation as them. Naming it proves the mailbox, so the
+account is created with `emailVerified: true`. A Microsoft sign-up has no id to send; the provider
+vouches for the address, and any pending invitation for it is enough.
+The admin plugin's `createUser` is refused over HTTP (`/v1/auth/admin/create-user`) unless the email
+has a pending invitation, so accounts stay invite-only; only a server-side call bypasses the rule. It covers email sign-up and Microsoft implicit sign-up. The
+refusal is `403` with the fixed message `Sign-up is by invitation only.`, which does not reveal
+whether an invitation exists. Email sign-up stays technically enabled so an invitee can create a
+password; the panel's `/accept-invitation/:id` page drives it and sends the id from its URL.
+
+**Active organization.** `databaseHooks.session.create.before`
+(`active-organization.hook.ts`) gives a new session the user's oldest `member` row as its
+`activeOrganizationId` when it has none, so a single-organization member reaches admin routes
+without choosing one. The panel's organization switcher (`organization.setActive`) appears only for
+a user in two or more organizations.
+
+**Endpoints outside the guard.** better-auth's own `/v1/auth/admin/*` and `/v1/auth/organization/*`
+endpoints never pass `AdminSessionGuard`. A `hooks.before`
+(`auth-endpoint-guards.hook.ts`) refuses `/admin/set-role`, `/admin/ban-user` and `/admin/remove-user` when the change would
+leave no non-banned superadmin: `403 LAST_SUPERADMIN`. Role changes, bans and invitations made
+through these endpoints are not written to the audit trail; they are visible only in the `auth`
+schema.
+
+**Seed.** `SuperadminSeedService` (`src/auth/superadmin-seed.service.ts`) runs on application
+bootstrap. With `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD` set and no user holding the
+`superadmin` role, it creates one through the admin plugin's `createUser` and logs the email, never
+the password. A second boot finds the superadmin and does nothing. The seeded user is an ordinary
+credential user, with two-factor off until it turns it on.
+
+**Mail.** `AuthMailer` (`src/auth/auth-mailer.ts`) sends the invitation and the password-reset
+link through `nodemailer` on `AUTH_SMTP_URL` and `AUTH_MAIL_FROM`; locally that is MailHog. It is
+not a connector. The invitation links to `<origin>/accept-invitation/<invitation id>`, where the
+origin is the one the inviter's request came from when that is `ADMIN_PANEL_ORIGIN` (a panel served
+apart from the engine, such as `pnpm dev`), and `BETTER_AUTH_URL` otherwise
+(`src/auth/better-auth/invitation-link.ts`); an untrusted `Origin` never reaches the link. The reset
+mail is not awaited, so response time does not reveal which addresses exist; a failed send is
+logged as `AUTH_PASSWORD_RESET_MAIL_FAILED` with the user id.
 
 Configuration (`.env.dist` documents each inline): `ADMIN_AUTH_ENABLED` (default `true`; `false` is
-a local-only escape hatch the engine refuses at startup once `NODE_ENV=production`),
-`ADMIN_SSO_PROVIDER` (`azure` is the only implemented value — see `docs/EXTENDING.md` to add
-another), `AZURE_TENANT_ID` / `AZURE_API_AUDIENCE` (required and validated at startup once auth is
-enabled), and `ADMIN_REQUIRED_ROLES` (comma-separated Entra app-role allowlist, default `admin`,
-matched case-insensitively against the token's `roles` claim).
+a local-only escape hatch the engine refuses at startup once `NODE_ENV=production`). With it on,
+startup fails by name unless `BETTER_AUTH_SECRET` (at least 32 characters), `BETTER_AUTH_URL` (the
+engine's absolute http(s) URL, the base for cookies and redirects), `AUTH_SMTP_URL` and
+`AUTH_MAIL_FROM` are set. `AUTH_SUPERADMIN_EMAIL` / `AUTH_SUPERADMIN_PASSWORD` are optional, both or
+neither. `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET` and `AUTH_MICROSOFT_TENANT_ID`
+are optional, all or none, and the tenant must be a GUID; the redirect URI to register is
+`<BETTER_AUTH_URL>/v1/auth/callback/microsoft`. The pair and the triple are validated even while
+auth is off. The secrets never reach the panel: `/config.js` carries only
+`VITE_AUTH_MICROSOFT_ENABLED`, derived from the triple, beside `VITE_AUTH_ENABLED`. The Entra-era
+variables — the SSO provider switch, the Azure tenant and audience pair, the required-roles
+allowlist and the panel's `VITE_AZURE_*` family — no longer exist.
 
 The manual review route predated admin sign-in and was open until 2026-11-01; it is now marked
-`@AdminRoute()` like every other operator action. The OpenAPI document tags it on its own
-(`Admin: manual review`) because it is a decision, not a read of admin data. Its
-`onboarding.manual_review_decision` audit row is still written as the `engine` actor; the guard's own
-`auth.*` row names the operator who called.
+`@AdminRoute({ resource: 'onboarding', action: 'review' })` like every other operator action. The
+OpenAPI document tags it on its own (`Admin: manual review`) because it is a decision, not a read of
+admin data. Its `onboarding.manual_review_decision` audit row is still written as the `engine`
+actor; the guard's own `auth.*` row names the operator who called.
 
 A request to a guarded route is refused as:
 
-| Status                  | When                                                                                                                              |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| 401 Unauthorized        | No bearer token, or the token fails signature/issuer/audience/expiry verification                                                 |
-| 403 Forbidden           | The token verifies but carries none of `ADMIN_REQUIRED_ROLES` — re-authenticating cannot fix this                                 |
-| 503 Service Unavailable | Entra's signing key set could not be reached, so the token was never judged — distinguishes an engine-side fault from a bad token |
+| Status                  | Code                       | When                                                                                                                                                                                                                                                                                                                  |
+| ----------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 403 Forbidden           | `ADMIN_ORIGIN_REFUSED`     | A write (not GET, HEAD or OPTIONS) whose `Origin` is neither `ADMIN_PANEL_ORIGIN` nor the engine's own (`BETTER_AUTH_URL`); checked before the session, so a forged same-site form post carrying the `SameSite=Lax` cookie is refused. A request without `Origin` is not a browser's and goes on to the session check |
+| 401 Unauthorized        | `ADMIN_SESSION_REQUIRED`   | No cookie, or the session is expired or revoked                                                                                                                                                                                                                                                                       |
+| 403 Forbidden           | `ADMIN_PERMISSION_MISSING` | The role holds no such permission, or the session has no active organization; signing in again cannot fix it                                                                                                                                                                                                          |
+| 503 Service Unavailable | `AUTH_UNAVAILABLE`         | The `auth` schema could not be reached, so the session was never judged                                                                                                                                                                                                                                               |
 
 Every decision on these routes, granted or refused, is written to the admin access audit trail
 (`packages/engine/src/auth/admin-access-audit.port.ts`), so it answers who read admin data, not only
-who was turned away. The write is best effort and is not awaited before the response, so a database
-outage is reported as `AUTH_AUDIT_WRITE_FAILED` on the engine's own logger instead of taking the
-admin endpoints down with it. That leaves writes still running once the response has gone out, so
-`AzureJwtGuard.onModuleDestroy` waits for the outstanding ones; Nest runs it before the hook that
+who was turned away:
+
+| Audit action                    | Written when                                                  |
+| ------------------------------- | ------------------------------------------------------------- |
+| `auth.access_granted`           | The route was allowed                                         |
+| `auth.origin_refused`           | A write from an untrusted `Origin`; metadata carries `origin` |
+| `auth.session_missing`          | No valid session (replaces `auth.token_rejected`)             |
+| `auth.two_factor_required`      | Legacy: written while TOTP was mandatory, no longer written   |
+| `auth.permission_missing`       | The role lacks the permission (replaces `auth.role_missing`)  |
+| `auth.verification_unavailable` | The auth store was unreachable                                |
+| `auth.access_unauthenticated`   | `ADMIN_AUTH_ENABLED=false` let the request through            |
+
+The row's `actorId` is the operator's user id and its metadata carries `method`, `email`,
+`platformRole`, `organizationId` and, for a refusal, `requiredPermission` (`connector:write`). It
+replaces the Entra identity (`objectId`, `userPrincipalName`, `tenantId`, `roles`); rows written
+before better-auth keep that shape and the panel's actor cell still renders them. The write is best
+effort and is not awaited before the response, so a database outage is reported as
+`AUTH_AUDIT_WRITE_FAILED` on the engine's own logger instead of taking the admin endpoints down with
+it. That leaves writes still running once the response has gone out, so
+`AdminSessionGuard.onModuleDestroy` waits for the outstanding ones; Nest runs it before the hook that
 destroys the data source, so a restart records the requests it was serving rather than dropping
 them.
+
+**In the panel.** `src/services/auth/auth-client.ts` is the one better-auth client (`baseURL`
+`<engine>/v1/auth`, credentials included, with the two-factor, organization and admin client
+plugins); `src/services/api/http-client.ts` sends the cookie and no `Authorization` header.
+`AuthGate` renders the sign-in screen (`SignInPage`: email and password, "Sign in with Microsoft"
+only when `VITE_AUTH_MICROSOFT_ENABLED` is true, a forgot-password request), the TOTP challenge
+(`TwoFactorChallenge`, with a backup-code fallback and "trust this device") for an operator who
+turned two-factor on. `/account` (the `Account` sidebar group) shows the signed-in operator's
+two-factor state and turns it on (`TwoFactorSetup`: password, QR code plus the secret as text,
+first code, backup codes shown once) or off (`DisableTwoFactorForm`: password). An operator without a
+password account (Microsoft only) sees why the setting is not theirs to change.
+`/reset-password` takes the mailed link and `/accept-invitation/:id` (outside the gate) lets an
+invitee sign up with a name and password, accept, and continue to the panel. The `Admin` sidebar
+group holds `/organization` (members, role changes, removal, pending invitations, invite form) for
+the active organization, and, for `platformRole === 'superadmin'` only, `/platform/users` (search,
+platform role, ban and unban, revoke sessions, temporary password) and `/platform/organizations`
+(create one, with the creator as its owner). The organizations page lists only the organizations
+the signed-in superadmin belongs to. The panel does not hide actions a role cannot perform: it
+reacts to the `403`. With `VITE_AUTH_ENABLED=false` the gate renders the panel directly.
+
+Two writes refresh more than their own list. Creating an organization makes the creator its owner
+and changes what every admin read may return, so `createOrganization` awaits the invalidation of
+every query (`awaits: [[]]`). The client refreshes the session on its own after the two-factor,
+organization-create, set-active and accept-invitation calls, but not after the admin plugin's
+`setRole`; `setUserRole` therefore emits `$sessionSignal` itself, so a superadmin who changes their
+own platform role sees the sidebar change without reloading.
+
+Out of scope, so not built: data tenancy, impersonation, passkeys, audit rows for writes through
+better-auth's own endpoints, permission-aware UI, per-request session caching, shared-storage rate
+limiting across replicas (better-auth's default is per process), `/v1/auth/*` in the OpenAPI
+document, machine-to-machine access to admin routes (a BFF that used Entra client credentials has no
+replacement yet), and a forced password change for the seeded superadmin.
 
 ### The OpenAPI document
 
@@ -3123,7 +3313,7 @@ hook, so nothing reaches for the network. That is what lets `openapi-document.sp
 `pnpm test`: it rebuilds the document and asserts it equals the committed file, then checks
 completeness — every one of the 33 routes present, unique `operationId`s, a summary and exactly
 one declared tag per operation, one success response with a schema (or a `204`), every path
-parameter declared, the bearer requirement on every `Admin:` operation and on nothing else, no
+parameter declared, the cookie security requirement on every `Admin:` operation and on nothing else, no
 dangling `$ref`, every property typed or deliberately described, and no `nullable` left. What it
 cannot see is a response property that was never decorated; that rests on review.
 `test/openapi.e2e-spec.ts` checks that the served JSON equals the committed file and that no UI is
@@ -3134,11 +3324,13 @@ rendering is the only one, and the drift test compares the parsed documents.
 
 ## 12. Admin panel
 
-`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod, nuqs. Three sections, built from
+`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod, nuqs. Sections built from
 `ADMIN_SECTIONS` in `src/app/navigation.tsx`: **Onboardings**, a filterable, read-only list
 served from `GET /v1/onboardings` with a details page per onboarding and an Export CSV download; **Logs**, a
 filterable, read-only view of the audit trail (§8); and **Connectors**, which writes connector
-settings. **Workflows** also writes, but only drafts (Workflows, below).
+settings. **Workflows** also writes, but only drafts (Workflows, below). An **Admin** group adds
+**Organization** for everyone and, for a superadmin only, **Users** and **Organizations**, and an **Account** group holds the signed-in operator's
+two-factor setting (see Authentication, §11).
 
 Every engine read and write fails with one class, `ApiError` (`src/services/api/api-error.ts`),
 registered as TanStack Query's `defaultError`
@@ -3300,7 +3492,7 @@ once a list fetch has succeeded — hidden while the list is loading or after it
 is labelled with that list's `pagination.total` (`Export 41 as CSV`), which is the export's row
 count for the same criteria. It is disabled while a request is in flight, while a draft filter
 is refused (`findDraftError`) and when the total is zero, and reads `Exporting…` meanwhile. The download goes through axios as a blob (`fetchAdminOnboardingsCsv`,
-`useOnboardingsExport`) because a navigation could not carry the Entra bearer token; a failure is an
+`useOnboardingsExport`) so a failure is an
 `Export failed` toast, and since a broken connection rejects the request, no truncated file is ever
 saved. The panel names the file itself, `onboardings-<yyyy-MM-ddTHH-mm>.csv` in local time (`toDateTimeLocalValue`, `:` swapped for `-`), and does
 not read `Content-Disposition`.
@@ -4011,6 +4203,17 @@ Decisions worth keeping:
   a two-click confirm: choosing a schedule is not itself the destructive act, and the sentence
   under it says when the rotation it causes falls due — at once, when the chosen interval is
   shorter than the active key's current age.
+- **The cache belongs to one session.** `SessionCacheGuard` (mounted by `AuthProvider` under
+  `QueryProvider`, while sign-in is on) reads the scope of every cached read — the operator, their
+  platform role and the active organization — from better-auth's session. When the session ends
+  (sign-out, expiry, revocation, a sign-out broadcast from another tab) it calls
+  `queryClient.clear()`; when the scope changes (another operator, a role change, an organization
+  switch) it calls `resetQueries()` and notifies better-auth's `$listOrg`, which better-auth itself
+  refreshes only after an organization is created, updated or deleted. A `401` from any read or
+  write reaches `handleUnauthorized` (`src/services/auth/session-cache.ts`) through the query and
+  mutation caches' `onError`: it removes the inactive queries and re-reads the session, and if that
+  session is gone the gate shows the sign-in form and the guard clears the rest. Without this the
+  no-refetch-on-mount rule above would show the next operator the previous one's rows.
 - **Zod-validated, explicitly projected responses.** `projectAdminOnboardingSummary` copies exactly
   the lifecycle-safe fields and drops everything else, so a future engine field (notably `context`)
   cannot reach the browser by accident.
@@ -4043,7 +4246,11 @@ Decisions worth keeping:
   spawned as its own CLI — resolved from `@playwright/test` and run with the Node executable
   already running the harness — rather than through the package manager, because
   `node $npm_execpath exec playwright` assumes the package manager is a JavaScript file and a
-  standalone pnpm (`@pnpm/exe`) is a native binary.
+  standalone pnpm (`@pnpm/exe`) is a native binary. The fixture also stands in for better-auth's
+  cookie session: its accounts (an operator, a viewer without the admin permission, one still to
+  enrol in two-factor, and `switcher@example.com` in two organizations, whose second sees only one
+  onboarding) let `admin-session-cache.spec.ts` prove that no cached read outlives the session,
+  operator or organization it was fetched for.
 
 - **Configuration is read at runtime, not baked in at build time.** Vite inlines
   `import.meta.env.VITE_*` when the panel is built, which would otherwise mean one image per
@@ -4052,7 +4259,7 @@ Decisions worth keeping:
   string so an unset variable falls through rather than shadowing the build-time one. In the
   container, the engine serves `/config.js` itself, rendering `window.__ENV__` from its own
   configuration on every request (`packages/engine/src/admin-panel/admin-panel-runtime-config.ts`),
-  so the same image serves any engine URL or SSO config a deployment's Compose `environment:` block
+  so the same image serves any engine URL or sign-in config a deployment's Compose `environment:` block
   gives it, and a `.env` change takes effect on restart with no rebuild. Values are embedded with
   `JSON.stringify`, so nothing in a configured value can break out of the object literal. A key
   that is unset, empty or blank is omitted rather than written as `""`, because `readRuntimeEnv()`

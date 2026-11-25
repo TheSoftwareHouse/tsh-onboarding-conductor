@@ -24,7 +24,7 @@ export type ApiErrorSource =
 
 /**
  * A refusal the framework answers with its own envelope before the handler runs: a DTO the global
- * `ValidationPipe` rejects, a route pipe refusing a parameter, or the admin bearer guard.
+ * `ValidationPipe` rejects, a route pipe refusing a parameter, or the admin session guard.
  */
 export type FrameworkErrorSource = Readonly<{
   framework: true;

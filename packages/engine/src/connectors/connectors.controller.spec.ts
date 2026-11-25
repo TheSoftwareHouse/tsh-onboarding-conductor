@@ -2,7 +2,7 @@ import { GUARDS_METADATA, HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import type { ArgumentMetadata } from '@nestjs/common';
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { ADMIN_ACCESS_UNKNOWN_ACTOR } from '../audit/audit.types';
-import { AzureJwtGuard } from '../auth/azure-jwt.guard';
+import { ADMIN_PERMISSION_METADATA, AdminSessionGuard } from '../auth/admin-session.guard';
 import type {
   ConnectorSettingsAdminService,
   ConnectorSettingsView,
@@ -41,26 +41,20 @@ const buildView = (overrides: Partial<ConnectorSettingsView> = {}): ConnectorSet
 });
 
 describe('ConnectorsController', () => {
-  const methodsByRoute: Record<
-    'list' | 'get' | 'replace' | 'patch' | 'remove',
-    keyof ConnectorsController
-  > = {
-    list: 'list',
-    get: 'get',
-    replace: 'replace',
-    patch: 'patch',
-    remove: 'remove',
-  };
+  it.each([
+    ['list', 'read'],
+    ['get', 'read'],
+    ['replace', 'write'],
+    ['patch', 'write'],
+    ['remove', 'write'],
+  ] as const)('guards %s with the connector:%s permission', (method, action) => {
+    const handler = ConnectorsController.prototype[method];
 
-  it('carries AzureJwtGuard on every route', () => {
-    for (const method of Object.values(methodsByRoute)) {
-      const guards = Reflect.getMetadata(
-        GUARDS_METADATA,
-        ConnectorsController.prototype[method],
-      ) as unknown[] | undefined;
-
-      expect(guards).toContain(AzureJwtGuard);
-    }
+    expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toContain(AdminSessionGuard);
+    expect(Reflect.getMetadata(ADMIN_PERMISSION_METADATA, handler)).toEqual({
+      resource: 'connector',
+      action,
+    });
   });
 
   describe('list', () => {
@@ -138,7 +132,7 @@ describe('ConnectorsController', () => {
       expect(dto.settings).toEqual({ apiKey: 'sk-live' });
     });
 
-    it('resolves updated_by from the oid claim and forwards the validated settings', async () => {
+    it('resolves updated_by from the session user id and forwards the validated settings', async () => {
       const service = createServiceStub();
       service.replaceSettings.mockResolvedValue(buildView());
       const controller = new ConnectorsController(service);
@@ -146,7 +140,7 @@ describe('ConnectorsController', () => {
       dto.settings = { apiKey: 'sk-live' };
 
       await controller.replace('sendgrid_email', dto, noReplaceQuery, {
-        adminTokenClaims: { oid: 'operator-oid' },
+        adminSession: { userId: 'operator-oid' },
       } as never);
 
       expect(service.replaceSettings).toHaveBeenCalledWith(
@@ -157,26 +151,7 @@ describe('ConnectorsController', () => {
       );
     });
 
-    it('falls back to the user principal name when oid is absent', async () => {
-      const service = createServiceStub();
-      service.replaceSettings.mockResolvedValue(buildView());
-      const controller = new ConnectorsController(service);
-      const dto = new UpdateConnectorSettingsRequestDto();
-      dto.settings = { apiKey: 'sk-live' };
-
-      await controller.replace('sendgrid_email', dto, noReplaceQuery, {
-        adminTokenClaims: { preferred_username: 'operator@tsh.io' },
-      } as never);
-
-      expect(service.replaceSettings).toHaveBeenCalledWith(
-        'sendgrid_email',
-        { apiKey: 'sk-live' },
-        'operator@tsh.io',
-        false,
-      );
-    });
-
-    it('resolves the unknown-actor constant with no adminTokenClaims on the request, without throwing', async () => {
+    it('resolves the unknown-actor constant with no adminSession on the request, without throwing', async () => {
       const service = createServiceStub();
       service.replaceSettings.mockResolvedValue(buildView());
       const controller = new ConnectorsController(service);
@@ -245,7 +220,7 @@ describe('ConnectorsController', () => {
       dto.settings = { from: 'ops@tsh.io', apiKey: null };
 
       const response = await controller.patch('sendgrid_email', dto, {
-        adminTokenClaims: { oid: 'operator-oid' },
+        adminSession: { userId: 'operator-oid' },
       } as never);
 
       expect(service.mergeSettings).toHaveBeenCalledWith(
@@ -259,7 +234,7 @@ describe('ConnectorsController', () => {
       expect(secretSetting?.value).toBeUndefined();
     });
 
-    it('resolves the unknown-actor constant with no adminTokenClaims on the request', async () => {
+    it('resolves the unknown-actor constant with no adminSession on the request', async () => {
       const service = createServiceStub();
       service.mergeSettings.mockResolvedValue(buildView());
       const controller = new ConnectorsController(service);
@@ -284,7 +259,7 @@ describe('ConnectorsController', () => {
 
       await expect(
         controller.remove('sendgrid_email', {
-          adminTokenClaims: { oid: 'operator-oid' },
+          adminSession: { userId: 'operator-oid' },
         } as never),
       ).resolves.toBeUndefined();
       expect(service.removeSettings).toHaveBeenCalledWith('sendgrid_email', 'operator-oid');
@@ -296,7 +271,7 @@ describe('ConnectorsController', () => {
       expect(httpCode).toBe(204);
     });
 
-    it('resolves the unknown-actor constant with no adminTokenClaims on the request', async () => {
+    it('resolves the unknown-actor constant with no adminSession on the request', async () => {
       const service = createServiceStub();
       service.removeSettings.mockResolvedValue(undefined);
       const controller = new ConnectorsController(service);

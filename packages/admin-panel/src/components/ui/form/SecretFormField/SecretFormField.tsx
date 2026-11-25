@@ -20,11 +20,17 @@ export interface SecretFormFieldProps<TValues extends FieldValues> {
   revealLabel: string;
   /** Forwarded to `useController` — enforcement, kept separate from `isRequired`'s declaration. */
   rules?: UseControllerProps<TValues>['rules'];
+  /**
+   * `off` (the default) is for secrets that are not the user's own login, and keeps the vendor
+   * opt-outs. A sign-in or password-setting screen passes `current-password` / `new-password`
+   * instead (WCAG 1.3.5), which also lets password managers fill the field.
+   */
+  autoComplete?: 'off' | 'current-password' | 'new-password';
 }
 
 /**
- * `FormField` wired to RHF for a credential: `autoComplete="off"` and vendor opt-outs, never
- * `new-password`. The eye reveals typed text, and is disabled while the box is empty.
+ * `FormField` wired to RHF for a credential: `autoComplete="off"` and vendor opt-outs by
+ * default. The eye reveals typed text, and is disabled while the box is empty.
  */
 export function SecretFormField<TValues extends FieldValues>({
   control,
@@ -38,6 +44,7 @@ export function SecretFormField<TValues extends FieldValues>({
   placeholder,
   revealLabel,
   rules,
+  autoComplete = 'off',
 }: SecretFormFieldProps<TValues>): ReactElement {
   const [revealRequested, setRevealRequested] = useState(false);
   const { field, fieldState } = useController({ control, name, rules });
@@ -46,6 +53,7 @@ export function SecretFormField<TValues extends FieldValues>({
   const value = (field.value ?? '') as string;
   const hasValue = value.length > 0;
   const revealed = revealRequested && hasValue;
+  const isOptedOut = autoComplete === 'off';
 
   return (
     <FormField
@@ -60,10 +68,10 @@ export function SecretFormField<TValues extends FieldValues>({
         <Input
           id={controlId}
           type={revealed ? 'text' : 'password'}
-          autoComplete="off"
-          data-1p-ignore
-          data-lpignore="true"
-          data-bwignore
+          autoComplete={autoComplete}
+          data-1p-ignore={isOptedOut ? true : undefined}
+          data-lpignore={isOptedOut ? 'true' : undefined}
+          data-bwignore={isOptedOut ? true : undefined}
           // Only ever matters once revealed, and a credential is exactly the string no browser
           // should offer to correct or capitalise.
           spellCheck={false}

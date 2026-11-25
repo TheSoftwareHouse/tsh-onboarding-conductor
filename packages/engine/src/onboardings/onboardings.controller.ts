@@ -27,7 +27,7 @@ import { AgreementNotFoundException } from '../agreements/errors/agreement-not-f
 import { AgreementNotPublishedException } from '../agreements/errors/agreement-not-published.exception';
 import { ApiFailureAuditFilter } from '../audit/api-failure-audit.filter';
 import { AdminRoute } from '../auth/admin-route.decorator';
-import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
+import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/admin-session.guard';
 import { PendingConnectorReconcileUnsupportedException } from '../connectors/errors/pending-connector-reconcile-unsupported.exception';
 import { ConnectorNotConfiguredException } from '../connectors/errors/connector-not-configured.exception';
 import { OtpDeliveryFailedException } from '../connectors/errors/otp-delivery-failed.exception';
@@ -279,7 +279,7 @@ export class OnboardingsController {
   // An operator's decision on someone else's onboarding, so it sits behind the same guard as the
   // admin routes below rather than with the end user's own POST handlers above.
   @Post(':id/review/:action')
-  @AdminRoute()
+  @AdminRoute({ resource: 'onboarding', action: 'review' })
   @HttpCode(200)
   @ApiTags(API_TAGS.manualReview.name)
   @ApiOperation({
@@ -287,7 +287,7 @@ export class OnboardingsController {
     summary: 'Record a manual review decision',
     description:
       'Applies the `manual.<action>` transition the current step declares and reports where the ' +
-      'onboarding now stands. An operator route: it requires the same bearer token as the admin ' +
+      'onboarding now stands. An operator route: it requires the same admin session as the admin ' +
       'routes.',
   })
   @OnboardingIdParam()
@@ -338,7 +338,7 @@ export class OnboardingsController {
   }
 
   // Unguarded on purpose, like the handlers above: accepting an agreement is the end user's own
-  // action from their own flow, which carries no Entra identity. It is also not gated on the
+  // action from their own flow, which carries no operator identity. It is also not gated on the
   // lifecycle status — an approved customer still has to be able to accept new terms.
   @Post(':id/agreements/:agreementId/accept')
   @HttpCode(200)
@@ -380,10 +380,10 @@ export class OnboardingsController {
   }
 
   // Admin read surface. The end user's own POST handlers above and `:id/state` stay public: they
-  // serve the onboarding flow, which has no Entra identity. `review` and everything below are
+  // serve the onboarding flow, which has no operator identity. `review` and everything below are
   // guarded, so the guard is stated per route rather than on the controller.
   @Get('/')
-  @AdminRoute()
+  @AdminRoute({ resource: 'onboarding', action: 'read' })
   @ApiTags(API_TAGS.adminOnboardings.name)
   @ApiOperation({
     operationId: 'listOnboardings',
@@ -400,7 +400,7 @@ export class OnboardingsController {
   }
 
   @Get('export')
-  @AdminRoute()
+  @AdminRoute({ resource: 'onboarding', action: 'export' })
   @ApiTags(API_TAGS.adminOnboardings.name)
   @ApiOperation({
     operationId: 'exportOnboardings',
@@ -426,7 +426,7 @@ export class OnboardingsController {
   ): Promise<StreamableFile> {
     const csv = await this.onboardingsExportService.exportCsv(
       query,
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
 
     response.setHeader('Cache-Control', 'no-store');
@@ -468,7 +468,7 @@ export class OnboardingsController {
   }
 
   @Get(':id/transitions')
-  @AdminRoute()
+  @AdminRoute({ resource: 'onboarding', action: 'read' })
   @ApiTags(API_TAGS.adminOnboardings.name)
   @ApiOperation({
     operationId: 'listOnboardingTransitions',
@@ -488,7 +488,7 @@ export class OnboardingsController {
   }
 
   @Get(':id/agreements')
-  @AdminRoute()
+  @AdminRoute({ resource: 'onboarding', action: 'read' })
   @ApiTags(API_TAGS.adminOnboardings.name)
   @ApiOperation({
     operationId: 'listOnboardingAgreements',
@@ -511,7 +511,7 @@ export class OnboardingsController {
   // 200 rather than 201: the call is idempotent, so a retry that created nothing must not report
   // a creation. The body says which of the two happened.
   @Post(':id/agreements')
-  @AdminRoute()
+  @AdminRoute({ resource: 'agreement', action: 'write' })
   @HttpCode(200)
   @ApiTags(API_TAGS.adminOnboardings.name)
   @ApiOperation({
@@ -538,7 +538,7 @@ export class OnboardingsController {
 
   // 200 rather than 201: nothing is created; the body says which of three things happened.
   @Post(':id/pending-connector/reconcile')
-  @AdminRoute()
+  @AdminRoute({ resource: 'onboarding', action: 'review' })
   @HttpCode(200)
   @ApiTags(API_TAGS.adminOnboardings.name)
   @ApiOperation({
@@ -575,12 +575,12 @@ export class OnboardingsController {
   ): Promise<ReconcilePendingConnectorResponseDto> {
     return this.pendingConnectorReconcileService.reconcile(
       id,
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
   }
 
   @Get(':id')
-  @AdminRoute()
+  @AdminRoute({ resource: 'onboarding', action: 'read' })
   @ApiTags(API_TAGS.adminOnboardings.name)
   @ApiOperation({
     operationId: 'getOnboarding',

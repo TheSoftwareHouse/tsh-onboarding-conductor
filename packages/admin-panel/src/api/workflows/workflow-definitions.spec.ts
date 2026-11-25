@@ -226,7 +226,7 @@ describe('fetchWorkflowDefinition', () => {
     await expect(fetchWorkflowDefinition('kyc', 3)).rejects.toMatchObject({
       kind: 'request-failed',
       status: 403,
-      message: 'Your account is signed in but is not assigned a role that may view workflows.',
+      message: 'Your role in the active organization does not allow viewing workflows.',
     });
   });
 

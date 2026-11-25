@@ -1,33 +1,21 @@
 import 'reflect-metadata';
-import { Controller, Get, Module, Post, UseGuards } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
+import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { Test } from '@nestjs/testing';
+import { Client, type Pool } from 'pg';
 import request from 'supertest';
-import {
-  createLocalJWKSet,
-  errors,
-  exportJWK,
-  exportSPKI,
-  generateKeyPair,
-  SignJWT,
-  UnsecuredJWT,
-  type JWTVerifyGetKey,
-  type KeyLike,
-} from 'jose';
 import { startE2eServer } from './e2e-server';
+import { createOperator, OPERATOR_EMAIL_DOMAIN, OPERATOR_PASSWORD } from './admin-session.support';
 
-const TENANT_ID = '11111111-1111-1111-1111-111111111111';
-const AUDIENCE = '22222222-2222-2222-2222-222222222222';
-const KEY_ID = 'test-signing-key';
-const OPERATOR_OBJECT_ID = '9f3c0000-0000-0000-0000-00000000000a';
-const OPERATOR_UPN = 'anna.kowalska@tsh.io';
 const PANEL_ORIGIN = 'http://localhost:5173';
 
 process.env.NODE_ENV = 'test';
 process.env.MODE = 'api-only';
 process.env.PORT = '3002';
-process.env.DATABASE_URL = 'postgres://user:pass@localhost:5432/db';
-process.env.REDIS_URL = 'redis://localhost:6379';
+process.env.DATABASE_URL =
+  'postgres://orchestrator:orchestrator_pass@localhost:5432/e2e_admin_auth?sslmode=disable';
+process.env.REDIS_URL = 'redis://127.0.0.1:6379/0';
 process.env.STORAGE_DRIVER = 's3';
 process.env.STORAGE_S3_BUCKET = 'orchestrator-files';
 process.env.STORAGE_S3_REGION = 'us-east-1';
@@ -37,558 +25,360 @@ process.env.STORAGE_S3_ACCESS_KEY_ID = 'onboardingdev';
 process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'onboardingdevsecret0123456789';
 process.env.ADMIN_PANEL_ORIGIN = PANEL_ORIGIN;
 process.env.ADMIN_AUTH_ENABLED = 'true';
-process.env.AZURE_TENANT_ID = TENANT_ID;
-process.env.AZURE_API_AUDIENCE = AUDIENCE;
-process.env.ADMIN_REQUIRED_ROLES = 'admin';
 
-import { createApp } from '../src/main';
-import { validateConfig } from '../src/config/app.config';
-import {
-  ADMIN_ACCESS_AUDIT,
-  type AdminAccessAuditEvent,
-  type AdminAccessAuditPort,
-} from '../src/auth/admin-access-audit.port';
-import {
-  ADMIN_TOKEN_VERIFIER,
-  type AdminTokenVerifierPort,
-} from '../src/auth/admin-token-verifier.port';
-import { toAdminAccessAuditInput } from '../src/audit/admin-access-audit.adapter';
-import { AzureJwtGuard } from '../src/auth/azure-jwt.guard';
-import { AzureTokenVerifier, buildEntraIssuer } from '../src/auth/azure-token-verifier';
-import { AuditController } from '../src/audit/audit.controller';
-import { HealthController } from '../src/health/health.controller';
-import { OnboardingsController } from '../src/onboardings/onboardings.controller';
-import { WebhookController } from '../src/webhook/webhook.controller';
+import { AppModule } from '../src/app.module';
+import { BETTER_AUTH_POOL } from '../src/auth/better-auth/better-auth.tokens';
 
 /**
- * The engine's real verifier, pointed at a locally generated key set instead of Entra's JWKS,
- * so the whole signature/issuer/audience/expiry path runs without a network call.
+ * This spec demotes superadmins to assert the last-superadmin rule and boots the seed twice, so it
+ * runs in a database of its own, created on the shared stack's server and dropped afterwards.
+ * Nothing it does can reach the developer's seeded superadmin. `DATABASE_URL` above names it
+ * statically because the config module reads the environment when `AppModule` is imported.
  */
-let localVerifier: AzureTokenVerifier;
-let privateKey: KeyLike;
-let publicKeySpki: string;
+const ISOLATED_DATABASE = 'e2e_admin_auth';
 
-/**
- * Stands in for the audit adapter so the suite can assert the trail without a database. Events
- * are translated through the real mapper, so what is asserted is the row that would be written.
- */
-const recordedAccess: AdminAccessAuditEvent[] = [];
+/** Runs `statement` against the server's maintenance database, which can create and drop others. */
+async function runAdminStatement(statement: string): Promise<void> {
+  const url = new URL(process.env.DATABASE_URL as string);
+  url.pathname = '/postgres';
+  const client = new Client({ connectionString: url.toString() });
+  await client.connect();
 
-/** Set by the one test that needs the audit write to fail. */
-let accessAuditFailure: Error | null = null;
-
-@Controller()
-class TestAdminController {
-  @Get('/v1/onboardings')
-  @UseGuards(AzureJwtGuard)
-  listOnboardings() {
-    return [];
-  }
-
-  @Get('/v1/admin/audit')
-  @UseGuards(AzureJwtGuard)
-  listAudit() {
-    return [];
-  }
-
-  @Post('/v1/onboardings')
-  startOnboarding() {
-    return { onboardingId: 'public-route' };
-  }
-
-  @Get('/v1/health/live')
-  getLive() {
-    return { status: 'ok' };
+  try {
+    await client.query(statement);
+  } finally {
+    await client.end();
   }
 }
 
-@Module({
-  imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: [],
-      ignoreEnvFile: true,
-      validate: validateConfig,
-    }),
-  ],
-  controllers: [TestAdminController],
-  providers: [
-    {
-      provide: ADMIN_ACCESS_AUDIT,
-      useFactory: (): AdminAccessAuditPort => ({
-        record: (event) => {
-          recordedAccess.push(event);
+const READ_ROUTES = ['/v1/onboardings', '/v1/admin/audit'];
+/** Guard runs before validation and the handler, so this refuses a body-less call with no side effect. */
+const WRITE_ROUTE = '/v1/admin/encryption/keys';
 
-          return accessAuditFailure === null
-            ? Promise.resolve()
-            : Promise.reject(accessAuditFailure);
-        },
-      }),
-    },
-    {
-      provide: ADMIN_TOKEN_VERIFIER,
-      // Delegates on every call rather than capturing the verifier at bootstrap, so a single test
-      // can stand a broken one in its place and put the working one back afterwards.
-      useFactory: (): AdminTokenVerifierPort => ({
-        verify: (token) => localVerifier.verify(token),
-      }),
-    },
-    AzureJwtGuard,
-  ],
-})
-class TestAppModule {}
+/**
+ * `config` is set on the `ConfigService` before the app starts. Changing `process.env` instead would
+ * be too late: the config module read the environment when `AppModule` was imported, and a value
+ * the developer's `.env` carries would win.
+ */
+async function bootApp(config: Record<string, string> = {}): Promise<NestExpressApplication> {
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  const configService = moduleRef.get(ConfigService);
+  for (const [key, value] of Object.entries(config)) {
+    configService.set(key, value);
+  }
+  const app = moduleRef.createNestApplication<NestExpressApplication>();
+  await startE2eServer(app);
 
-async function signToken(
-  claims: {
-    issuer?: string;
-    audience?: string;
-    expiresIn?: string;
-    roles?: string[] | undefined;
-  } = {},
-): Promise<string> {
-  return new SignJWT({
-    scp: 'Onboardings.Read',
-    oid: OPERATOR_OBJECT_ID,
-    preferred_username: OPERATOR_UPN,
-    tid: TENANT_ID,
-    ...('roles' in claims ? { roles: claims.roles } : { roles: ['admin'] }),
-  })
-    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
-    .setSubject('operator-object-id')
-    .setIssuer(claims.issuer ?? buildEntraIssuer(TENANT_ID))
-    .setAudience(claims.audience ?? AUDIENCE)
-    .setIssuedAt()
-    .setExpirationTime(claims.expiresIn ?? '5m')
-    .sign(privateKey);
+  return app;
 }
 
+/**
+ * The real engine with `ADMIN_AUTH_ENABLED=true`: every guard outcome, driven with real better-auth
+ * session cookies over HTTP. Requires the local stack (`pnpm test:e2e` brings it up).
+ */
 describe('Admin endpoint authentication (e2e)', () => {
-  const adminRoutes = ['/v1/onboardings', '/v1/admin/audit'];
-  let app: NestExpressApplication | undefined;
+  let app: NestExpressApplication;
+  let pool: Pool;
 
   beforeAll(async () => {
-    const keyPair = await generateKeyPair('RS256', { extractable: true });
-    privateKey = keyPair.privateKey;
-    publicKeySpki = await exportSPKI(keyPair.publicKey);
-
-    const publicJwk = await exportJWK(keyPair.publicKey);
-    const getKey: JWTVerifyGetKey = createLocalJWKSet({
-      keys: [{ ...publicJwk, kid: KEY_ID, alg: 'RS256', use: 'sig' }],
-    });
-
-    localVerifier = new AzureTokenVerifier({
-      tenantId: TENANT_ID,
-      audience: AUDIENCE,
-      getKey,
-    });
-
-    const createdApp = await createApp(TestAppModule);
-    app = createdApp.app;
-    await startE2eServer(app);
-  });
+    await runAdminStatement(`DROP DATABASE IF EXISTS ${ISOLATED_DATABASE} WITH (FORCE)`);
+    await runAdminStatement(`CREATE DATABASE ${ISOLATED_DATABASE}`);
+    app = await bootApp();
+    pool = app.get<Pool>(BETTER_AUTH_POOL);
+  }, 60000);
 
   afterAll(async () => {
     await app?.close();
-  });
-
-  beforeEach(() => {
-    recordedAccess.length = 0;
-    accessAuditFailure = null;
-  });
-
-  /** The audit row the engine would have written for the single decision just made. */
-  function recordedAuditRow() {
-    expect(recordedAccess).toHaveLength(1);
-
-    return toAdminAccessAuditInput(recordedAccess[0]);
-  }
-
-  describe.each(adminRoutes)('%s', (route) => {
-    it('answers 401 without a token', async () => {
-      await request(app!.getHttpServer()).get(route).expect(401);
-    });
-
-    it('answers 401 for a malformed Authorization header', async () => {
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', 'Basic dXNlcjpwYXNz')
-        .expect(401);
-    });
-
-    it('answers 401 for a token from another tenant', async () => {
-      const token = await signToken({
-        issuer: buildEntraIssuer('99999999-9999-9999-9999-999999999999'),
-      });
-
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(401);
-    });
-
-    it('answers 401 for a token minted for another API', async () => {
-      const token = await signToken({ audience: 'api://some-other-service' });
-
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(401);
-    });
-
-    it('answers 401 for an expired token', async () => {
-      const token = await signToken({ expiresIn: '-1m' });
-
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(401);
-    });
-
-    it('answers 403 for a verifiable token from an account with no assigned app role', async () => {
-      const token = await signToken({ roles: undefined });
-
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(403);
-    });
-
-    it('answers 403 for a token carrying only the other app roles', async () => {
-      const token = await signToken({ roles: ['compliance', 'auditor'] });
-
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(403);
-    });
-
-    it('answers 200 for a valid token from an admin', async () => {
-      const token = await signToken();
-
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(200);
-    });
-
-    it.each([['bearer'], ['BEARER'], ['BeArEr']])(
-      'accepts the %s scheme, which RFC 7235 makes case-insensitive',
-      async (scheme) => {
-        const token = await signToken();
-
-        await request(app!.getHttpServer())
-          .get(route)
-          .set('Authorization', `${scheme} ${token}`)
-          .expect(200);
-      },
-    );
-
-    it('answers 401 for a header that names no scheme at all', async () => {
-      const token = await signToken();
-
-      await request(app!.getHttpServer()).get(route).set('Authorization', token).expect(401);
-    });
-
-    describe('algorithm confusion', () => {
-      it('answers 401 for an unsecured alg=none token', async () => {
-        const token = new UnsecuredJWT({ scp: 'Onboardings.Read', roles: ['admin'] })
-          .setSubject('attacker')
-          .setIssuer(buildEntraIssuer(TENANT_ID))
-          .setAudience(AUDIENCE)
-          .setIssuedAt()
-          .setExpirationTime('5m')
-          .encode();
-
-        await request(app!.getHttpServer())
-          .get(route)
-          .set('Authorization', `Bearer ${token}`)
-          .expect(401);
-      });
-
-      it('answers 401, not 200, for an HS256 token signed with the public key', async () => {
-        // The public key is public. If HS256 were accepted this token would be a valid admin
-        // credential mintable by anyone who fetched the JWKS.
-        const token = await new SignJWT({ scp: 'Onboardings.Read', roles: ['admin'] })
-          .setProtectedHeader({ alg: 'HS256', kid: KEY_ID })
-          .setSubject('attacker')
-          .setIssuer(buildEntraIssuer(TENANT_ID))
-          .setAudience(AUDIENCE)
-          .setIssuedAt()
-          .setExpirationTime('5m')
-          .sign(new TextEncoder().encode(publicKeySpki));
-
-        await request(app!.getHttpServer())
-          .get(route)
-          .set('Authorization', `Bearer ${token}`)
-          .expect(401);
-      });
-
-      it('answers 401, not 503, so a caller cannot fake an outage with a bad algorithm', async () => {
-        const token = await new SignJWT({ roles: ['admin'] })
-          .setProtectedHeader({ alg: 'PS256', kid: KEY_ID })
-          .setIssuer(buildEntraIssuer(TENANT_ID))
-          .setAudience(AUDIENCE)
-          .setExpirationTime('5m')
-          .sign(privateKey);
-
-        await request(app!.getHttpServer())
-          .get(route)
-          .set('Authorization', `Bearer ${token}`)
-          .expect(401);
-      });
-    });
-
-    it('serves the read even when the audit row cannot be written', async () => {
-      // Best effort by design: a database outage must not take the admin endpoints down with it.
-      accessAuditFailure = new Error('connection terminated');
-      const token = await signToken();
-
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(200);
-
-      expect(recordedAccess).toHaveLength(1);
-    });
-
-    it('answers 503, not 401, when Entra’s key set cannot be reached', async () => {
-      // A perfectly good token, but the engine cannot fetch the keys to check it. Answering 401
-      // would tell the operator their session is bad and send them to sign in again for nothing.
-      const token = await signToken();
-      const unreachable = new AzureTokenVerifier({
-        tenantId: TENANT_ID,
-        audience: AUDIENCE,
-        getKey: () => Promise.reject(new errors.JWKSTimeout()),
-      });
-      const restore = localVerifier;
-      localVerifier = unreachable;
-
-      try {
-        await request(app!.getHttpServer())
-          .get(route)
-          .set('Authorization', `Bearer ${token}`)
-          .expect(503);
-      } finally {
-        localVerifier = restore;
-      }
-    });
-  });
-
-  describe.each(adminRoutes)('%s audit trail', (route) => {
-    it('records the operator behind a successful read', async () => {
-      const token = await signToken();
-
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(200);
-
-      expect(recordedAuditRow()).toEqual({
-        action: 'auth.access_granted',
-        actorType: 'operator',
-        actorId: OPERATOR_OBJECT_ID,
-        resourceId: route,
-        metadata: {
-          method: 'GET',
-          tenantId: TENANT_ID,
-          userPrincipalName: OPERATOR_UPN,
-          grantedRoles: ['admin'],
-        },
-      });
-    });
-
-    it('records a missing credential as an anonymous refusal', async () => {
-      await request(app!.getHttpServer()).get(route).expect(401);
-
-      expect(recordedAuditRow()).toEqual({
-        action: 'auth.token_rejected',
-        actorType: 'anonymous',
-        actorId: 'unknown',
-        resourceId: route,
-        metadata: { method: 'GET', reason: 'Missing bearer access token' },
-      });
-    });
-
-    it('records which token a rejection was about, so a bad tenant is distinguishable', async () => {
-      const otherTenant = '99999999-9999-9999-9999-999999999999';
-      const token = await signToken({ issuer: buildEntraIssuer(otherTenant) });
-
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(401);
-
-      const row = recordedAuditRow();
-      expect(row.action).toBe('auth.token_rejected');
-      expect(row.actorType).toBe('anonymous');
-      expect(row.metadata.tokenIssuer).toBe(buildEntraIssuer(otherTenant));
-      expect(row.metadata.tokenAudience).toBe(AUDIENCE);
-      expect(row.metadata.reason).toMatch(/iss/);
-    });
-
-    it('records a role refusal against the named operator who was turned away', async () => {
-      const token = await signToken({ roles: ['compliance', 'auditor'] });
-
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', `Bearer ${token}`)
-        .expect(403);
-
-      expect(recordedAuditRow()).toEqual({
-        action: 'auth.role_missing',
-        actorType: 'operator',
-        actorId: OPERATOR_OBJECT_ID,
-        resourceId: route,
-        metadata: {
-          method: 'GET',
-          tenantId: TENANT_ID,
-          userPrincipalName: OPERATOR_UPN,
-          grantedRoles: ['compliance', 'auditor'],
-          requiredRoles: ['admin'],
-        },
-      });
-    });
-
-    it('records an unreachable key set separately from a rejected credential', async () => {
-      const token = await signToken();
-      const unreachable = new AzureTokenVerifier({
-        tenantId: TENANT_ID,
-        audience: AUDIENCE,
-        getKey: () => Promise.reject(new errors.JWKSTimeout()),
-      });
-      const restore = localVerifier;
-      localVerifier = unreachable;
-
-      try {
-        await request(app!.getHttpServer())
-          .get(route)
-          .set('Authorization', `Bearer ${token}`)
-          .expect(503);
-      } finally {
-        localVerifier = restore;
-      }
-
-      const row = recordedAuditRow();
-      expect(row.action).toBe('auth.verification_unavailable');
-      expect(row.actorType).toBe('anonymous');
-      expect(row.metadata.reason).toMatch(/timed out/i);
-    });
-
-    it('never attributes a refused request to a named operator', async () => {
-      await request(app!.getHttpServer())
-        .get(route)
-        .set('Authorization', 'Basic dXNlcjpwYXNz')
-        .expect(401);
-
-      const row = recordedAuditRow();
-      expect(row.metadata.userPrincipalName).toBeUndefined();
-      expect(row.metadata.tenantId).toBeUndefined();
-      expect(row.actorId).toBe('unknown');
-    });
-  });
-
-  it('leaves the public onboarding start endpoint unauthenticated', async () => {
-    await request(app!.getHttpServer()).post('/v1/onboardings').expect(201);
-  });
-
-  it('leaves the health endpoint unauthenticated', async () => {
-    await request(app!.getHttpServer()).get('/v1/health/live').expect(200);
-  });
-
-  it('allows the panel origin to preflight an Authorization-bearing admin request', async () => {
-    const response = await request(app!.getHttpServer())
-      .options('/v1/onboardings')
-      .set('Origin', PANEL_ORIGIN)
-      .set('Access-Control-Request-Method', 'GET')
-      .set('Access-Control-Request-Headers', 'authorization')
-      .send();
-
-    expect([200, 204]).toContain(response.status);
-    expect(response.headers['access-control-allow-origin']).toBe(PANEL_ORIGIN);
-    expect(response.headers['access-control-allow-headers']?.toLowerCase()).toContain(
-      'authorization',
-    );
+    await runAdminStatement(`DROP DATABASE IF EXISTS ${ISOLATED_DATABASE} WITH (FORCE)`);
   });
 
   /**
-   * The suite above drives a stand-in controller, so this enumerates the engine's entire real
-   * route surface and states, handler by handler, which side of the trust boundary it sits on.
-   * Adding a route without deciding that question fails here rather than shipping.
+   * Leaves `keepId` as the only active superadmin so the last-superadmin rule is assertable. Only
+   * the disposable operators of this spec's own database are demoted: the database is isolated
+   * (see `ISOLATED_DATABASE`), so no real account can be touched, whatever state a run dies in.
    */
-  describe('authorization surface of the real controllers', () => {
-    function guardsOf(handler: object): unknown[] {
-      return (Reflect.getMetadata('__guards__', handler) as unknown[] | undefined) ?? [];
+  async function makeOnlySuperadmin(keepId: string): Promise<void> {
+    await pool.query(
+      `UPDATE auth."user" SET "role" = 'user'
+        WHERE "id" <> $1 AND 'superadmin' = ANY(string_to_array("role", ','))`,
+      [keepId],
+    );
+  }
+
+  it('answers GET /v1/auth/ok through the mounted better-auth handler', async () => {
+    const response = await request(app.getHttpServer()).get('/v1/auth/ok').expect(200);
+
+    expect(response.body).toEqual({ ok: true });
+  });
+
+  describe.each(READ_ROUTES)('%s', (route) => {
+    it('answers 401 ADMIN_SESSION_REQUIRED without a session', async () => {
+      const response = await request(app.getHttpServer()).get(route).expect(401);
+
+      expect(response.body.code).toBe('ADMIN_SESSION_REQUIRED');
+    });
+
+    it('answers 401 for a cookie that names no session', async () => {
+      await request(app.getHttpServer())
+        .get(route)
+        .set('Cookie', 'better-auth.session_token=not-a-real-session')
+        .expect(401);
+    });
+
+    it('answers 200 for a credential superadmin without TOTP, which is opt-in', async () => {
+      const operator = await createOperator(app, { platformRole: 'superadmin' });
+
+      await request(app.getHttpServer()).get(route).set('Cookie', operator.cookie).expect(200);
+    });
+
+    it('answers 403 ADMIN_PERMISSION_MISSING for a user with no organization', async () => {
+      const operator = await createOperator(app, { twoFactor: true });
+
+      const response = await request(app.getHttpServer())
+        .get(route)
+        .set('Cookie', operator.cookie)
+        .expect(403);
+
+      expect(response.body.code).toBe('ADMIN_PERMISSION_MISSING');
+    });
+
+    it('answers 200 for a superadmin with TOTP', async () => {
+      const operator = await createOperator(app, { platformRole: 'superadmin', twoFactor: true });
+
+      await request(app.getHttpServer()).get(route).set('Cookie', operator.cookie).expect(200);
+    });
+  });
+
+  it('gives a single-organization member that organization as active in a fresh session and lets them read', async () => {
+    const operator = await createOperator(app, { organizationRole: 'member', twoFactor: true });
+
+    const { rows } = await pool.query(
+      `SELECT s."activeOrganizationId" FROM auth."session" s
+         JOIN auth."user" u ON u."id" = s."userId" WHERE u."id" = $1`,
+      [operator.userId],
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].activeOrganizationId).toBe(operator.organizationId);
+    await request(app.getHttpServer())
+      .get('/v1/onboardings')
+      .set('Cookie', operator.cookie)
+      .expect(200);
+  });
+
+  it('answers 403 ADMIN_PERMISSION_MISSING when a member lacks the route permission', async () => {
+    const operator = await createOperator(app, { organizationRole: 'member', twoFactor: true });
+
+    const response = await request(app.getHttpServer())
+      .post(WRITE_ROUTE)
+      .set('Cookie', operator.cookie)
+      .expect(403);
+
+    expect(response.body.code).toBe('ADMIN_PERMISSION_MISSING');
+  });
+
+  describe('cross-site writes', () => {
+    it('refuses a write carrying a valid session cookie from another origin with 403 ADMIN_ORIGIN_REFUSED', async () => {
+      // What a forged form post from a sibling subdomain looks like: the Lax cookie rides along.
+      const operator = await createOperator(app, { organizationRole: 'owner', twoFactor: true });
+
+      const response = await request(app.getHttpServer())
+        .post(WRITE_ROUTE)
+        .set('Cookie', operator.cookie)
+        .set('Origin', 'https://evil.example.com')
+        .expect(403);
+
+      expect(response.body.code).toBe('ADMIN_ORIGIN_REFUSED');
+    });
+
+    it('judges a write from the admin panel by its session as before', async () => {
+      const operator = await createOperator(app, { organizationRole: 'member', twoFactor: true });
+
+      const response = await request(app.getHttpServer())
+        .post(WRITE_ROUTE)
+        .set('Cookie', operator.cookie)
+        .set('Origin', PANEL_ORIGIN)
+        .expect(403);
+
+      // Past the origin check: refused only for the member's missing permission.
+      expect(response.body.code).toBe('ADMIN_PERMISSION_MISSING');
+    });
+
+    it('does not judge the origin of a read', async () => {
+      const operator = await createOperator(app, { organizationRole: 'member', twoFactor: true });
+
+      await request(app.getHttpServer())
+        .get('/v1/onboardings')
+        .set('Cookie', operator.cookie)
+        .set('Origin', 'https://evil.example.com')
+        .expect(200);
+    });
+  });
+
+  describe('better-auth admin and organization endpoints', () => {
+    it('lets a credential superadmin without TOTP change a role', async () => {
+      const operator = await createOperator(app, { platformRole: 'superadmin' });
+      const target = await createOperator(app);
+
+      await request(app.getHttpServer())
+        .post('/v1/auth/admin/set-role')
+        .set('Cookie', operator.cookie)
+        .send({ userId: target.userId, role: 'superadmin' })
+        .expect(200);
+    });
+
+    it('applies the query string of a GET, such as the list-users role filter', async () => {
+      const operator = await createOperator(app, { platformRole: 'superadmin', twoFactor: true });
+      await createOperator(app);
+
+      const response = await request(app.getHttpServer())
+        .get('/v1/auth/admin/list-users')
+        .query({ filterField: 'role', filterValue: 'superadmin', filterOperator: 'eq', limit: 100 })
+        .set('Cookie', operator.cookie)
+        .expect(200);
+      const roles = (response.body.users as Array<{ role: string }>).map((user) => user.role);
+
+      expect(roles).toContain('superadmin');
+      expect(roles.every((role) => role === 'superadmin')).toBe(true);
+    });
+
+    it('refuses impersonation to a superadmin with TOTP', async () => {
+      const operator = await createOperator(app, { platformRole: 'superadmin', twoFactor: true });
+      const target = await createOperator(app);
+
+      const response = await request(app.getHttpServer())
+        .post('/v1/auth/admin/impersonate-user')
+        .set('Cookie', operator.cookie)
+        .send({ userId: target.userId })
+        .expect(403);
+
+      expect(response.headers['set-cookie']).toBeUndefined();
+    });
+
+    it('refuses to demote the last superadmin', async () => {
+      const operator = await createOperator(app, { platformRole: 'superadmin', twoFactor: true });
+
+      await makeOnlySuperadmin(operator.userId);
+
+      const response = await request(app.getHttpServer())
+        .post('/v1/auth/admin/set-role')
+        .set('Cookie', operator.cookie)
+        .send({ userId: operator.userId, role: 'user' })
+        .expect(403);
+
+      expect(response.body.code).toBe('LAST_SUPERADMIN');
+    });
+  });
+
+  describe('invite-only sign-up', () => {
+    it('refuses email sign-up without an invitation and creates no user', async () => {
+      const email = `${randomUUID()}@${OPERATOR_EMAIL_DOMAIN}`;
+
+      await request(app.getHttpServer())
+        .post('/v1/auth/sign-up/email')
+        .send({ email, password: OPERATOR_PASSWORD, name: 'Uninvited' })
+        .expect(403);
+
+      const { rowCount } = await pool.query('SELECT 1 FROM auth."user" WHERE "email" = $1', [
+        email,
+      ]);
+      expect(rowCount).toBe(0);
+    });
+
+    async function inviteNewAddress(): Promise<{ email: string; invitationId: string }> {
+      const inviter = await createOperator(app, { organizationRole: 'owner' });
+      const email = `${randomUUID()}@${OPERATOR_EMAIL_DOMAIN}`;
+      const invitationId = randomUUID();
+      await pool.query(
+        `INSERT INTO auth."invitation" ("id", "organizationId", "email", "role", "status", "expiresAt", "inviterId")
+         VALUES ($1, $2, $3, 'member', 'pending', now() + interval '1 day', $4)`,
+        [invitationId, inviter.organizationId, email, inviter.userId],
+      );
+
+      return { email, invitationId };
     }
 
-    const guarded: ReadonlyArray<[string, object]> = [
-      ['OnboardingsController.list', OnboardingsController.prototype.list],
-      // The CSV download of the same operator list, so it shares the list's guard.
-      ['OnboardingsController.export', OnboardingsController.prototype.export],
-      // Both serve the admin panel's onboarding detail view, so they belong to the operator read
-      // surface rather than to the end user's own flow that `getState` answers.
-      ['OnboardingsController.getForAdmin', OnboardingsController.prototype.getForAdmin],
-      ['OnboardingsController.listTransitions', OnboardingsController.prototype.listTransitions],
-      // Reading and linking an agreement are operator actions on someone else's onboarding, so
-      // they join the admin surface rather than the end user's own flow.
-      ['OnboardingsController.listAgreements', OnboardingsController.prototype.listAgreements],
-      ['OnboardingsController.linkAgreement', OnboardingsController.prototype.linkAgreement],
-      // An operator reads a parked provider's verdict back on someone else's onboarding, so it sits
-      // with the other admin actions.
-      [
-        'OnboardingsController.reconcilePendingConnector',
-        OnboardingsController.prototype.reconcilePendingConnector,
-      ],
-      // An operator's decision on someone else's onboarding, so it joins the admin surface rather
-      // than the end user's own POST handlers.
-      ['OnboardingsController.review', OnboardingsController.prototype.review],
-      ['AuditController.list', AuditController.prototype.list],
-    ];
+    async function findUser(email: string) {
+      const { rows } = await pool.query(
+        'SELECT "emailVerified" FROM auth."user" WHERE "email" = $1',
+        [email],
+      );
 
-    const unguarded: ReadonlyArray<[string, object]> = [
-      ['OnboardingsController.start', OnboardingsController.prototype.start],
-      ['OnboardingsController.submit', OnboardingsController.prototype.submit],
-      [
-        'OnboardingsController.reserveDocumentUpload',
-        OnboardingsController.prototype.reserveDocumentUpload,
-      ],
-      [
-        'OnboardingsController.completeDocumentUpload',
-        OnboardingsController.prototype.completeDocumentUpload,
-      ],
-      // Serves the end user's own onboarding flow through the BFF, which carries no Entra
-      // identity, so it stays public alongside the POST handlers above rather than joining the
-      // admin read surface below.
-      ['OnboardingsController.getState', OnboardingsController.prototype.getState],
-      // Accepting is the end user ticking the box in their own flow, which carries no Entra
-      // identity, so it stays public alongside `submit` and `getState`.
-      ['OnboardingsController.acceptAgreement', OnboardingsController.prototype.acceptAgreement],
-      ['WebhookController.receive', WebhookController.prototype.receive],
-      ['HealthController.getLiveHealth', HealthController.prototype.getLiveHealth],
-    ];
+      return rows[0] as { emailVerified: boolean } | undefined;
+    }
 
-    it.each(guarded)('%s is behind the Entra guard', (_name, handler) => {
-      expect(guardsOf(handler)).toContain(AzureJwtGuard);
+    it('accepts email sign-up that names its invitation, and marks the address verified', async () => {
+      const { email, invitationId } = await inviteNewAddress();
+
+      await request(app.getHttpServer())
+        .post('/v1/auth/sign-up/email')
+        .send({ email, password: OPERATOR_PASSWORD, name: 'Invitee', invitationId })
+        .expect(200);
+
+      expect(await findUser(email)).toEqual({ emailVerified: true });
     });
 
-    it.each(unguarded)('%s is reachable without a token', (_name, handler) => {
-      expect(guardsOf(handler)).not.toContain(AzureJwtGuard);
+    it('refuses email sign-up that knows an invited address but not the mailed invitation', async () => {
+      // Taking over an invitation needs only the address without this check.
+      const { email } = await inviteNewAddress();
+
+      await request(app.getHttpServer())
+        .post('/v1/auth/sign-up/email')
+        .send({ email, password: OPERATOR_PASSWORD, name: 'Squatter' })
+        .expect(403);
+      await request(app.getHttpServer())
+        .post('/v1/auth/sign-up/email')
+        .send({ email, password: OPERATOR_PASSWORD, name: 'Squatter', invitationId: randomUUID() })
+        .expect(403);
+
+      expect(await findUser(email)).toBeUndefined();
     });
 
-    it('covers every handler on the controllers that expose admin data', () => {
-      // Keeps the two lists above honest: a new route on either controller is unlisted until
-      // someone classifies it.
-      const classified = new Set([...guarded, ...unguarded].map(([, handler]) => handler));
-      const declared = [OnboardingsController, AuditController]
-        .flatMap((controller) =>
-          Object.getOwnPropertyNames(controller.prototype)
-            .filter((name) => name !== 'constructor')
-            .map((name) => (controller.prototype as unknown as Record<string, unknown>)[name]),
-        )
-        .filter(
-          (member): member is (...args: unknown[]) => unknown => typeof member === 'function',
-        );
+    it("refuses email sign-up that names another address's invitation", async () => {
+      const invited = await inviteNewAddress();
+      const email = `${randomUUID()}@${OPERATOR_EMAIL_DOMAIN}`;
 
-      expect(declared.filter((handler) => !classified.has(handler))).toEqual([]);
+      await request(app.getHttpServer())
+        .post('/v1/auth/sign-up/email')
+        .send({
+          email,
+          password: OPERATOR_PASSWORD,
+          name: 'Squatter',
+          invitationId: invited.invitationId,
+        })
+        .expect(403);
+
+      expect(await findUser(email)).toBeUndefined();
     });
+  });
+
+  it('leaves the public onboarding start endpoint and health unauthenticated', async () => {
+    await request(app.getHttpServer()).get('/v1/health/live').expect(200);
+    // Not 401/403: the public flow answers whatever it does with no cookie (here, a validation reply).
+    const response = await request(app.getHttpServer()).post('/v1/onboardings').send({});
+    expect([401, 403]).not.toContain(response.status);
+  });
+
+  describe('superadmin seed', () => {
+    const seedEmail = `seed-${randomUUID()}@${OPERATOR_EMAIL_DOMAIN}`;
+
+    it('creates exactly one superadmin across two boots', async () => {
+      const keep = await createOperator(app);
+
+      await makeOnlySuperadmin(keep.userId);
+
+      for (let boot = 0; boot < 2; boot += 1) {
+        const seeded = await bootApp({
+          AUTH_SUPERADMIN_EMAIL: seedEmail,
+          AUTH_SUPERADMIN_PASSWORD: OPERATOR_PASSWORD,
+        });
+        await seeded.close();
+      }
+
+      const { rows } = await pool.query(
+        `SELECT "email" FROM auth."user" WHERE 'superadmin' = ANY(string_to_array("role", ','))`,
+      );
+      expect(rows).toEqual([{ email: seedEmail }]);
+    }, 90000);
   });
 });

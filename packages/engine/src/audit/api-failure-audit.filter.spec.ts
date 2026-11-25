@@ -6,7 +6,6 @@ import {
   type HttpServer,
 } from '@nestjs/common';
 import { BaseExceptionFilter, type HttpAdapterHost } from '@nestjs/core';
-import type { JWTPayload } from 'jose';
 import type { DataSource } from 'typeorm';
 import { markAuditRecorded } from './audit-recorded.marker';
 import type { AuditService } from './audit.service';
@@ -41,7 +40,7 @@ type TestRequest = {
   originalUrl?: string;
   route?: { path?: string };
   params?: Record<string, string>;
-  adminTokenClaims?: JWTPayload;
+  adminSession?: { userId: string };
 };
 
 /**
@@ -341,7 +340,7 @@ describe('ApiFailureAuditFilter', () => {
   });
 
   describe('actor attribution', () => {
-    it('attributes an anonymous actor when the request carries no verified claims', async () => {
+    it('attributes an anonymous actor when the request carries no admin session', async () => {
       const auditService = createAuditServiceMock();
       const filter = createFilter(auditService);
 
@@ -359,7 +358,7 @@ describe('ApiFailureAuditFilter', () => {
       expect(input.actorId).toBe(ADMIN_ACCESS_UNKNOWN_ACTOR);
     });
 
-    it('attributes the operator identity when the request carries verified admin claims', async () => {
+    it('attributes the operator identity when the request carries an admin session', async () => {
       const auditService = createAuditServiceMock();
       const filter = createFilter(auditService);
 
@@ -370,7 +369,7 @@ describe('ApiFailureAuditFilter', () => {
             method: 'DELETE',
             path: '/v1/admin/connectors/mock_kyc',
             route: { path: '/v1/admin/connectors/:connectorId' },
-            adminTokenClaims: { oid: 'operator-1' } as JWTPayload,
+            adminSession: { userId: 'operator-1' },
           }),
         ),
       );

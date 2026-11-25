@@ -22,13 +22,12 @@ writeFileSync(join(distDir, 'assets', 'index-abc123.js'), ASSET_JS);
 // ahead of the static handler, so this file must never reach the browser from a container.
 writeFileSync(join(distDir, 'config.js'), 'window.__ENV__ = {};\n');
 
-// This suite sends no Entra ID token; admin auth has its own e2e spec.
+// This suite sends no session cookie; admin auth has its own e2e spec.
 process.env.ADMIN_AUTH_ENABLED = 'false';
 process.env.PORT = '3002';
 process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5173';
 process.env.ADMIN_PANEL_DIST_DIR = distDir;
 process.env.VITE_AUTH_ENABLED = 'false';
-process.env.VITE_AZURE_CLIENT_ID = '';
 
 import { createApp } from '../src/main';
 import { validateConfig } from '../src/config/app.config';
@@ -109,8 +108,8 @@ describe('Admin panel served by the engine (e2e)', () => {
     expect(response.headers['content-type']).toContain('javascript');
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.text).toContain('"VITE_AUTH_ENABLED": "false"');
-    // Unset and empty keys are omitted so the panel falls back to its build-time value.
-    expect(response.text).not.toContain('VITE_AZURE_CLIENT_ID');
+    // Derived from the engine's own Microsoft client id, which this suite leaves unset.
+    expect(response.text).toContain('"VITE_AUTH_MICROSOFT_ENABLED": "false"');
   });
 
   it('points the panel at this engine, so a remapped host port cannot break it', async () => {

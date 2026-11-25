@@ -8,6 +8,7 @@ import { buildOpenApiDocument, serveOpenApiDocument } from './openapi/openapi-do
 import { exceptionFactory } from './validation/validation-exception.factory';
 
 const ASYNC_CALLBACK_ROUTE_PREFIX = '/v1/webhooks';
+const AUTH_ROUTE_PREFIX = '/v1/auth';
 
 type RequestLike = {
   originalUrl?: string;
@@ -20,6 +21,15 @@ function isAsyncCallbackRequest(request: RequestLike): boolean {
   const path = pathWithQuery.split('?')[0];
 
   return path === ASYNC_CALLBACK_ROUTE_PREFIX || path.startsWith(`${ASYNC_CALLBACK_ROUTE_PREFIX}/`);
+}
+
+// better-auth is mounted as middleware and reads the raw request body itself, so a parser
+// that ran first would leave it an already-consumed stream.
+function isAuthRequest(request: RequestLike): boolean {
+  const pathWithQuery = request.originalUrl || request.url || '';
+  const path = pathWithQuery.split('?')[0];
+
+  return path === AUTH_ROUTE_PREFIX || path.startsWith(`${AUTH_ROUTE_PREFIX}/`);
 }
 
 export async function createApp(module: Type<unknown> = AppModule) {
@@ -35,6 +45,7 @@ export async function createApp(module: Type<unknown> = AppModule) {
 
       return (
         !isAsyncCallbackRequest(request) &&
+        !isAuthRequest(request) &&
         Boolean(request.is?.(['application/json', 'application/*+json']))
       );
     },
@@ -46,6 +57,7 @@ export async function createApp(module: Type<unknown> = AppModule) {
 
       return (
         !isAsyncCallbackRequest(request) &&
+        !isAuthRequest(request) &&
         Boolean(request.is?.('application/x-www-form-urlencoded'))
       );
     },
@@ -78,12 +90,12 @@ export async function createApp(module: Type<unknown> = AppModule) {
     // write path at the preflight — a browser never even sends the request. A route added
     // here without its method belongs on this list too: `curl` ignores CORS, so a manual
     // check of a new route passes while the panel still cannot reach it.
-    methods: ['GET', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    // The admin panel sends a bearer token, so every admin request is now preceded by a
-    // preflight. Listing the header explicitly keeps that working where the default
-    // request-header reflection is not available.
-    allowedHeaders: ['Authorization', 'Content-Type'],
-    credentials: false,
+    // POST is for better-auth's sign-in and sign-out calls.
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    // The admin panel authenticates with a session cookie, not a bearer token, so only
+    // Content-Type needs allowing; credentials lets the browser send and store that cookie.
+    allowedHeaders: ['Content-Type'],
+    credentials: true,
   });
 
   // The admin panel's static build ships in this image and is served from this same origin, so

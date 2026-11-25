@@ -3,12 +3,9 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
-import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type KeyLike } from 'jose';
 import { startE2eServer } from './e2e-server';
+import { createOperator, deleteOperators, type Operator } from './admin-session.support';
 
-const TENANT_ID = '77777777-7777-7777-7777-777777777777';
-const AUDIENCE = '88888888-8888-8888-8888-888888888888';
-const KEY_ID = 'admin-workflow-details-signing-key';
 const WORKFLOW_ID = 'eu-b2c-individual-kyc-eea';
 const UNKNOWN_ID = 'admin-workflow-details-e2e-unknown';
 
@@ -34,8 +31,7 @@ const collectKeys = (value: unknown, keys: string[] = []): string[] => {
 describe('Admin workflow details (e2e)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
-  let privateKey: KeyLike;
-  let token: string;
+  let operator: Operator;
 
   const setStoredStatus = async (version: number, status: string): Promise<void> => {
     await dataSource.query(
@@ -48,7 +44,7 @@ describe('Admin workflow details (e2e)', () => {
   };
 
   const getAdmin = (url: string) =>
-    request(app.getHttpServer()).get(url).set('Authorization', `Bearer ${token}`);
+    request(app.getHttpServer()).get(url).set('Cookie', operator.cookie);
 
   const getStep = (steps: DefinitionStep[], name: string): DefinitionStep => {
     const step = steps.find((candidate) => candidate.name === name);
@@ -57,27 +53,12 @@ describe('Admin workflow details (e2e)', () => {
   };
 
   beforeAll(async () => {
-    const keyPair = await generateKeyPair('RS256', { extractable: true });
-    privateKey = keyPair.privateKey;
-    const publicJwk = await exportJWK(keyPair.publicKey);
-    const getKey = createLocalJWKSet({
-      keys: [{ ...publicJwk, kid: KEY_ID, alg: 'RS256', use: 'sig' }],
-    });
-
     process.env.ADMIN_AUTH_ENABLED = 'true';
-    process.env.AZURE_TENANT_ID = TENANT_ID;
-    process.env.AZURE_API_AUDIENCE = AUDIENCE;
-    process.env.ADMIN_REQUIRED_ROLES = 'admin';
     process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5173';
     process.env.CLIENT_WEBHOOK_BASE_URL = '';
 
     const { AppModule } = await import('../src/app.module');
-    const { ADMIN_TOKEN_VERIFIER } = await import('../src/auth/admin-token-verifier.port');
-    const { AzureTokenVerifier } = await import('../src/auth/azure-token-verifier');
-    const moduleFixture = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(ADMIN_TOKEN_VERIFIER)
-      .useValue(new AzureTokenVerifier({ tenantId: TENANT_ID, audience: AUDIENCE, getKey }))
-      .compile();
+    const moduleFixture = await Test.createTestingModule({ imports: [AppModule] }).compile();
 
     app = moduleFixture.createNestApplication<NestExpressApplication>(undefined, {
       bodyParser: false,
@@ -86,25 +67,12 @@ describe('Admin workflow details (e2e)', () => {
     await startE2eServer(app);
     dataSource = app.get(DataSource);
 
-    const { buildEntraIssuer } = await import('../src/auth/azure-token-verifier');
-    token = await new SignJWT({
-      scp: 'Onboardings.Read',
-      oid: '9f3c0000-0000-0000-0000-0000000000dd',
-      preferred_username: 'workflow.details@tsh.io',
-      tid: TENANT_ID,
-      roles: ['admin'],
-    })
-      .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
-      .setSubject('operator-subject')
-      .setIssuer(buildEntraIssuer(TENANT_ID))
-      .setAudience(AUDIENCE)
-      .setIssuedAt()
-      .setExpirationTime('30m')
-      .sign(privateKey);
+    operator = await createOperator(app!, { platformRole: 'superadmin', twoFactor: true });
   });
 
   afterAll(async () => {
     if (dataSource?.isInitialized) {
+      await deleteOperators(app);
       await setStoredStatus(1, 'published');
     }
 
@@ -222,7 +190,7 @@ describe('Admin workflow details (e2e)', () => {
     });
   });
 
-  it('answers 401 without a token on both routes', async () => {
+  it('answers 401 without a session on both routes', async () => {
     await request(app.getHttpServer())
       .get(`/v1/admin/workflows/${WORKFLOW_ID}/versions`)
       .expect(401);
