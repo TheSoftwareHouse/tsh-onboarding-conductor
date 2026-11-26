@@ -4556,11 +4556,35 @@ step: `garage server --single-node --default-bucket` creates it itself, and a bo
 `garage bucket info orchestrator-files` waits for that boot to finish before the suites run. Then
 `corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → skills:validate →
 typecheck → build → test:cov → install Playwright chromium → test:e2e:ci →
-test:mailhog:integration`. It is the only workflow: the model-driven skill checks run on a
-developer's machine on their own signed-in Claude Code account and have none (above). The last step
+test:mailhog:integration`. The last step
 runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, whose `postgres`
 container would otherwise try to publish host 5432 and collide with the job's own Postgres service
-container.
+container. Two pull-request-only jobs sit beside it: `changelog` (`pnpm changelog:check`) and
+`release-check`, which runs `pnpm release:check HEAD^1 HEAD^2` on the merge commit with full
+history. There are two workflows, `ci.yml` and `release.yml` (below); the model-driven skill checks
+run on a developer's machine on their own signed-in Claude Code account and have none (above).
+
+**Releases** (`docs/decisions/0054-ci-tags-every-release.md`): a release is the merge of a
+`release/X.Y.Z` pull request, and CI tags it. `pnpm version:bump` refuses unless the current branch
+is `release/<the version it computes>`, and exports the set of files it writes. `pnpm release:check`
+(`scripts/check-release.cjs`, rules in `scripts/release-lib.cjs`) passes when no `package.json`
+changes its version between the merge base and the head; when one does, it fails for each of: a
+branch that is not `release/*`, a branch other than `release/<new root version>`, a new version
+that is not X.Y.Z or not above the old one, a head `CHANGELOG.md` without a non-empty section for it
+(the GitHub Release notes), a non-empty `## Unreleased` section (code the tag would ship without
+notes; a missing heading passes), a changed file
+outside that write set, a head repository other than the base repository, and a base that is not an ancestor of the head. `release.yml` runs when a
+`release/*` pull request of this repository merges (`pull_request` `closed`, `merged == true`) and
+takes its `merge_commit_sha` as the release commit; by hand (`workflow_dispatch`) it takes a commit
+that must be on `main` and change the root `package.json` version. With `contents: write` and no
+concurrency group, it creates the annotated tag `vX.Y.Z` ("Release X.Y.Z") on that commit unless it
+already tags it, fails when the tag is on another commit, and creates the GitHub Release `X.Y.Z`
+unless it exists, with notes `pnpm release:notes X.Y.Z` extracts from `CHANGELOG.md`. Its actions
+are pinned to commit SHAs, as the one workflow with write access. Immutable releases, which lock a
+published release's tag, and the `release/**` ruleset that limits who cuts release branches are
+GitHub settings, not repository files (`CONTRIBUTING.md#release-setup-admins`). A ruleset on `main` requires the
+`changelog` and `release-check` checks and up-to-date branches, because `pull_request` checks do not
+re-run when `main` advances; it is what makes the tagged tree the one the pull request's CI tested.
 
 **Testing**: 98 co-located engine unit spec files, 21 engine e2e spec files (real
 Postgres/Redis/Garage via supertest against a booted Nest app; 20 of them run by default, with

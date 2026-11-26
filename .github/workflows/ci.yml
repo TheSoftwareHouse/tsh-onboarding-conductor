@@ -52,6 +52,38 @@ jobs:
       - name: Check the changelog
         run: pnpm changelog:check HEAD^1
 
+  # A pull request that changes the product version must be a proper release pull request (ADR 0054):
+  # branch `release/<version>`, only the files `version:bump` writes, up to date with main. A job of
+  # its own, so a malformed release fails in seconds. Pull requests that leave the version alone pass.
+  release-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      # The check uses Node built-ins only; stop pnpm installing the workspace before running it.
+      pnpm_config_verify_deps_before_run: false
+    steps:
+      # Full history: the check needs the merge base of the pull request's two parents.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # HEAD^1 is the base branch's tip and HEAD^2 the pull request's head; the check reads the
+      # branch name from GITHUB_HEAD_REF, which GitHub sets on pull_request runs.
+      - name: Check the release pull request
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+        run: pnpm release:check HEAD^1 HEAD^2
+
   verify:
     runs-on: ubuntu-latest
 

@@ -70,4 +70,4 @@ function releaseUnreleased(changelog, version, isoDate) {
   );
 }
 
-module.exports = { SEMVER, nextVersion, replaceVersion, releaseUnreleased };
+module.exports = { SEMVER, compare, nextVersion, replaceVersion, releaseUnreleased };

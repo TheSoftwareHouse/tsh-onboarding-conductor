@@ -32,29 +32,31 @@ remaps the host side only; inside the Compose network the engine still reaches
 Always use the root pnpm scripts. Never invoke `docker compose`, `jest`, `tsc` or
 `playwright` directly — the scripts wrap them with required setup and teardown.
 
-| Command                                                                             | Does                                                                                                                            |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm bootstrap`                                                                    | Install from the lockfile and set up Husky hooks                                                                                |
-| `pnpm lint` / `pnpm lint:fix`                                                       | ESLint across packages                                                                                                          |
-| `pnpm typecheck`                                                                    | `tsc --noEmit` across packages; `@tsh/ddl-schema` builds first because its dependents typecheck against its `dist`              |
-| `pnpm build`                                                                        | Build all packages                                                                                                              |
-| `pnpm test` / `pnpm test:cov`                                                       | Unit tests (co-located `*.spec.ts`)                                                                                             |
-| `pnpm test:scripts`                                                                 | Tests for `scripts/` (`node --test`); part of `pnpm test` and `test:cov`                                                        |
-| `pnpm test:integration`                                                             | Integration tests                                                                                                               |
-| `pnpm test:e2e`                                                                     | Brings the stack up without the worker, runs e2e, always tears it down                                                          |
-| `pnpm format:fix`                                                                   | Canonical repo-wide Prettier write                                                                                              |
-| `pnpm workflow:validate [path]`                                                     | Validate every workflow the engine loads, or just the paths named, without the stack                                            |
-| `pnpm workflow:compile <file> [--report\|--normalized\|--from-untyped]`             | Compile a workflow the way the engine loads it; `--from-untyped` converts a document of untyped steps                           |
-| `pnpm skills:validate [path] [--strict]`                                            | Check the skills and rules in `.claude/` against the repository they cite; no model, runs in CI                                 |
-| `pnpm skills:routing`                                                               | Measure which skill fires for a table of prompts; spends money, never runs in CI                                                |
-| `pnpm skills:ablation`                                                              | Run each ablation case with and without its skill and grade the artifact; spends money, never runs in CI                        |
-| `pnpm skills:evals [--validate\|--dry-run\|--case <text>\|--runs <n>\|--model <m>]` | Run the skills' golden sets through headless Claude Code and grade them; local only, on the signed-in account, never in CI      |
-| `pnpm version:bump <patch\|minor\|major\|X.Y.Z>`                                    | Bump the product version: date `## Unreleased` in `CHANGELOG.md`, rewrite every `package.json`, regenerate OpenAPI and API docs |
-| `pnpm changelog:check [base]`                                                       | Fail unless `CHANGELOG.md` changed since `base` (default `origin/main`); CI runs it on every pull request                       |
-| `pnpm openapi:generate`                                                             | Rewrite the engine's OpenAPI document from its code                                                                             |
-| `pnpm docs:dev` / `pnpm docs:build`                                                 | The documentation site, with hot reload / built                                                                                 |
-| `pnpm stack:up` / `stack:down` / `stack:reset` / `stack:ps` / `stack:logs`          | Local Docker stack; `reset` also throws the volumes away                                                                        |
-| `pnpm stack:panel-dev:up` + `pnpm panel:watch`                                      | Stack serving the admin panel from the host's build                                                                             |
+| Command                                                                             | Does                                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm bootstrap`                                                                    | Install from the lockfile and set up Husky hooks                                                                                                                                       |
+| `pnpm lint` / `pnpm lint:fix`                                                       | ESLint across packages                                                                                                                                                                 |
+| `pnpm typecheck`                                                                    | `tsc --noEmit` across packages; `@tsh/ddl-schema` builds first because its dependents typecheck against its `dist`                                                                     |
+| `pnpm build`                                                                        | Build all packages                                                                                                                                                                     |
+| `pnpm test` / `pnpm test:cov`                                                       | Unit tests (co-located `*.spec.ts`)                                                                                                                                                    |
+| `pnpm test:scripts`                                                                 | Tests for `scripts/` (`node --test`); part of `pnpm test` and `test:cov`                                                                                                               |
+| `pnpm test:integration`                                                             | Integration tests                                                                                                                                                                      |
+| `pnpm test:e2e`                                                                     | Brings the stack up without the worker, runs e2e, always tears it down                                                                                                                 |
+| `pnpm format:fix`                                                                   | Canonical repo-wide Prettier write                                                                                                                                                     |
+| `pnpm workflow:validate [path]`                                                     | Validate every workflow the engine loads, or just the paths named, without the stack                                                                                                   |
+| `pnpm workflow:compile <file> [--report\|--normalized\|--from-untyped]`             | Compile a workflow the way the engine loads it; `--from-untyped` converts a document of untyped steps                                                                                  |
+| `pnpm skills:validate [path] [--strict]`                                            | Check the skills and rules in `.claude/` against the repository they cite; no model, runs in CI                                                                                        |
+| `pnpm skills:routing`                                                               | Measure which skill fires for a table of prompts; spends money, never runs in CI                                                                                                       |
+| `pnpm skills:ablation`                                                              | Run each ablation case with and without its skill and grade the artifact; spends money, never runs in CI                                                                               |
+| `pnpm skills:evals [--validate\|--dry-run\|--case <text>\|--runs <n>\|--model <m>]` | Run the skills' golden sets through headless Claude Code and grade them; local only, on the signed-in account, never in CI                                                             |
+| `pnpm version:bump <patch\|minor\|major\|X.Y.Z>`                                    | Bump the product version on a `release/X.Y.Z` branch (refuses elsewhere): date `## Unreleased`, rewrite every `package.json`, regenerate OpenAPI and API docs                          |
+| `pnpm release:check [base] [head]`                                                  | Fail a version-changing pull request unless it is `release/<new version>`, higher, its changelog section, an empty `## Unreleased`, bump files only, up to date; CI runs it on each PR |
+| `pnpm release:notes <X.Y.Z>`                                                        | Print that version's `CHANGELOG.md` section, the GitHub Release notes; fails when the section is missing                                                                               |
+| `pnpm changelog:check [base]`                                                       | Fail unless `CHANGELOG.md` changed since `base` (default `origin/main`); CI runs it on every pull request                                                                              |
+| `pnpm openapi:generate`                                                             | Rewrite the engine's OpenAPI document from its code                                                                                                                                    |
+| `pnpm docs:dev` / `pnpm docs:build`                                                 | The documentation site, with hot reload / built                                                                                                                                        |
+| `pnpm stack:up` / `stack:down` / `stack:reset` / `stack:ps` / `stack:logs`          | Local Docker stack; `reset` also throws the volumes away                                                                                                                               |
+| `pnpm stack:panel-dev:up` + `pnpm panel:watch`                                      | Stack serving the admin panel from the host's build                                                                                                                                    |
 
 `pnpm test:e2e`, `test:mailhog:integration` and every `stack:*` command need Docker
 running. `pnpm format` is check-only and covers just two packages — it is not a
@@ -70,8 +72,9 @@ either.
 CI (`.github/workflows/ci.yml`) runs lint → `skills:validate` → typecheck → build →
 `test:cov` → e2e → MailHog integration. Changes must pass that sequence. A separate job fails a
 pull request that does not change `CHANGELOG.md`: every change adds its line under `## Unreleased`.
-Merges release nothing; a maintainer bumps the one product version with `pnpm version:bump` in a
-pull request of its own (`CONTRIBUTING.md#versioning`).
+A release is a `release/X.Y.Z` branch where a maintainer runs `pnpm version:bump`, merged by pull
+request; CI then tags `vX.Y.Z` and publishes a GitHub Release, and nobody tags by hand
+(`CONTRIBUTING.md#versioning`, ADR 0054).
 
 The model-driven skill checks never run in CI, in any workflow, and never against the
 Anthropic API. `skills:evals`, `skills:routing` and `skills:ablation` each drive headless
@@ -100,9 +103,8 @@ when one of them changes. `README.md` is a short landing page — reader-facing 
 the documentation site (`packages/docs/docs/guides`, hand-written; the API and fixture pages there
 are generated) and developer material in `docs/`, and anything any of them states as a
 request/response shape or command output must come from an actual run. `CONTRIBUTING.md` carries the contribution flow
-and the checks a change must pass. The project is MIT-licensed, but the GitHub repository is
-currently private — `CONTRIBUTING.md`'s and the issue templates' outside-contributor framing
-describes an intended future state, not today's.
+and the checks a change must pass. The project is MIT-licensed and the GitHub repository is public, so
+`CONTRIBUTING.md`'s and the issue templates' outside-contributor framing describes today's state.
 
 The engine's HTTP contract is `packages/shared/openapi/engine.openapi.json`, generated from the
 controllers' and DTOs' decorators. A change to a route, a DTO or an error code needs

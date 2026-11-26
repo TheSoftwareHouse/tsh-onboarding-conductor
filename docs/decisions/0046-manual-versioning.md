@@ -1,10 +1,10 @@
 # 0046. One product version, bumped by hand, with a changelog line in every pull request
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-10-15
 - **Tags:** release, versioning, ci, changelog
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [0054-ci-tags-every-release.md](./0054-ci-tags-every-release.md)
 
 ## Decision
 
