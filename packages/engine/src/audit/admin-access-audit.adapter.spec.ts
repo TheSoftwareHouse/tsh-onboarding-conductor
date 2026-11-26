@@ -6,77 +6,78 @@ import { AuditService } from './audit.service';
 const ENDPOINT = { method: 'GET', path: '/v1/onboardings' };
 
 const OPERATOR: AdminOperatorIdentity = {
-  objectId: '9f3c0000-0000-0000-0000-00000000000a',
-  userPrincipalName: 'anna.kowalska@tsh.io',
-  tenantId: '11111111-1111-1111-1111-111111111111',
-  roles: ['admin'],
+  userId: 'user-1',
+  email: 'anna.kowalska@tsh.io',
+  platformRole: null,
+  organizationId: 'org-1',
+};
+
+const OPERATOR_METADATA = {
+  method: 'GET',
+  email: 'anna.kowalska@tsh.io',
+  platformRole: null,
+  organizationId: 'org-1',
 };
 
 describe('toAdminAccessAuditInput', () => {
-  it('attributes a granted read to the operator, keyed on the immutable object id', () => {
+  it('attributes a granted read to the operator, keyed on the user id', () => {
     expect(
       toAdminAccessAuditInput({ outcome: 'granted', endpoint: ENDPOINT, operator: OPERATOR }),
     ).toEqual({
       action: 'auth.access_granted',
       actorType: 'operator',
-      actorId: '9f3c0000-0000-0000-0000-00000000000a',
+      actorId: 'user-1',
       resourceId: '/v1/onboardings',
-      metadata: {
-        method: 'GET',
-        tenantId: '11111111-1111-1111-1111-111111111111',
-        userPrincipalName: 'anna.kowalska@tsh.io',
-        grantedRoles: ['admin'],
-      },
+      metadata: OPERATOR_METADATA,
     });
   });
 
-  it('records what a role refusal was measured against, not only what the operator held', () => {
-    const event: AdminAccessAuditEvent = {
-      outcome: 'role_missing',
-      endpoint: ENDPOINT,
-      operator: { ...OPERATOR, roles: ['auditor'] },
-      requiredRoles: ['admin', 'compliance'],
-    };
-
-    expect(toAdminAccessAuditInput(event)).toEqual({
-      action: 'auth.role_missing',
-      actorType: 'operator',
-      actorId: '9f3c0000-0000-0000-0000-00000000000a',
-      resourceId: '/v1/onboardings',
-      metadata: {
-        method: 'GET',
-        tenantId: '11111111-1111-1111-1111-111111111111',
-        userPrincipalName: 'anna.kowalska@tsh.io',
-        grantedRoles: ['auditor'],
-        requiredRoles: ['admin', 'compliance'],
-      },
-    });
-  });
-
-  it('keeps a rejected token anonymous while preserving the claims it presented', () => {
-    const event: AdminAccessAuditEvent = {
-      outcome: 'token_rejected',
-      endpoint: ENDPOINT,
-      reason: 'unexpected "iss" claim value',
-      token: {
-        issuer: 'https://sts.windows.net/other-tenant/',
-        audience: 'some-audience',
-        version: '1.0',
-      },
-    };
-
-    expect(toAdminAccessAuditInput(event)).toEqual({
-      action: 'auth.token_rejected',
+  it('keeps a missing session anonymous', () => {
+    expect(
+      toAdminAccessAuditInput({
+        outcome: 'session_missing',
+        endpoint: ENDPOINT,
+        reason: 'No valid session',
+      }),
+    ).toEqual({
+      action: 'auth.session_missing',
       actorType: 'anonymous',
       actorId: 'unknown',
       resourceId: '/v1/onboardings',
-      metadata: {
-        method: 'GET',
-        reason: 'unexpected "iss" claim value',
-        tokenIssuer: 'https://sts.windows.net/other-tenant/',
-        tokenAudience: 'some-audience',
-        tokenVersion: '1.0',
-      },
+      metadata: { method: 'GET', reason: 'No valid session' },
+    });
+  });
+
+  it('keeps a refused origin anonymous and records the origin', () => {
+    expect(
+      toAdminAccessAuditInput({
+        outcome: 'origin_refused',
+        endpoint: { method: 'POST', path: '/v1/onboardings' },
+        origin: 'https://evil.tsh.io',
+      }),
+    ).toEqual({
+      action: 'auth.origin_refused',
+      actorType: 'anonymous',
+      actorId: 'unknown',
+      resourceId: '/v1/onboardings',
+      metadata: { method: 'POST', origin: 'https://evil.tsh.io' },
+    });
+  });
+
+  it('records the permission a refusal was measured against', () => {
+    expect(
+      toAdminAccessAuditInput({
+        outcome: 'permission_missing',
+        endpoint: ENDPOINT,
+        operator: OPERATOR,
+        requiredPermission: { resource: 'workflow', action: 'write' },
+      }),
+    ).toEqual({
+      action: 'auth.permission_missing',
+      actorType: 'operator',
+      actorId: 'user-1',
+      resourceId: '/v1/onboardings',
+      metadata: { ...OPERATOR_METADATA, requiredPermission: 'workflow:write' },
     });
   });
 
@@ -105,31 +106,6 @@ describe('toAdminAccessAuditInput', () => {
       metadata: { method: 'GET' },
     });
   });
-
-  it('omits the claim fields entirely when the rejected token was unreadable', () => {
-    // Storing them as null would read as though claims had been parsed and found empty.
-    const event: AdminAccessAuditEvent = {
-      outcome: 'token_rejected',
-      endpoint: ENDPOINT,
-      reason: 'Missing bearer access token',
-      token: { issuer: null, audience: null, version: null },
-    };
-
-    expect(toAdminAccessAuditInput(event).metadata).toEqual({
-      method: 'GET',
-      reason: 'Missing bearer access token',
-    });
-  });
-
-  it('falls back to an unknown actor when a verified token names nobody', () => {
-    const event: AdminAccessAuditEvent = {
-      outcome: 'granted',
-      endpoint: ENDPOINT,
-      operator: { objectId: null, userPrincipalName: null, tenantId: null, roles: [] },
-    };
-
-    expect(toAdminAccessAuditInput(event).actorId).toBe('unknown');
-  });
 });
 
 describe('AdminAccessAuditAdapter', () => {
@@ -143,14 +119,9 @@ describe('AdminAccessAuditAdapter', () => {
     expect(auditService.logAdminAccess).toHaveBeenCalledWith(dataSource, {
       action: 'auth.access_granted',
       actorType: 'operator',
-      actorId: '9f3c0000-0000-0000-0000-00000000000a',
+      actorId: 'user-1',
       resourceId: '/v1/onboardings',
-      metadata: {
-        method: 'GET',
-        tenantId: '11111111-1111-1111-1111-111111111111',
-        userPrincipalName: 'anna.kowalska@tsh.io',
-        grantedRoles: ['admin'],
-      },
+      metadata: OPERATOR_METADATA,
     });
   });
 

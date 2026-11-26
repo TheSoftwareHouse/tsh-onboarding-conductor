@@ -3,8 +3,14 @@ const process = require('node:process');
 const { setTimeout: delay } = require('node:timers/promises');
 const { URL } = require('node:url');
 
+const crypto = require('node:crypto');
+
 const HOST = '127.0.0.1';
 const PATH = '/v1/onboardings';
+const WORKFLOWS_PATH = '/v1/admin/workflows';
+const WORKFLOW_VERSIONS_PATTERN = /^\/v1\/admin\/workflows\/([^/]+)\/versions$/;
+const WORKFLOW_LIST_KEYS = new Set(['page', 'limit', 'search', 'scope', 'hasDraft']);
+const AUTH_PREFIX = '/v1/auth/';
 const PANEL_ORIGIN = process.env.PANEL_ORIGIN || process.env.BASE_URL || 'http://localhost:5174';
 const RESPONSE_DELAY_MS = 250;
 const ALLOWED_KEYS = new Set([
@@ -38,6 +44,318 @@ const VALID_STATUSES = new Set([
 ]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/**
+ * Cookie-session stand-in for the engine's better-auth endpoints, for the paths and response
+ * shapes the better-auth 1.7.25 client uses. Accounts are chosen by email so specs running in
+ * parallel never share state; every mutation (enrolling in two-factor) lives on the session.
+ */
+const SESSION_COOKIE = 'fixture_session';
+const PENDING_COOKIE = 'fixture_pending';
+const PASSWORD = 'correct-horse-battery';
+/** The only authenticator code the fixture accepts. */
+const TOTP_CODE = '123456';
+const TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
+const BACKUP_CODES = ['aaaa-1111', 'bbbb-2222', 'cccc-3333', 'dddd-4444'];
+
+const ACCOUNTS = {
+  'operator@example.com': { id: 'user-operator', twoFactorEnabled: true, hasPermission: true },
+  'enrolling@example.com': { id: 'user-enrolling', twoFactorEnabled: false, hasPermission: true },
+  'viewer@example.com': { id: 'user-viewer', twoFactorEnabled: true, hasPermission: false },
+  // Belongs to two organizations, so the panel offers its organization switcher.
+  'switcher@example.com': {
+    id: 'user-switcher',
+    twoFactorEnabled: true,
+    hasPermission: true,
+    organizations: [
+      { id: 'org-alpha', name: 'Alpha', slug: 'alpha' },
+      { id: 'org-beta', name: 'Beta', slug: 'beta' },
+    ],
+  },
+};
+
+/** The one organization whose onboarding list differs: it holds only the special record. */
+const NARROW_ORGANIZATION_ID = 'org-beta';
+
+function organizationsOf(email) {
+  return ACCOUNTS[email].organizations ?? [];
+}
+
+const sessions = new Map();
+const pendingChallenges = new Map();
+/** Whether admin routes demand a session; off for the passes that run with the gate disabled. */
+let enforceAuth = false;
+
+function createSession(email, twoFactorEnabled) {
+  return {
+    email,
+    twoFactorEnabled,
+    hasPermission: ACCOUNTS[email].hasPermission,
+    // As the engine's session hook does: a new session acts in the user's first organization.
+    activeOrganizationId: organizationsOf(email)[0]?.id ?? null,
+  };
+}
+
+function readCookie(request, name) {
+  const cookies = (request.headers.cookie || '').split(';');
+
+  for (const cookie of cookies) {
+    const [key, ...value] = cookie.trim().split('=');
+
+    if (key === name) {
+      return value.join('=');
+    }
+  }
+
+  return null;
+}
+
+function cookieHeader(name, value, maxAge) {
+  return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
+}
+
+function findSession(request) {
+  const token = readCookie(request, SESSION_COOKIE);
+
+  return token === null ? null : (sessions.get(token) ?? null);
+}
+
+function toUser(session) {
+  const { id } = ACCOUNTS[session.email];
+
+  return {
+    id,
+    email: session.email,
+    name: session.email.split('@')[0],
+    emailVerified: true,
+    image: null,
+    role: 'user',
+    twoFactorEnabled: session.twoFactorEnabled,
+    createdAt: '2026-07-01T00:00:00.000Z',
+    updatedAt: '2026-07-01T00:00:00.000Z',
+  };
+}
+
+function toSessionPayload(token, session) {
+  return {
+    session: {
+      id: `session-${token}`,
+      token,
+      userId: ACCOUNTS[session.email].id,
+      activeOrganizationId: session.activeOrganizationId,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    },
+    user: toUser(session),
+  };
+}
+
+function startSession(email, twoFactorEnabled) {
+  const token = crypto.randomUUID();
+  const session = createSession(email, twoFactorEnabled);
+
+  sessions.set(token, session);
+
+  return { token, session, cookies: [cookieHeader(SESSION_COOKIE, token, 3600)] };
+}
+
+function readJsonBody(request) {
+  return new Promise((resolve) => {
+    const chunks = [];
+
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
+      } catch {
+        resolve({});
+      }
+    });
+  });
+}
+
+function sendAuthError(response, status, code, message) {
+  sendJson(response, status, { code, message });
+}
+
+/** Answers one `/v1/auth/*` request; returns false for a path the fixture does not emulate. */
+async function respondToAuth(request, response, pathname) {
+  const route = `${request.method} ${pathname.slice(AUTH_PREFIX.length - 1)}`;
+  const session = findSession(request);
+  const token = readCookie(request, SESSION_COOKIE);
+
+  switch (route) {
+    case 'GET /get-session':
+      sendJson(response, 200, session ? toSessionPayload(token, session) : null);
+      return true;
+
+    case 'GET /organization/list':
+      sendJson(response, 200, session ? organizationsOf(session.email) : []);
+      return true;
+
+    case 'POST /organization/set-active': {
+      const { organizationId } = await readJsonBody(request);
+      const organization = session
+        ? organizationsOf(session.email).find((candidate) => candidate.id === organizationId)
+        : undefined;
+
+      if (!organization) {
+        sendAuthError(response, 403, 'NOT_A_MEMBER', 'You are not a member of this organization');
+        return true;
+      }
+
+      session.activeOrganizationId = organization.id;
+      sendJson(response, 200, { ...organization, members: [], invitations: [] });
+      return true;
+    }
+
+    case 'GET /list-accounts':
+      sendJson(response, 200, session ? [{ id: 'account-1', providerId: 'credential' }] : []);
+      return true;
+
+    case 'POST /two-factor/disable': {
+      const { password } = await readJsonBody(request);
+
+      if (!session) {
+        sendAuthError(response, 401, 'UNAUTHORIZED', 'Unauthorized');
+      } else if (password !== PASSWORD) {
+        sendAuthError(response, 400, 'INVALID_PASSWORD', 'Invalid password');
+      } else {
+        session.twoFactorEnabled = false;
+        sendJson(response, 200, { status: true });
+      }
+
+      return true;
+    }
+
+    case 'POST /sign-in/email': {
+      const { email, password } = await readJsonBody(request);
+      const account = ACCOUNTS[email];
+
+      if (!account || password !== PASSWORD) {
+        sendAuthError(response, 401, 'INVALID_EMAIL_OR_PASSWORD', 'Invalid email or password');
+        return true;
+      }
+
+      if (account.twoFactorEnabled) {
+        const challenge = crypto.randomUUID();
+
+        pendingChallenges.set(challenge, email);
+        response.setHeader('set-cookie', cookieHeader(PENDING_COOKIE, challenge, 600));
+        sendJson(response, 200, { twoFactorRedirect: true, twoFactorMethods: ['totp'] });
+        return true;
+      }
+
+      const started = startSession(email, false);
+
+      response.setHeader('set-cookie', started.cookies);
+      sendJson(response, 200, {
+        redirect: false,
+        token: started.token,
+        user: toUser(started.session),
+      });
+      return true;
+    }
+
+    case 'POST /two-factor/enable': {
+      const { password } = await readJsonBody(request);
+
+      if (!session) {
+        sendAuthError(response, 401, 'UNAUTHORIZED', 'Unauthorized');
+      } else if (password !== PASSWORD) {
+        sendAuthError(response, 400, 'INVALID_PASSWORD', 'Invalid password');
+      } else {
+        sendJson(response, 200, {
+          totpURI: `otpauth://totp/Fixture:${session.email}?secret=${TOTP_SECRET}&issuer=Fixture`,
+          backupCodes: BACKUP_CODES,
+        });
+      }
+
+      return true;
+    }
+
+    case 'POST /two-factor/verify-totp':
+    case 'POST /two-factor/verify-backup-code': {
+      const { code } = await readJsonBody(request);
+      const accepted = route.endsWith('verify-totp') ? TOTP_CODE : BACKUP_CODES[0];
+
+      if (code !== accepted) {
+        sendAuthError(response, 401, 'INVALID_CODE', 'Invalid code');
+        return true;
+      }
+
+      // Enrolment verification runs against an existing session; a sign-in challenge runs against
+      // the pending cookie and only now creates the session.
+      if (session) {
+        session.twoFactorEnabled = true;
+        sendJson(response, 200, { token, user: toUser(session) });
+        return true;
+      }
+
+      const challenge = readCookie(request, PENDING_COOKIE);
+      const email = challenge === null ? undefined : pendingChallenges.get(challenge);
+
+      if (email === undefined) {
+        sendAuthError(response, 401, 'INVALID_TWO_FACTOR_COOKIE', 'Invalid two factor cookie');
+        return true;
+      }
+
+      pendingChallenges.delete(challenge);
+      const started = startSession(email, true);
+
+      response.setHeader('set-cookie', [...started.cookies, cookieHeader(PENDING_COOKIE, '', 0)]);
+      sendJson(response, 200, { token: started.token, user: toUser(started.session) });
+      return true;
+    }
+
+    case 'POST /sign-out':
+      if (token !== null) {
+        sessions.delete(token);
+      }
+
+      response.setHeader('set-cookie', cookieHeader(SESSION_COOKIE, '', 0));
+      sendJson(response, 200, { success: true });
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+/**
+ * The engine's admin guard, in the order it applies: session, second factor, permission. Returns
+ * true when it has already answered with a refusal.
+ */
+function refuseAdminRequest(request, response) {
+  if (!enforceAuth) {
+    return false;
+  }
+
+  const session = findSession(request);
+
+  sendCorsHeaders(response);
+
+  if (!session) {
+    sendJson(response, 401, {
+      statusCode: 401,
+      code: 'ADMIN_SESSION_REQUIRED',
+      message: 'An admin session is required.',
+    });
+    return true;
+  }
+
+  if (!session.hasPermission) {
+    sendJson(response, 403, {
+      statusCode: 403,
+      code: 'ADMIN_PERMISSION_MISSING',
+      message: 'The admin permission is missing.',
+    });
+    return true;
+  }
+
+  return false;
+}
+
 function createRecord(sequence) {
   const index = sequence + 1;
 
@@ -65,10 +383,12 @@ function createRecord(sequence) {
   };
 }
 
+const SPECIAL_RECORD_ID = '018f1e2a-eeee-7000-8000-00000000000e';
+
 const RESPONSES = [
   ...Array.from({ length: 39 }, (_, sequence) => createRecord(sequence)),
   {
-    onboardingId: '018f1e2a-eeee-7000-8000-00000000000e',
+    onboardingId: SPECIAL_RECORD_ID,
     workflowId: 'kyc basic / encoding?',
     workflowVersion: 7,
     status: 'approved',
@@ -80,6 +400,50 @@ const RESPONSES = [
     context: { hidden: 'fixture-context-special' },
   },
 ];
+
+const WORKFLOW_TIMESTAMP = '2026-07-01T00:00:00.000Z';
+
+/** Every workflow id the onboarding rows and the spec's cases filter by, so each can be picked. */
+const WORKFLOWS = [
+  'kyc-standard',
+  'kyc-basic',
+  'kyc-enhanced-with-an-excessively-long-workflow-identifier-for-scroll-testing',
+  'kyc basic / encoding?',
+  'kyc-reloaded',
+  'no-onboardings',
+].map((workflowId) => ({
+  workflowId,
+  name: null,
+  scope: 'fixtures',
+  servingVersion: 1,
+  versionCount: 2,
+  draftCount: 0,
+  inProgressCount: 0,
+  createdAt: WORKFLOW_TIMESTAMP,
+  updatedAt: WORKFLOW_TIMESTAMP,
+}));
+
+/** Newest first, as the engine lists them; the draft must not reach the panel's version select. */
+function versionsFor(workflowId) {
+  const versions =
+    workflowId === 'kyc basic / encoding?'
+      ? [
+          [8, 'draft'],
+          [7, 'published'],
+          [6, 'retired'],
+        ]
+      : [
+          [2, 'published'],
+          [1, 'retired'],
+        ];
+
+  return versions.map(([version, status]) => ({
+    version,
+    status,
+    createdAt: WORKFLOW_TIMESTAMP,
+    updatedAt: WORKFLOW_TIMESTAMP,
+  }));
+}
 
 function isUuid(value) {
   return UUID_PATTERN.test(value);
@@ -186,11 +550,12 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
+/** The panel sends its session cookie cross-origin, so credentials are allowed for its origin. */
 function sendCorsHeaders(response) {
   response.setHeader('access-control-allow-origin', PANEL_ORIGIN);
-  response.setHeader('access-control-allow-credentials', 'false');
-  response.setHeader('access-control-allow-methods', 'GET, OPTIONS');
-  response.setHeader('access-control-allow-headers', 'content-type, authorization');
+  response.setHeader('access-control-allow-credentials', 'true');
+  response.setHeader('access-control-allow-methods', 'GET, POST, PUT, OPTIONS');
+  response.setHeader('access-control-allow-headers', 'content-type');
   response.setHeader('access-control-max-age', '86400');
   response.setHeader('vary', 'origin');
 }
@@ -207,11 +572,20 @@ function recordRequest(request) {
   };
 }
 
+function isKnownPath(pathname) {
+  return (
+    pathname === PATH || pathname === WORKFLOWS_PATH || WORKFLOW_VERSIONS_PATTERN.test(pathname)
+  );
+}
+
 function isValidRequest(record) {
+  const isAuthRequest = record.pathname.startsWith(AUTH_PREFIX);
+
   return (
     record.origin === PANEL_ORIGIN &&
-    record.pathname === PATH &&
-    (record.method === 'GET' || record.method === 'OPTIONS')
+    (isAuthRequest
+      ? ['GET', 'POST', 'OPTIONS'].includes(record.method)
+      : isKnownPath(record.pathname) && ['GET', 'OPTIONS'].includes(record.method))
   );
 }
 
@@ -223,15 +597,55 @@ async function respondWithUnexpected(response, record) {
   });
 }
 
+function respondToWorkflowsList(requestUrl, response) {
+  const params = requestUrl.searchParams;
+
+  for (const key of params.keys()) {
+    if (!WORKFLOW_LIST_KEYS.has(key)) {
+      throw new Error(`Fixture received an unsupported query string: ${requestUrl.search}`);
+    }
+  }
+
+  const search = (params.get('search') ?? '').toLowerCase();
+  const matching = WORKFLOWS.filter((workflow) =>
+    workflow.workflowId.toLowerCase().includes(search),
+  );
+
+  sendCorsHeaders(response);
+  sendJson(response, 200, paginate(matching, params));
+}
+
+function respondToWorkflowVersions(workflowId, response) {
+  sendCorsHeaders(response);
+  sendJson(response, 200, { items: versionsFor(workflowId) });
+}
+
 async function respondToGet(request, response) {
   const requestUrl = new URL(request.url || '/', `http://${HOST}`);
+  const versionsMatch = WORKFLOW_VERSIONS_PATTERN.exec(requestUrl.pathname);
+
+  if (versionsMatch !== null) {
+    respondToWorkflowVersions(decodeURIComponent(versionsMatch[1]), response);
+    return;
+  }
+
+  if (requestUrl.pathname === WORKFLOWS_PATH) {
+    respondToWorkflowsList(requestUrl, response);
+    return;
+  }
+
   const query = validateQueryParams(requestUrl.searchParams);
 
   if (query === null) {
     throw new Error(`Fixture received an unsupported query string: ${requestUrl.search}`);
   }
 
-  const filtered = RESPONSES.filter((record) => matchesQuery(record, query));
+  // Onboardings are scoped to the active organization: the narrow one sees only one record.
+  const narrow = findSession(request)?.activeOrganizationId === NARROW_ORGANIZATION_ID;
+  const filtered = RESPONSES.filter(
+    (record) =>
+      matchesQuery(record, query) && (!narrow || record.onboardingId === SPECIAL_RECORD_ID),
+  );
 
   if (RESPONSE_DELAY_MS > 0) {
     await delay(RESPONSE_DELAY_MS);
@@ -241,7 +655,117 @@ async function respondToGet(request, response) {
   sendJson(response, 200, paginate(filtered, query));
 }
 
+/** In-memory draft families for the workflow editor spec, keyed by workflow id; documents are never validated. */
+const DRAFT_FAMILIES = new Map();
+const DRAFT_ROUTE = /^\/v1\/admin\/workflows\/([^/]+)\/versions(?:\/(\d+)(\/document)?)?$/;
+// Each test names its own draft, so one test's save is never another test's starting document.
+const DRAFT_ID_PREFIX = 'editor-draft-';
+
+/** The draft family for `workflowId`, created empty on first use; undefined for any other id. */
+function findDraftFamily(workflowId) {
+  if (!workflowId.startsWith(DRAFT_ID_PREFIX)) {
+    return undefined;
+  }
+
+  if (!DRAFT_FAMILIES.has(workflowId)) {
+    DRAFT_FAMILIES.set(workflowId, {
+      version: 1,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+      document: { id: workflowId, version: 1, name: 'Editor draft', steps: [] },
+    });
+  }
+
+  return DRAFT_FAMILIES.get(workflowId);
+}
+
+function readBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    request.on('error', reject);
+  });
+}
+
+function toDraftSummary(workflowId, family) {
+  return {
+    workflowId,
+    version: family.version,
+    status: 'draft',
+    name: family.document.name ?? null,
+    createdAt: family.createdAt,
+    updatedAt: family.updatedAt,
+  };
+}
+
+/** Answers a draft route, or returns false when the request is not one. */
+async function respondToDraftRoute(request, response, pathname) {
+  const match = DRAFT_ROUTE.exec(pathname);
+  if (match === null) {
+    return false;
+  }
+
+  const workflowId = decodeURIComponent(match[1]);
+  const family = findDraftFamily(workflowId);
+  // Any other workflow's versions belong to the onboardings filter's handler.
+  if (family === undefined) {
+    return false;
+  }
+
+  const version = match[2] === undefined ? null : Number.parseInt(match[2], 10);
+  sendCorsHeaders(response);
+
+  if (request.method === 'OPTIONS') {
+    response.writeHead(204);
+    response.end();
+    return true;
+  }
+
+  if (version !== null && version !== family.version) {
+    sendJson(response, 404, { code: 'WORKFLOW_NOT_FOUND' });
+    return true;
+  }
+
+  if (version === null && request.method === 'GET') {
+    sendJson(response, 200, {
+      items: [
+        {
+          version: family.version,
+          status: 'draft',
+          createdAt: family.createdAt,
+          updatedAt: family.updatedAt,
+        },
+      ],
+    });
+    return true;
+  }
+
+  if (version !== null && match[3] !== undefined && request.method === 'GET') {
+    sendJson(response, 200, { ...toDraftSummary(workflowId, family), document: family.document });
+    return true;
+  }
+
+  if (version !== null && match[3] === undefined && request.method === 'PUT') {
+    family.document = JSON.parse(await readBody(request));
+    family.updatedAt = new Date().toISOString();
+    sendJson(response, 200, toDraftSummary(workflowId, family));
+    return true;
+  }
+
+  return false;
+}
+
 const server = http.createServer(async (request, response) => {
+  const { pathname } = new URL(request.url || '/', `http://${HOST}`);
+
+  // Draft routes are not onboarding reads: they bypass the runner's onboarding request audit.
+  if (pathname.startsWith('/v1/admin/workflows') && request.headers.origin === PANEL_ORIGIN) {
+    if (await respondToDraftRoute(request, response, pathname)) {
+      return;
+    }
+  }
+
   const record = recordRequest(request);
 
   if (typeof process.send === 'function') {
@@ -265,6 +789,20 @@ const server = http.createServer(async (request, response) => {
   }
 
   try {
+    if (record.pathname.startsWith(AUTH_PREFIX)) {
+      sendCorsHeaders(response);
+
+      if (!(await respondToAuth(request, response, record.pathname))) {
+        throw new Error(`Fixture does not emulate ${record.method} ${record.pathname}`);
+      }
+
+      return;
+    }
+
+    if (refuseAdminRequest(request, response)) {
+      return;
+    }
+
     await respondToGet(request, response);
   } catch (error) {
     if (typeof process.send === 'function') {
@@ -282,6 +820,13 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
+// The runner switches enforcement per pass: the passes with the gate off send no session cookie.
+process.on('message', (message) => {
+  if (message && typeof message === 'object' && message.type === 'enforce-auth') {
+    enforceAuth = message.value === true;
+  }
+});
+
 server.listen(0, HOST, () => {
   const address = server.address();
 
@@ -289,7 +834,9 @@ server.listen(0, HOST, () => {
     throw new Error('Engine fixture failed to bind to an ephemeral loopback port.');
   }
 
-  const url = `http://${HOST}:${address.port}`;
+  // `localhost` rather than the loopback address: the panel is served from `localhost`, and the
+  // SameSite=Lax session cookie is only sent back to a host on the same site.
+  const url = `http://localhost:${address.port}`;
 
   if (typeof process.send === 'function') {
     process.send({ type: 'ready', url });

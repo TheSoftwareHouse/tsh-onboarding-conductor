@@ -13,7 +13,7 @@ import {
 import { FormField } from '@/components/ui/form/FormField/FormField';
 import { Select } from '@/components/ui/Select/Select';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
-import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
 import type { ForkSource } from '../../utils/new-draft-schema';
 import { defaultForkVersion, nextWorkflowVersion } from '../../utils/workflow-version-picks';
 
@@ -239,7 +239,9 @@ export function ForkSourceFields({ source, idPrefix }: ForkSourceFieldsProps): R
             id={versionId}
             items={versionItems}
             value={source.version === null ? null : String(source.version)}
-            onValueChange={source.pickVersion}
+            onValueChange={(next) => {
+              if (next !== null) source.pickVersion(next);
+            }}
             placeholder={source.isLoading ? 'Loading…' : 'Choose a version'}
             disabled={source.family == null || source.versions === undefined}
           />

@@ -7,7 +7,6 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
-import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type KeyLike } from 'jose';
 import {
   MOCK_ASYNC_CALLBACK_VERDICT_FIELD,
   MockAsyncCallback2Connector,
@@ -15,11 +14,7 @@ import {
 } from '../src/connectors/adapters/fixtures/mock-async-callback.connector';
 import { exceptionFactory } from '../src/validation/validation-exception.factory';
 import { startE2eServer } from './e2e-server';
-
-const TENANT_ID = '99999999-9999-9999-9999-999999999999';
-const AUDIENCE = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-const KEY_ID = 'pending-connector-lifecycle-signing-key';
-const OPERATOR_OBJECT_ID = '9f3c0000-0000-0000-0000-0000000000ef';
+import { createOperator, deleteOperators, type Operator } from './admin-session.support';
 
 const WORKFLOW_ID = 'pending-connector-lifecycle-e2e';
 const GUARDED_WORKFLOW_ID = 'pending-connector-lifecycle-guard-e2e';
@@ -100,14 +95,14 @@ describe('Parked onboarding lifecycle (e2e)', () => {
   let app: NestExpressApplication;
   let dataSource: DataSource;
   let workflowsDir: string;
-  let token: string;
+  let operator: Operator;
   let provider: MockAsyncCallbackConnector;
 
   const createdOnboardingIds = new Set<string>();
 
   const http = () => request(app.getHttpServer());
 
-  const admin = (test: request.Test) => test.set('Authorization', `Bearer ${token}`);
+  const admin = (test: request.Test) => test.set('Cookie', operator.cookie);
 
   const startParked = async (): Promise<{ onboardingId: string; providerReference: string }> => {
     const response = await http()
@@ -187,29 +182,13 @@ describe('Parked onboarding lifecycle (e2e)', () => {
       JSON.stringify(guardedWorkflow),
     );
 
-    const keyPair = await generateKeyPair('RS256', { extractable: true });
-    const privateKey: KeyLike = keyPair.privateKey;
-    const publicJwk = await exportJWK(keyPair.publicKey);
-    const getKey = createLocalJWKSet({
-      keys: [{ ...publicJwk, kid: KEY_ID, alg: 'RS256', use: 'sig' }],
-    });
-
     process.env.ADMIN_AUTH_ENABLED = 'true';
-    process.env.AZURE_TENANT_ID = TENANT_ID;
-    process.env.AZURE_API_AUDIENCE = AUDIENCE;
-    process.env.ADMIN_REQUIRED_ROLES = 'admin';
     process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5173';
     process.env.CLIENT_WEBHOOK_BASE_URL = '';
     process.env.WORKFLOWS_USERS_DIR = workflowsDir;
 
     const { AppModule } = await import('../src/app.module');
-    const { ADMIN_TOKEN_VERIFIER } = await import('../src/auth/admin-token-verifier.port');
-    const { AzureTokenVerifier, buildEntraIssuer } =
-      await import('../src/auth/azure-token-verifier');
-    const moduleFixture = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(ADMIN_TOKEN_VERIFIER)
-      .useValue(new AzureTokenVerifier({ tenantId: TENANT_ID, audience: AUDIENCE, getKey }))
-      .compile();
+    const moduleFixture = await Test.createTestingModule({ imports: [AppModule] }).compile();
 
     app = moduleFixture.createNestApplication<NestExpressApplication>(undefined, {
       bodyParser: false,
@@ -223,24 +202,12 @@ describe('Parked onboarding lifecycle (e2e)', () => {
     dataSource = app.get(DataSource);
     provider = app.get(MockAsyncCallbackConnector);
 
-    token = await new SignJWT({
-      scp: 'Onboardings.Read',
-      oid: OPERATOR_OBJECT_ID,
-      preferred_username: 'pending.connector@tsh.io',
-      tid: TENANT_ID,
-      roles: ['admin'],
-    })
-      .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
-      .setSubject('operator-subject')
-      .setIssuer(buildEntraIssuer(TENANT_ID))
-      .setAudience(AUDIENCE)
-      .setIssuedAt()
-      .setExpirationTime('30m')
-      .sign(privateKey);
+    operator = await createOperator(app!, { platformRole: 'superadmin', twoFactor: true });
   });
 
   afterAll(async () => {
     if (dataSource?.isInitialized) {
+      await deleteOperators(app);
       const onboardingIds = Array.from(createdOnboardingIds);
 
       if (onboardingIds.length > 0) {
@@ -419,7 +386,7 @@ describe('Parked onboarding lifecycle (e2e)', () => {
       ).resolves.toEqual([
         expect.objectContaining({
           actor_type: 'operator',
-          actor_id: OPERATOR_OBJECT_ID,
+          actor_id: operator.userId,
           entry_type: 'observed',
           resource_type: 'onboarding',
           metadata: { connectorId: PROVIDER_ID, connectorOrder: 1, outcome: 'still_pending' },
@@ -447,7 +414,7 @@ describe('Parked onboarding lifecycle (e2e)', () => {
       ).resolves.toEqual([
         expect.objectContaining({
           actor_type: 'operator',
-          actor_id: OPERATOR_OBJECT_ID,
+          actor_id: operator.userId,
           entry_type: 'success',
           metadata: {
             connectorId: PROVIDER_ID,

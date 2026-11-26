@@ -20,7 +20,7 @@ process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
 process.env.STORAGE_S3_ACCESS_KEY_ID = 'onboardingdev';
 process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'onboardingdevsecret0123456789';
 process.env.ADMIN_PANEL_ORIGIN = PANEL_ORIGIN;
-// The local escape hatch. Deliberately set with no Entra configuration alongside it, which is
+// The local escape hatch. Deliberately set with no better-auth configuration alongside it, which is
 // exactly the shape a fresh clone starts in.
 process.env.ADMIN_AUTH_ENABLED = 'false';
 
@@ -31,8 +31,8 @@ import {
   type AdminAccessAuditEvent,
   type AdminAccessAuditPort,
 } from '../src/auth/admin-access-audit.port';
-import { ADMIN_TOKEN_VERIFIER } from '../src/auth/admin-token-verifier.port';
-import { AzureJwtGuard } from '../src/auth/azure-jwt.guard';
+import { ADMIN_SESSION_VERIFIER } from '../src/auth/admin-session-verifier.port';
+import { AdminSessionGuard } from '../src/auth/admin-session.guard';
 import { toAdminAccessAuditInput } from '../src/audit/admin-access-audit.adapter';
 
 const recordedAccess: AdminAccessAuditEvent[] = [];
@@ -40,13 +40,13 @@ const recordedAccess: AdminAccessAuditEvent[] = [];
 @Controller()
 class TestAdminController {
   @Get('/v1/onboardings')
-  @UseGuards(AzureJwtGuard)
+  @UseGuards(AdminSessionGuard)
   listOnboardings() {
     return [];
   }
 
   @Get('/v1/admin/audit')
-  @UseGuards(AzureJwtGuard)
+  @UseGuards(AdminSessionGuard)
   listAudit() {
     return [];
   }
@@ -74,15 +74,15 @@ class TestAdminController {
       }),
     },
     // What the real factory hands over when the flag is off.
-    { provide: ADMIN_TOKEN_VERIFIER, useValue: null },
-    AzureJwtGuard,
+    { provide: ADMIN_SESSION_VERIFIER, useValue: null },
+    AdminSessionGuard,
   ],
 })
 class TestAppModule {}
 
 /**
- * `ADMIN_AUTH_ENABLED=false` is the escape hatch that lets a fresh clone run without an Entra
- * tenant, and it is the one configuration in which admin data is served to anyone who asks. The
+ * `ADMIN_AUTH_ENABLED=false` is the escape hatch that lets a fresh clone run without a
+ * better-auth setup, and it is the one configuration in which admin data is served to anyone who asks. The
  * suite states that plainly, and pins the compensating control: the read is still audited.
  */
 describe('Admin endpoints with authentication disabled (e2e)', () => {
@@ -136,19 +136,19 @@ describe('Admin endpoints with authentication disabled (e2e)', () => {
         .expect(200);
 
       const row = toAdminAccessAuditInput(recordedAccess[0]);
-      expect(row.metadata.userPrincipalName).toBeUndefined();
-      expect(row.metadata.tenantId).toBeUndefined();
-      expect(row.metadata.grantedRoles).toBeUndefined();
+      expect(row.metadata.email).toBeUndefined();
+      expect(row.metadata.organizationId).toBeUndefined();
+      expect(row.metadata.platformRole).toBeUndefined();
     });
   });
 
-  it('never consults a token verifier, because the flag is what decides', async () => {
+  it('never consults a session verifier, because the flag is what decides', async () => {
     // The guard is wired with a null verifier here, exactly as the real factory leaves it when the
     // flag is off. Reaching the route at all proves the flag short-circuits before any
     // verification is attempted, rather than the request surviving a failed one.
-    const guard = app!.get(AzureJwtGuard);
+    const guard = app!.get(AdminSessionGuard);
 
-    expect(guard).toBeInstanceOf(AzureJwtGuard);
+    expect(guard).toBeInstanceOf(AdminSessionGuard);
     await request(app!.getHttpServer())
       .get('/v1/onboardings')
       .set('Authorization', 'Bearer eyJhbGciOiJub25lIn0.e30.')

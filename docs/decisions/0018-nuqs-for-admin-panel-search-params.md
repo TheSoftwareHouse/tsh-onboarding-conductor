@@ -4,7 +4,7 @@
 - **Date:** 2026-09-17
 - **Tags:** admin-panel, frontend, search-params, validation
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [0050](./0050-admin-panel-data-router.md) (router placement)
 
 ## Decision
 

@@ -9,7 +9,7 @@ import {
 import { BaseExceptionFilter, HttpAdapterHost } from '@nestjs/core';
 import { DataSource } from 'typeorm';
 import { isApiRequest } from '../admin-panel/admin-panel-static';
-import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
+import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/admin-session.guard';
 import { isAuditRecorded } from './audit-recorded.marker';
 import { AuditService } from './audit.service';
 import {
@@ -287,13 +287,13 @@ function resolveActor(request: AdminAuthenticatedRequest): {
   actorType: AdminAccessActorType;
   actorId: string;
 } {
-  const { adminTokenClaims } = request;
+  const { adminSession } = request;
 
-  if (adminTokenClaims === undefined) {
+  if (adminSession === undefined) {
     return { actorType: 'anonymous', actorId: ADMIN_ACCESS_UNKNOWN_ACTOR };
   }
 
-  return { actorType: 'operator', actorId: resolveOperatorId(adminTokenClaims) };
+  return { actorType: 'operator', actorId: resolveOperatorId(adminSession) };
 }
 
 /**

@@ -93,20 +93,21 @@ services:
       # "call the origin the panel was served from", which is this container whatever ENGINE_PORT
       # publishes it on.
       VITE_AUTH_ENABLED: ${VITE_AUTH_ENABLED:-false}
-      VITE_SSO_PROVIDER: ${VITE_SSO_PROVIDER:-azure}
-      VITE_AZURE_CLIENT_ID: ${VITE_AZURE_CLIENT_ID:-}
-      VITE_AZURE_TENANT_ID: ${VITE_AZURE_TENANT_ID:-}
-      VITE_AZURE_API_SCOPE: ${VITE_AZURE_API_SCOPE:-}
-      VITE_AZURE_REDIRECT_URI: ${VITE_AZURE_REDIRECT_URI:-}
-      # Entra ID verification on the admin read endpoints. Defaults to on, matching the engine's
+      # Session verification on the admin endpoints. Defaults to on, matching the engine's
       # own default, so the container refuses to start unconfigured rather than serving admin
       # data unguarded; .env.dist ships the flag as false for a fresh clone.
       ADMIN_AUTH_ENABLED: ${ADMIN_AUTH_ENABLED:-true}
-      # Which provider issues those tokens; 'azure' is the only one implemented.
-      ADMIN_SSO_PROVIDER: ${ADMIN_SSO_PROVIDER:-azure}
-      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
-      AZURE_API_AUDIENCE: ${AZURE_API_AUDIENCE:-}
-      ADMIN_REQUIRED_ROLES: ${ADMIN_REQUIRED_ROLES:-admin}
+      # better-auth (admin sign-in). Required when ADMIN_AUTH_ENABLED is true; the Microsoft triple
+      # and the superadmin pair are optional, all-or-nothing.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-}
+      AUTH_SMTP_URL: ${AUTH_SMTP_URL:-}
+      AUTH_MAIL_FROM: ${AUTH_MAIL_FROM:-}
+      AUTH_SUPERADMIN_EMAIL: ${AUTH_SUPERADMIN_EMAIL:-}
+      AUTH_SUPERADMIN_PASSWORD: ${AUTH_SUPERADMIN_PASSWORD:-}
+      AUTH_MICROSOFT_CLIENT_ID: ${AUTH_MICROSOFT_CLIENT_ID:-}
+      AUTH_MICROSOFT_CLIENT_SECRET: ${AUTH_MICROSOFT_CLIENT_SECRET:-}
+      AUTH_MICROSOFT_TENANT_ID: ${AUTH_MICROSOFT_TENANT_ID:-}
       DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       # The key-encryption key, forwarded from `.env`; unset means this process cannot turn
@@ -188,11 +189,17 @@ services:
       # The worker serves no HTTP admin routes, but shares the engine's configuration
       # validation, so it needs the same values to start.
       ADMIN_AUTH_ENABLED: ${ADMIN_AUTH_ENABLED:-true}
-      # Which provider issues those tokens; 'azure' is the only one implemented.
-      ADMIN_SSO_PROVIDER: ${ADMIN_SSO_PROVIDER:-azure}
-      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
-      AZURE_API_AUDIENCE: ${AZURE_API_AUDIENCE:-}
-      ADMIN_REQUIRED_ROLES: ${ADMIN_REQUIRED_ROLES:-admin}
+      # better-auth (admin sign-in). Required when ADMIN_AUTH_ENABLED is true; the Microsoft triple
+      # and the superadmin pair are optional, all-or-nothing.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-}
+      AUTH_SMTP_URL: ${AUTH_SMTP_URL:-}
+      AUTH_MAIL_FROM: ${AUTH_MAIL_FROM:-}
+      AUTH_SUPERADMIN_EMAIL: ${AUTH_SUPERADMIN_EMAIL:-}
+      AUTH_SUPERADMIN_PASSWORD: ${AUTH_SUPERADMIN_PASSWORD:-}
+      AUTH_MICROSOFT_CLIENT_ID: ${AUTH_MICROSOFT_CLIENT_ID:-}
+      AUTH_MICROSOFT_CLIENT_SECRET: ${AUTH_MICROSOFT_CLIENT_SECRET:-}
+      AUTH_MICROSOFT_TENANT_ID: ${AUTH_MICROSOFT_TENANT_ID:-}
       DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       # The key-encryption key, forwarded from `.env`; unset means this process cannot turn

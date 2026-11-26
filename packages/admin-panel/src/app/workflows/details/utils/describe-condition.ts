@@ -1,10 +1,8 @@
+import { isPlainObject } from './is-plain-object';
+
 const CUSTOM = 'custom condition';
 
 const SCORE_COMPARATORS = { gte: '≥', gt: '>', lte: '≤', lt: '<' } as const;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function formatLiteral(value: unknown): string {
   return typeof value === 'string' ? value : (JSON.stringify(value) ?? String(value));
@@ -15,14 +13,14 @@ function describeChildren(children: unknown, joiner: string): string {
   return children
     .map((child) => {
       const text = describeNode(child);
-      const compound = isRecord(child) && ('all' in child || 'any' in child);
+      const compound = isPlainObject(child) && ('all' in child || 'any' in child);
       return compound && children.length > 1 ? `(${text})` : text;
     })
     .join(joiner);
 }
 
 function describeNode(when: unknown): string {
-  if (!isRecord(when)) return CUSTOM;
+  if (!isPlainObject(when)) return CUSTOM;
   if ('all' in when) return describeChildren(when.all, ' and ');
   if ('any' in when) return describeChildren(when.any, ' or ');
   if ('not' in when) return `not (${describeNode(when.not)})`;

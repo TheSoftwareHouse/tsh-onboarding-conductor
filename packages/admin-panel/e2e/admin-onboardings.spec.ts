@@ -4,6 +4,7 @@ import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings
 const APP_URL = process.env.BASE_URL || 'http://localhost:5174';
 const ENGINE_BASE_URL = process.env.VITE_ENGINE_API_BASE_URL;
 const ENGINE_ONBOARDINGS_PATH = '/v1/onboardings';
+const ENGINE_WORKFLOWS_PATH = '/v1/admin/workflows';
 const ENGINE_ONBOARDINGS_ROUTE = '**/v1/onboardings**';
 // Registered inside the export test only, so it never competes with the list glob above.
 const ENGINE_ONBOARDINGS_EXPORT_ROUTE = '**/v1/onboardings/export**';
@@ -33,10 +34,11 @@ const SPECIAL_REQUEST_WITHOUT_STATUS_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=
 const SPECIAL_REQUEST_WITHOUT_ONBOARDING_ID_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F`;
 const WORKFLOW_ID_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc+basic+%2F+encoding%3F`;
 const STATUS_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved`;
-const WORKFLOW_VERSION_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowVersion=7`;
+// A version is only pickable once its workflow is, so the request always carries both.
+const WORKFLOW_VERSION_ONLY_SEARCH = `${WORKFLOW_ID_ONLY_SEARCH}&workflowVersion=7`;
 const CURRENT_STEP_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&currentStep=final+review+%2F+qa%3F`;
 const ONBOARDING_ID_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&onboardingId=018f1e2a-eeee-7000-8000-00000000000e`;
-const NO_MATCH_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=does-not-match`;
+const NO_MATCH_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=no-onboardings`;
 const RELOAD_QUERY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc-reloaded`;
 /** What the unfiltered list reports: all 40 fixture rows fit inside the default 100-row window. */
 const UNFILTERED_STATUS = 'Showing 40 of 40 onboardings (page 1 of 1).';
@@ -115,6 +117,10 @@ class AdminOnboardingsPage {
     return this.page.getByRole('status');
   }
 
+  get errorRegion() {
+    return this.page.getByRole('alert');
+  }
+
   get table() {
     return this.page.getByRole('table', { name: 'Onboardings matching the current filters' });
   }
@@ -132,7 +138,7 @@ class AdminOnboardingsPage {
   }
 
   get workflowIdFilter() {
-    return this.page.getByLabel('Workflow ID');
+    return this.page.getByLabel('Workflow', { exact: true });
   }
 
   get workflowVersionFilter() {
@@ -161,7 +167,9 @@ class AdminOnboardingsPage {
   }
 
   get resetButton() {
-    return this.page.getByRole('button', { name: 'Reset filters' });
+    return this.page
+      .getByLabel('Filter onboardings')
+      .getByRole('button', { name: 'Reset filters' });
   }
 
   get pager() {
@@ -208,16 +216,35 @@ class AdminOnboardingsPage {
 
   async fillFilters(filters: Partial<Filters>) {
     if (filters.workflowId !== undefined) {
-      await this.workflowIdFilter.fill(filters.workflowId);
+      await this.pickWorkflow(filters.workflowId);
     }
 
     if (filters.workflowVersion !== undefined) {
-      await this.workflowVersionFilter.fill(filters.workflowVersion);
+      await this.pickVersion(filters.workflowVersion);
     }
 
     if (filters.currentStep !== undefined) {
       await this.currentStepFilter.fill(filters.currentStep);
     }
+  }
+
+  /** Opens the Workflow combobox and picks the option for `workflowId`. */
+  async pickWorkflow(workflowId: string) {
+    await this.workflowIdFilter.click();
+    await this.page.getByRole('option', { name: workflowId }).click();
+  }
+
+  /** Waits for the Workflow version select to enable, then picks the version by its number. */
+  async pickVersion(version: string) {
+    await expect(this.workflowVersionFilter).toBeEnabled();
+    await this.workflowVersionFilter.click();
+    await this.page.getByRole('option', { name: new RegExp(`^v${version} `) }).click();
+  }
+
+  /** Opens the Per page select and picks `size`. */
+  async pickPageSize(size: string) {
+    await this.pageSizeFilter.click();
+    await this.page.getByRole('option', { name: size, exact: true }).click();
   }
 
   async applyFilters() {
@@ -246,6 +273,11 @@ class AdminOnboardingsPage {
   }
 }
 
+/** The pickers' reads share the engine origin but are not the onboarding list traffic under test. */
+function isWorkflowPickerPath(pathname: string) {
+  return pathname === ENGINE_WORKFLOWS_PATH || pathname.startsWith(`${ENGINE_WORKFLOWS_PATH}/`);
+}
+
 function createTrafficLog(page: Page) {
   const requests: EngineRequestRecord[] = [];
   const responses: EngineResponseRecord[] = [];
@@ -254,7 +286,13 @@ function createTrafficLog(page: Page) {
   page.on('request', (request) => {
     const url = new URL(request.url());
 
-    if (url.origin !== ENGINE_ORIGIN) {
+    // The sidebar asks better-auth for the session even with the gate off; that is not onboarding
+    // traffic, and this log exists to prove what the table itself requests.
+    if (
+      url.origin !== ENGINE_ORIGIN ||
+      isWorkflowPickerPath(url.pathname) ||
+      url.pathname.startsWith('/v1/auth/')
+    ) {
       return;
     }
 
@@ -421,7 +459,7 @@ test.describe.serial('admin onboardings', () => {
       }),
     );
 
-    await app.fillFilters({ workflowId: '  kyc basic / encoding?  ' });
+    await app.fillFilters({ workflowId: SPECIAL_WORKFLOW_ID });
     await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
     expect(traffic.requests).toHaveLength(1);
 
@@ -459,7 +497,7 @@ test.describe.serial('admin onboardings', () => {
     await waitForTraffic(traffic, 5);
     expectDirectRequest(traffic.requests[4]);
 
-    await app.fillFilters({ workflowVersion: '7' });
+    await app.fillFilters({ workflowId: SPECIAL_WORKFLOW_ID, workflowVersion: '7' });
     await app.applyFilters();
     await waitForTraffic(traffic, 6);
     await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
@@ -544,11 +582,11 @@ test.describe.serial('admin onboardings', () => {
     await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
     expectDirectRequest(traffic.requests[17]);
 
-    await app.fillFilters({ workflowId: 'does-not-match' });
+    await app.fillFilters({ workflowId: 'no-onboardings' });
     await app.applyFilters();
     await waitForTraffic(traffic, 19);
-    await expect(app.statusRegion).toHaveText('No onboardings match the current filters.');
-    await expect(app.table).toContainText('No onboardings match the current filters.');
+    await expect(app.statusRegion).toContainText('No onboardings match the current filters');
+    await expect(app.tableRegion).toContainText('No onboardings match the current filters');
     expectDirectRequest(traffic.requests[18], NO_MATCH_SEARCH);
 
     await app.resetFilters();
@@ -557,6 +595,29 @@ test.describe.serial('admin onboardings', () => {
     expectDirectRequest(traffic.requests[19]);
 
     expect(traffic.unexpectedRequests).toEqual([]);
+  });
+
+  test('should clear the drafted version when the workflow changes', async ({ page }) => {
+    const app = new AdminOnboardingsPage(page);
+
+    await app.goto();
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
+    await expect(app.workflowVersionFilter).toBeDisabled();
+
+    await app.fillFilters({ workflowId: SPECIAL_WORKFLOW_ID, workflowVersion: '7' });
+    await expect(app.workflowVersionFilter).toHaveText('v7 — published');
+    // The draft v8 is not offered; only published and retired versions are.
+    await app.workflowVersionFilter.click();
+    await expect(page.getByRole('option')).toHaveText([
+      'Any version',
+      'v7 — published',
+      'v6 — retired',
+    ]);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('option')).toHaveCount(0);
+
+    await app.fillFilters({ workflowId: 'kyc-basic' });
+    await expect(app.workflowVersionFilter).toHaveText('Any version');
   });
 
   test('should step through the paginated list and honour the selected page size', async ({
@@ -572,7 +633,7 @@ test.describe.serial('admin onboardings', () => {
     await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
     expectDirectRequest(traffic.requests[0]);
 
-    await app.pageSizeFilter.selectOption('20');
+    await app.pickPageSize('20');
     await app.applyFilters();
     await waitForTraffic(traffic, 2);
 
@@ -608,7 +669,7 @@ test.describe.serial('admin onboardings', () => {
     await expect(app.pageInput).toHaveValue('2');
     expectDirectRequest(traffic.requests[4], SECOND_PAGE_SEARCH);
 
-    await app.pageSizeFilter.selectOption('50');
+    await app.pickPageSize('50');
     await app.applyFilters();
     await waitForTraffic(traffic, 6);
 
@@ -619,7 +680,7 @@ test.describe.serial('admin onboardings', () => {
     expect(traffic.unexpectedRequests).toEqual([]);
   });
 
-  test('should show loading, error, recovery, and invalid-input states while repeating the applied query', async ({
+  test('should show loading, error, and recovery states while repeating the applied query', async ({
     page,
   }) => {
     const app = new AdminOnboardingsPage(page);
@@ -637,9 +698,8 @@ test.describe.serial('admin onboardings', () => {
     recovery.releaseInitial();
     await waitForTraffic(traffic, 2);
 
-    await expect(app.statusRegion).toHaveText(
-      'Unable to load onboardings: Request failed with status 500.',
-    );
+    await expect(app.errorRegion).toContainText('Unable to load onboardings');
+    await expect(app.errorRegion).toContainText('Request failed with status 500.');
     expectDirectRequest(traffic.requests[1], RELOAD_QUERY_SEARCH);
     expect(traffic.responses[1]).toEqual(
       expect.objectContaining({
@@ -667,13 +727,6 @@ test.describe.serial('admin onboardings', () => {
         status: 200,
       }),
     );
-
-    const requestsBeforeInvalidVersion = traffic.requests.length;
-    await app.fillFilters({ workflowVersion: 'abc' });
-    await app.applyFilters();
-    await expect(app.statusRegion).toHaveText('Enter a whole number greater than zero.');
-    expect(traffic.requests).toHaveLength(requestsBeforeInvalidVersion);
-    await expect(app.table).toContainText('kyc-reloaded');
 
     expect(traffic.unexpectedRequests).toEqual([]);
   });
@@ -827,7 +880,11 @@ test.describe.serial('admin onboardings', () => {
       await route.fulfill({
         status: 200,
         contentType: 'text/csv; charset=utf-8',
-        headers: { 'access-control-allow-origin': '*' },
+        // The panel sends its session cookie, so the browser rejects a wildcard origin.
+        headers: {
+          'access-control-allow-origin': APP_URL,
+          'access-control-allow-credentials': 'true',
+        },
         body: EXPORT_CSV_BODY,
       });
     });
@@ -846,8 +903,8 @@ test.describe.serial('admin onboardings', () => {
     await expect(app.statusTab('approved')).toHaveAttribute('aria-current', 'page');
     await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
 
-    // Typed but never applied: the export must ignore it.
-    await app.workflowIdFilter.fill('draft-only-workflow');
+    // Picked but never applied: the export must ignore it.
+    await app.pickWorkflow('kyc-basic');
     await expect(app.exportButton).toHaveText('Export 1 as CSV');
 
     const downloadPromise = page.waitForEvent('download');
@@ -872,7 +929,7 @@ test.describe.serial('admin onboardings', () => {
     expect(exportUrl.searchParams.has('page')).toBe(false);
     expect(exportUrl.searchParams.has('limit')).toBe(false);
 
-    await expect(app.workflowIdFilter).toHaveValue('draft-only-workflow');
+    await expect(app.workflowIdFilter).toHaveValue('kyc-basic');
     await expect(app.exportButton).toBeEnabled();
   });
 });

@@ -1,7 +1,10 @@
 import { GUARDS_METADATA } from '@nestjs/common/constants';
-import type { Request } from 'express';
 import { ADMIN_ACCESS_UNKNOWN_ACTOR } from '../audit/audit.types';
-import { AzureJwtGuard } from '../auth/azure-jwt.guard';
+import {
+  ADMIN_PERMISSION_METADATA,
+  AdminSessionGuard,
+  type AdminAuthenticatedRequest,
+} from '../auth/admin-session.guard';
 import type { EncryptionAdminService, EncryptionStateView } from './encryption-admin.service';
 import { EncryptionController } from './encryption.controller';
 
@@ -13,10 +16,8 @@ const createServiceStub = (): jest.Mocked<EncryptionAdminService> =>
     addKey: jest.fn(),
   }) as unknown as jest.Mocked<EncryptionAdminService>;
 
-const createRequest = (claims?: Record<string, unknown>) =>
-  ({ adminTokenClaims: claims }) as unknown as Request & {
-    adminTokenClaims?: Record<string, unknown>;
-  };
+const createRequest = (session?: { userId: string }) =>
+  ({ adminSession: session }) as unknown as AdminAuthenticatedRequest;
 
 const buildView = (overrides: Partial<EncryptionStateView> = {}): EncryptionStateView => ({
   enabled: true,
@@ -58,15 +59,19 @@ const serializedView = {
 };
 
 describe('EncryptionController', () => {
-  it('carries AzureJwtGuard on every route', () => {
-    for (const method of ['getState', 'setEnabled', 'setRotation', 'addKey'] as const) {
-      const guards = Reflect.getMetadata(
-        GUARDS_METADATA,
-        EncryptionController.prototype[method],
-      ) as unknown[] | undefined;
+  it.each([
+    ['getState', 'read'],
+    ['setEnabled', 'write'],
+    ['setRotation', 'write'],
+    ['addKey', 'write'],
+  ] as const)('guards %s with the encryption:%s permission', (method, action) => {
+    const handler = EncryptionController.prototype[method];
 
-      expect(guards).toEqual([AzureJwtGuard]);
-    }
+    expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toEqual([AdminSessionGuard]);
+    expect(Reflect.getMetadata(ADMIN_PERMISSION_METADATA, handler)).toEqual({
+      resource: 'encryption',
+      action,
+    });
   });
 
   describe('getState', () => {
@@ -97,14 +102,14 @@ describe('EncryptionController', () => {
 
       const response = await controller.setEnabled(
         { enabled: false },
-        createRequest({ oid: 'operator-oid' }),
+        createRequest({ userId: 'operator-oid' }),
       );
 
       expect(service.setEnabled).toHaveBeenCalledWith(false, 'operator-oid');
       expect(response).toEqual({ ...serializedView, enabled: false });
     });
 
-    it('falls back to the unknown-actor constant with no token claims', async () => {
+    it('falls back to the unknown-actor constant with no admin session', async () => {
       const service = createServiceStub();
       service.setEnabled.mockResolvedValue(buildView());
       const controller = new EncryptionController(service);
@@ -127,7 +132,7 @@ describe('EncryptionController', () => {
 
       const response = await controller.setRotation(
         { interval: '48h' },
-        createRequest({ oid: 'operator-oid' }),
+        createRequest({ userId: 'operator-oid' }),
       );
 
       expect(service.setRotationInterval).toHaveBeenCalledWith('48h', 'operator-oid');
@@ -157,13 +162,13 @@ describe('EncryptionController', () => {
       service.addKey.mockResolvedValue({ id: 'key-new' });
       const controller = new EncryptionController(service);
 
-      const response = await controller.addKey(createRequest({ oid: 'operator-oid' }));
+      const response = await controller.addKey(createRequest({ userId: 'operator-oid' }));
 
       expect(service.addKey).toHaveBeenCalledWith('operator-oid');
       expect(response).toEqual({ id: 'key-new' });
     });
 
-    it('falls back to the unknown-actor constant with no token claims', async () => {
+    it('falls back to the unknown-actor constant with no admin session', async () => {
       const service = createServiceStub();
       service.addKey.mockResolvedValue({ id: 'key-new' });
       const controller = new EncryptionController(service);

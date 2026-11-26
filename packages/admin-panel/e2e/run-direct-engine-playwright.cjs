@@ -9,6 +9,10 @@ const packageRoot = path.join(__dirname, '..');
 const monorepoRoot = path.join(packageRoot, '..', '..');
 const envFilePath = path.join(monorepoRoot, '.env.development.local');
 const panelOrigin = process.env.BASE_URL || 'http://localhost:5174';
+const ONBOARDINGS_PATH = '/v1/onboardings';
+const WORKFLOWS_PATH = '/v1/admin/workflows';
+const WORKFLOW_VERSIONS_PATTERN = /^\/v1\/admin\/workflows\/[^/]+\/versions$/;
+const WORKFLOW_LIST_KEYS = new Set(['page', 'limit', 'search', 'scope', 'hasDraft']);
 const ALLOWED_QUERY_KEYS = new Set([
   'page',
   'limit',
@@ -43,11 +47,6 @@ const VALID_STATUSES = new Set([
  */
 const AUTH_ENABLED_TAG = '@auth-enabled';
 
-// Public identifiers for a directory that does not exist. The gate-enabled pass never completes a
-// sign-in, so nothing here has to resolve — it exists so the panel can construct its MSAL client.
-const FAKE_CLIENT_ID = '00000000-0000-0000-0000-0000000000c1';
-const FAKE_TENANT_ID = '00000000-0000-0000-0000-0000000000e1';
-const FAKE_API_SCOPE = '00000000-0000-0000-0000-0000000000c1/.default';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isValidSearch(search) {
@@ -88,6 +87,21 @@ function isValidSearch(search) {
   }
 
   return true;
+}
+
+/** Validates a recorded request by route: the onboardings list's own query, or the pickers' reads. */
+function isValidRequestTarget(request) {
+  if (request.pathname === ONBOARDINGS_PATH) {
+    return isValidSearch(request.search);
+  }
+
+  if (request.pathname === WORKFLOWS_PATH) {
+    return [...new URLSearchParams(request.search).keys()].every((key) =>
+      WORKFLOW_LIST_KEYS.has(key),
+    );
+  }
+
+  return WORKFLOW_VERSIONS_PATTERN.test(request.pathname) && request.search === '';
 }
 
 function waitForServer(url) {
@@ -137,9 +151,15 @@ function normalizeExitCode(code, signal) {
 function resolvePlaywrightCommand(additionalArgs = []) {
   const playwrightCli = path.join(path.dirname(require.resolve('@playwright/test')), 'cli.js');
 
+  // `pnpm --filter … test:e2e -- <spec>` forwards the `--` itself; Playwright would read it as the
+  // end of its options and then run every spec of the pass instead of the ones named.
+  const forwardedArgs = process.argv.slice(2).filter((argument) => argument !== '--');
+
   return {
     command: process.execPath,
-    args: [playwrightCli, 'test', ...additionalArgs, ...process.argv.slice(2)],
+    // Each pass runs a tag-selected subset, so naming specs that all belong to the other pass
+    // leaves this one empty; that is not a failure.
+    args: [playwrightCli, 'test', '--pass-with-no-tests', ...additionalArgs, ...forwardedArgs],
   };
 }
 
@@ -263,22 +283,19 @@ async function main() {
      * therefore means two passes, each with its own dev server, selected by tag.
      */
     const runPlaywright = async (authEnabled, grepArgs) => {
+      // The fixture answers admin routes with 401/403 only while the gate is on; the gate-off
+      // passes send no session cookie and must keep reading the onboarding table.
+      fixture.send({ type: 'enforce-auth', value: authEnabled });
+
       await fs.writeFile(
         envFilePath,
         [
           `VITE_ENGINE_API_BASE_URL=${fixtureUrl}`,
           `VITE_AUTH_ENABLED=${authEnabled}`,
-          ...(authEnabled
-            ? [
-                `VITE_AZURE_CLIENT_ID=${FAKE_CLIENT_ID}`,
-                `VITE_AZURE_TENANT_ID=${FAKE_TENANT_ID}`,
-                `VITE_AZURE_API_SCOPE=${FAKE_API_SCOPE}`,
-                // Blanked rather than omitted. Vite also loads the developer's own .env, so a
-                // real redirect URI configured there would otherwise decide what this suite
-                // asserts, and the run would pass or fail per machine.
-                'VITE_AZURE_REDIRECT_URI=',
-              ]
-            : []),
+          // Pinned rather than omitted. Vite also loads the developer's own .env, so a Microsoft
+          // button switched on there would otherwise decide what this suite asserts, and the run
+          // would pass or fail per machine.
+          'VITE_AUTH_MICROSOFT_ENABLED=false',
           '',
         ].join('\n'),
       );
@@ -292,14 +309,7 @@ async function main() {
           BASE_URL: panelOrigin,
           VITE_ENGINE_API_BASE_URL: fixtureUrl,
           VITE_AUTH_ENABLED: String(authEnabled),
-          ...(authEnabled
-            ? {
-                VITE_AZURE_CLIENT_ID: FAKE_CLIENT_ID,
-                VITE_AZURE_TENANT_ID: FAKE_TENANT_ID,
-                VITE_AZURE_API_SCOPE: FAKE_API_SCOPE,
-                VITE_AZURE_REDIRECT_URI: '',
-              }
-            : {}),
+          VITE_AUTH_MICROSOFT_ENABLED: 'false',
         },
         stdio: 'inherit',
       });
@@ -318,7 +328,7 @@ async function main() {
 
     let playwrightExit = mainExit;
 
-    // Pass 2: the gate switched on, covering the one behaviour the first pass cannot reach.
+    // Pass 2: the gate switched on, covering the cookie-session behaviour the first pass cannot reach.
     if (normalizeExitCode(mainExit.code, mainExit.signal) === 0) {
       playwrightExit = await runPlaywright(true, ['--grep', AUTH_ENABLED_TAG]);
     }
@@ -327,12 +337,14 @@ async function main() {
 
     await shutdown('SIGTERM');
 
-    const invalidRequests = requests.filter(
-      (request) =>
-        request.origin !== panelOrigin ||
-        request.pathname !== '/v1/onboardings' ||
-        !['GET', 'OPTIONS'].includes(request.method) ||
-        !isValidSearch(request.search),
+    // Auth requests are the panel's better-auth calls; the fixture answers only the ones it
+    // emulates and reports the rest as unexpected. Every other read must stay a valid GET.
+    const invalidRequests = requests.filter((request) =>
+      request.pathname.startsWith('/v1/auth/')
+        ? request.origin !== panelOrigin
+        : request.origin !== panelOrigin ||
+          !['GET', 'OPTIONS'].includes(request.method) ||
+          !isValidRequestTarget(request),
     );
 
     if (invalidRequests.length > 0) {

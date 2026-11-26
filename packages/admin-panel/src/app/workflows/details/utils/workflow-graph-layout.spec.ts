@@ -3,14 +3,14 @@ import type {
   WorkflowDefinition,
   WorkflowStepDefinition,
 } from '@/api/workflows/workflow-definitions';
+import { RANK_GAP } from './canvas-layout';
 import {
-  labelBox,
   NODE_HEIGHT,
   NODE_WIDTH,
   layoutWorkflowGraph,
-  placeLabels,
+  labelBox,
   MAX_LABEL_CHARS,
-  spreadEdgePorts,
+  placeLabels,
   type WorkflowGraphEdge,
   type WorkflowStepNode,
 } from './workflow-graph-layout';
@@ -107,35 +107,81 @@ describe('layoutWorkflowGraph', () => {
     expect(pairs.filter((pair) => pair === 'collect>verify')).toHaveLength(1);
   });
 
-  it('merges a pair joined both ways into one edge with two arrowheads', () => {
-    const merged = edges.filter(
-      (candidate) => [candidate.source, candidate.target].sort().join() === 'collect,verify',
-    );
+  it('draws a pair joined both ways as two edges, the loop back round an outer lane', () => {
+    const right = Math.max(...nodes.map((node) => node.position.x + NODE_WIDTH));
+    const left = Math.min(...nodes.map((node) => node.position.x));
+    const outside = (point: { x: number }) => point.x > right || point.x < left;
 
-    expect(merged).toHaveLength(1);
-    expect(merged[0]?.markerStart).toBeDefined();
-    expect(merged[0]?.markerEnd).toBeDefined();
+    expect(edge('collect', 'verify')?.markerStart).toBeUndefined();
+    expect(edge('verify', 'collect')?.markerEnd).toBeDefined();
+    expect(edge('verify', 'collect')?.data?.points.some(outside)).toBe(true);
+    expect(edge('collect', 'verify')?.data?.points.some(outside)).toBe(false);
   });
 
-  it('draws a non-success edge dashed and a success edge solid', () => {
-    expect(edge('verify', 'review')?.style?.strokeDasharray).toBe('5 4');
+  it('turns every edge only at right angles', () => {
+    for (const candidate of edges) {
+      const points = candidate.data?.points ?? [];
+      points.slice(1).forEach((point, index) => {
+        const previous = points[index]!;
+        expect(point.x === previous.x || point.y === previous.y).toBe(true);
+      });
+    }
+  });
+
+  it('dashes only a loop back, whatever the status of an edge going down', () => {
+    expect(edge('verify', 'collect')?.style?.strokeDasharray).toBe('5 4');
+    expect(edge('verify', 'review')?.style?.strokeDasharray).toBeUndefined();
     expect(edge('collect', 'review')?.style?.strokeDasharray).toBeUndefined();
   });
 
   it('labels a guarded edge and its fallback arm, and leaves a plain success edge unlabelled', () => {
     expect(edge('collect', 'verify')?.data?.label).toContain('success when a = x');
-    // The pair is joined both ways, so the retry back to `collect` is on the same line.
-    expect(edge('collect', 'verify')?.data?.condition).toBe('a = x · success · fallback · retry');
+    expect(edge('collect', 'verify')?.data?.condition).toBe('a = x · success · fallback');
+    expect(edge('verify', 'collect')?.data?.condition).toBe('retry');
     expect(edge('collect', 'review')?.data?.condition).toBe('success · fallback');
     expect(edge('verify', 'approved')?.data?.label).toBe('');
   });
 
-  it('takes a label position from dagre for a labelled edge only', () => {
-    const labelled = edge('collect', 'verify')?.data?.labelPosition;
+  it('puts the label of a labelled edge on its own line, and gives a plain edge none', () => {
+    const labelled = edge('collect', 'verify');
+    const at = labelled?.data?.labelPosition;
+    const points = labelled?.data?.points ?? [];
+    const onLine = points.slice(1).some((point, index) => {
+      const previous = points[index]!;
+      const within = (value: number, a: number, b: number) =>
+        value >= Math.min(a, b) && value <= Math.max(a, b);
+      return (
+        at !== null &&
+        at !== undefined &&
+        within(at.x, previous.x, point.x) &&
+        within(at.y, previous.y, point.y)
+      );
+    });
 
-    expect(labelled).not.toBeNull();
-    expect(labelled?.y).toBeGreaterThan(byId('collect')?.position.y ?? Number.NaN);
+    expect(onLine).toBe(true);
     expect(edge('verify', 'approved')?.data?.labelPosition).toBeNull();
+  });
+
+  it('keeps the labels of the edges leaving one step clear of each other', () => {
+    const boxes = edges
+      .filter((candidate) => candidate.source === 'collect' && candidate.data?.labelPosition)
+      .map((candidate) => {
+        const { width, height } = labelBox(candidate.data!.displayLabel);
+        const { x, y } = candidate.data!.labelPosition!;
+        return {
+          left: x - width / 2,
+          right: x + width / 2,
+          top: y - height / 2,
+          bottom: y + height / 2,
+        };
+      });
+    const meet = (a: (typeof boxes)[number], b: (typeof boxes)[number]) =>
+      a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+    expect(boxes.length).toBeGreaterThan(1);
+    boxes.forEach((box, index) =>
+      boxes.slice(index + 1).forEach((other) => expect(meet(box, other)).toBe(false)),
+    );
   });
 
   it('keeps self-transitions as node data rather than edges', () => {
@@ -173,11 +219,26 @@ describe('layoutWorkflowGraph spacing and labels', () => {
     ),
   });
 
-  it('puts consecutive unlabelled steps a node height plus 64px apart', () => {
+  it('puts consecutive unlabelled steps a node height plus the Authored rank gap apart', () => {
     const { nodes } = layoutWorkflowGraph(chain(3));
 
-    expect(nodes[1]?.position.y).toBe((nodes[0]?.position.y ?? 0) + 60 + 64);
-    expect(nodes[2]?.position.y).toBe((nodes[1]?.position.y ?? 0) + 60 + 64);
+    expect(nodes[1]?.position.y).toBe((nodes[0]?.position.y ?? 0) + 60 + RANK_GAP);
+    expect(nodes[2]?.position.y).toBe((nodes[1]?.position.y ?? 0) + 60 + RANK_GAP);
+  });
+
+  it('grows only the gap under a step with labels, by a label height per label', () => {
+    const definition = chain(3);
+    definition.steps[1] = step({
+      name: 's1',
+      transitions: [
+        { status: 'failed', target: 's2', reason: null },
+        { status: 'rejected', target: 's0', reason: null },
+      ],
+    });
+    const { nodes } = layoutWorkflowGraph(definition);
+
+    expect(nodes[1]?.position.y).toBe((nodes[0]?.position.y ?? 0) + 60 + RANK_GAP);
+    expect(nodes[2]?.position.y).toBe((nodes[1]?.position.y ?? 0) + 60 + RANK_GAP + 2 * 18);
   });
 
   it('keeps a 17-step chain under 2400px tall', () => {
@@ -335,267 +396,6 @@ describe('layoutWorkflowGraph edge ports', () => {
   });
 });
 
-describe('spreadEdgePorts', () => {
-  const node = (id: string, x: number, y: number) =>
-    ({ id, position: { x, y }, data: {} }) as unknown as WorkflowStepNode;
-  const edge = (source: string, target: string, points: Array<[number, number]>) =>
-    ({
-      id: `${source}>${target}`,
-      source,
-      target,
-      data: {
-        points: points.map(([x, y]) => ({ x, y })),
-        labelPosition: null,
-        label: '',
-        condition: '',
-        displayLabel: '',
-        dashed: false,
-      },
-    }) as unknown as WorkflowGraphEdge;
-  const pointsOf = (edges: WorkflowGraphEdge[], id: string) =>
-    edges.find((candidate) => candidate.id === id)?.data?.points ?? [];
-
-  it('sorts a multi-rank edge by the side it approaches from, not by its far node', () => {
-    const nodes = [node('target', 0, 400), node('far', 1000, 0), node('near', 600, 300)];
-    const edges = spreadEdgePorts(
-      [
-        // Far to the right, but it bends in from the left of the target.
-        edge('far', 'target', [
-          [1088, 60],
-          [-200, 160],
-          [-250, 300],
-          [88, 400],
-        ]),
-        edge('near', 'target', [
-          [688, 360],
-          [88, 400],
-        ]),
-      ],
-      nodes,
-      new Map(),
-    );
-
-    expect(pointsOf(edges, 'far>target').at(-1)?.x).toBeLessThan(
-      pointsOf(edges, 'near>target').at(-1)?.x ?? Number.NaN,
-    );
-  });
-
-  it('leaves a back edge from its source top and enters the target bottom, stubs outward', () => {
-    const nodes = [node('target', 0, 0), node('source', 0, 300)];
-    const [back] = spreadEdgePorts(
-      [
-        edge('source', 'target', [
-          [88, 300],
-          [88, 60],
-        ]),
-      ],
-      nodes,
-      new Map(),
-    );
-    const points = back?.data?.points ?? [];
-
-    expect(points[0]).toEqual({ x: 88, y: 300 });
-    expect(points[1]?.y).toBeLessThan(300);
-    expect(points.at(-1)).toEqual({ x: 88, y: 60 });
-    expect(points.at(-2)?.y).toBeGreaterThan(60);
-  });
-
-  it('adds no stub when the neighbouring point is close', () => {
-    const nodes = [node('target', 0, 0), node('source', 0, 80)];
-    const [short] = spreadEdgePorts(
-      [
-        edge('source', 'target', [
-          [88, 80],
-          [88, 60],
-        ]),
-      ],
-      nodes,
-      new Map(),
-    );
-
-    expect(short?.data?.points).toHaveLength(2);
-  });
-});
-
-describe('layoutWorkflowGraph label placement', () => {
-  // Mirrors `verify_phone_code`: three edges leave one node's bottom, one of them labelled.
-  const definition: WorkflowDefinition = {
-    workflowId: 'siblings',
-    workflowVersion: 1,
-    name: null,
-    initialStep: 'verify',
-    scores: {},
-    webhook: null,
-    steps: [
-      step({
-        name: 'verify',
-        transitions: [
-          { status: 'success', target: 'personal', reason: null },
-          {
-            status: 'rejected',
-            target: 'resend',
-            reason: ['CHALLENGE_EXPIRED', 'CHALLENGE_NOT_FOUND'],
-          },
-          { status: 'rejected', target: 'rejected', reason: null },
-        ],
-      }),
-      step({
-        name: 'resend',
-        transitions: [{ status: 'success', target: 'verify', reason: null }],
-      }),
-      step({
-        name: 'personal',
-        transitions: [{ status: 'success', target: 'purpose', reason: null }],
-      }),
-      step({
-        name: 'purpose',
-        transitions: [{ status: 'success', target: 'review', reason: null }],
-      }),
-      step({
-        name: 'review',
-        transitions: [{ status: 'manual.reject', target: 'rejected', reason: null }],
-      }),
-      step({ name: 'rejected', status: 'rejected', terminal: true }),
-    ],
-  };
-
-  it('keeps a label box off the sibling edges leaving the same node', () => {
-    const { edges } = layoutWorkflowGraph(definition);
-    const labelled = edges.find((candidate) =>
-      candidate.data?.condition.startsWith('rejected · CHALLENGE'),
-    );
-    const centre = labelled?.data?.labelPosition;
-    const { width, height } = labelBox(labelled?.data?.displayLabel ?? '');
-    const inside = (x: number, y: number) =>
-      centre != null && Math.abs(x - centre.x) < width / 2 && Math.abs(y - centre.y) < height / 2;
-    const siblings = edges.filter(
-      (candidate) => candidate.id !== labelled?.id && candidate.source === 'verify',
-    );
-
-    expect(centre).not.toBeNull();
-    expect(siblings.length).toBeGreaterThan(1);
-    for (const sibling of siblings) {
-      const points = sibling.data?.points ?? [];
-      for (let index = 1; index < points.length; index += 1) {
-        const from = points[index - 1]!;
-        const to = points[index]!;
-        for (let step = 0; step <= 50; step += 1) {
-          const x = from.x + ((to.x - from.x) * step) / 50;
-          const y = from.y + ((to.y - from.y) * step) / 50;
-          expect(inside(x, y)).toBe(false);
-        }
-      }
-    }
-  });
-});
-
-describe('placeLabels', () => {
-  const node = (id: string, x: number, y: number) =>
-    ({ id, position: { x, y }, data: {} }) as unknown as WorkflowStepNode;
-  const edge = (
-    id: string,
-    points: Array<[number, number]>,
-    label: { at: [number, number]; text: string } | null = null,
-  ) =>
-    ({
-      id,
-      source: 'verify',
-      target: id,
-      data: {
-        points: points.map(([x, y]) => ({ x, y })),
-        labelPosition: label === null ? null : { x: label.at[0], y: label.at[1] },
-        label: label?.text ?? '',
-        condition: label?.text ?? '',
-        displayLabel: label?.text ?? '',
-        dashed: false,
-      },
-    }) as unknown as WorkflowGraphEdge;
-
-  it('moves a label seeded on a sibling edge along its own edge until the box is clear', () => {
-    const nodes = [node('verify', 0, 0), node('resend', 200, 300), node('rejected', 0, 600)];
-    const sibling = edge('rejected', [
-      [70, 60],
-      [70, 600],
-    ]);
-    // The label starts on the sibling's vertical line.
-    const labelled = edge(
-      'resend',
-      [
-        [88, 60],
-        [288, 300],
-      ],
-      { at: [80, 80], text: 'rejected · CHALLENGE' },
-    );
-    const [, placed] = placeLabels([sibling, labelled], nodes, new Map());
-    const centre = placed?.data?.labelPosition;
-    const { width } = labelBox('rejected · CHALLENGE');
-
-    expect(centre).not.toBeNull();
-    expect(Math.abs((centre?.x ?? 0) - 70)).toBeGreaterThanOrEqual(width / 2);
-  });
-});
-
-describe('layoutWorkflowGraph merged pair labels', () => {
-  it('puts a label carried only by the reverse direction on the drawn line', () => {
-    const definition: WorkflowDefinition = {
-      workflowId: 'pair',
-      workflowVersion: 1,
-      name: null,
-      initialStep: 'a',
-      scores: {},
-      webhook: null,
-      steps: [
-        // `a` reaches `b` directly and through `m`, so the pair spans two ranks.
-        step({
-          name: 'a',
-          transitions: [
-            { status: 'success', target: 'm', reason: null },
-            { status: 'success', target: 'b', reason: null },
-          ],
-        }),
-        step({ name: 'm', transitions: [{ status: 'success', target: 'b', reason: null }] }),
-        step({
-          name: 'b',
-          transitions: [
-            { status: 'retry', target: 'a', reason: null },
-            { status: 'success', target: 'c', reason: null },
-          ],
-        }),
-        step({ name: 'c', terminal: true }),
-      ],
-    };
-    const merged = layoutWorkflowGraph(definition).edges.find(
-      (candidate) => candidate.source === 'a' && candidate.target === 'b',
-    );
-    const centre = merged?.data?.labelPosition;
-    const points = merged?.data?.points ?? [];
-    const distance = Math.min(
-      ...points.slice(1).map((to, index) => {
-        const from = points[index]!;
-        const dx = to.x - from.x;
-        const dy = to.y - from.y;
-        const lengthSquared = dx * dx + dy * dy || 1;
-        const t = Math.max(
-          0,
-          Math.min(
-            1,
-            (((centre?.x ?? 0) - from.x) * dx + ((centre?.y ?? 0) - from.y) * dy) / lengthSquared,
-          ),
-        );
-        return Math.hypot(
-          (centre?.x ?? 0) - (from.x + t * dx),
-          (centre?.y ?? 0) - (from.y + t * dy),
-        );
-      }),
-    );
-
-    expect(merged?.source).toBe('a');
-    expect(merged?.data?.condition).toBe('retry');
-    expect(centre).not.toBeNull();
-    expect(distance).toBeLessThan(3);
-  });
-});
-
 describe('layoutWorkflowGraph edge cases', () => {
   const definitionOf = (
     initialStep: string,
@@ -607,6 +407,37 @@ describe('layoutWorkflowGraph edge cases', () => {
   });
   const yOf = (nodes: readonly WorkflowStepNode[], id: string): number =>
     nodes.find((node) => node.id === id)?.position.y ?? Number.NaN;
+
+  it('orders the exits of a step by where each edge heads, so none of them cross', () => {
+    const { edges } = layoutWorkflowGraph(
+      definitionOf('a', [
+        step({ name: 'a', transitions: [{ status: 'success', target: 'b', reason: null }] }),
+        step({ name: 'b', transitions: [{ status: 'success', target: 'c', reason: null }] }),
+        step({
+          name: 'c',
+          transitions: [
+            { status: 'success', target: 'done', reason: null },
+            { status: 'retry', target: 'a', reason: null },
+            { status: 'failed', target: 'b', reason: null },
+          ],
+        }),
+        step({ name: 'done', status: 'approved', terminal: true }),
+      ]),
+    );
+    const leaving = edges.filter((edge) => edge.source === 'c');
+    // Where each edge first moves sideways to, below the step.
+    const headingOf = (points: { x: number }[]) =>
+      points.find((point) => point.x !== points[0]!.x)?.x ?? points[0]!.x;
+    const byExit = [...leaving].sort(
+      (a, b) => (a.data?.points[0]?.x ?? 0) - (b.data?.points[0]?.x ?? 0),
+    );
+    const byHeading = [...leaving].sort(
+      (a, b) => headingOf(a.data?.points ?? []) - headingOf(b.data?.points ?? []),
+    );
+
+    expect(leaving).toHaveLength(3);
+    expect(byExit.map((edge) => edge.id)).toEqual(byHeading.map((edge) => edge.id));
+  });
 
   it('still terminates and places every step when the workflow declares a cycle', () => {
     const { nodes } = layoutWorkflowGraph(
@@ -656,8 +487,8 @@ describe('layoutWorkflowGraph edge cases', () => {
 
     expect(yOf(nodes, 'collect')).toBeLessThan(yOf(nodes, 'verify'));
     expect(yOf(nodes, 'verify')).toBeLessThan(yOf(nodes, 'approved'));
-    expect(between).toHaveLength(1);
-    expect(between[0]?.markerStart).toBeDefined();
+    expect(between).toHaveLength(2);
+    expect(between.every((candidate) => candidate.markerStart === undefined)).toBe(true);
   });
 
   it('draws no node and no edge for a transition target no step declares', () => {
@@ -679,7 +510,11 @@ describe('layoutWorkflowGraph edge cases', () => {
   });
 
   it('draws a workflow that declares no steps at all', () => {
-    expect(layoutWorkflowGraph(definitionOf('collect', []))).toEqual({ nodes: [], edges: [] });
+    expect(layoutWorkflowGraph(definitionOf('collect', []))).toEqual({
+      nodes: [],
+      edges: [],
+      groups: [],
+    });
   });
 
   it('places a step nothing transitions to rather than dropping it', () => {
@@ -755,5 +590,112 @@ describe('layoutWorkflowGraph for a workflow that loops back and skips a rank', 
 
     expect(oneWay?.markerStart).toBeUndefined();
     expect(oneWay?.markerEnd).toBeDefined();
+  });
+});
+
+describe('layoutWorkflowGraph groups', () => {
+  const otp = { step: 'send_code', type: 'otp-verify', category: 'verify' };
+  const grouped: WorkflowDefinition = {
+    ...DEFINITION,
+    initialStep: 'collect',
+    steps: [
+      step({
+        name: 'collect',
+        source: { step: 'collect', type: 'form', category: 'collect' },
+        transitions: [{ status: 'success', target: 'send_code', reason: null }],
+      }),
+      step({
+        name: 'send_code',
+        source: otp,
+        transitions: [{ status: 'success', target: 'verify_code', reason: null }],
+      }),
+      step({
+        name: 'verify_code',
+        source: otp,
+        transitions: [
+          { status: 'success', target: 'approved', reason: null },
+          { status: 'rejected', target: 'resend_code', reason: null },
+        ],
+      }),
+      step({
+        name: 'resend_code',
+        source: otp,
+        transitions: [{ status: 'success', target: 'verify_code', reason: null }],
+      }),
+      step({ name: 'approved', status: 'approved', terminal: true }),
+    ],
+  };
+
+  it('frames only an authored step that compiled to several steps, around every one of them', () => {
+    const { nodes, groups } = layoutWorkflowGraph(grouped);
+
+    expect(groups.map((group) => group.data)).toEqual([
+      expect.objectContaining({ step: 'send_code', type: 'otp-verify', category: 'verify' }),
+    ]);
+    const [frame] = groups;
+    for (const name of ['send_code', 'verify_code', 'resend_code']) {
+      const node = nodes.find((candidate) => candidate.id === name)!;
+      expect(node.position.x).toBeGreaterThan(frame!.position.x);
+      expect(node.position.y).toBeGreaterThan(frame!.position.y);
+      expect(node.position.x + NODE_WIDTH).toBeLessThan(frame!.position.x + frame!.data.width);
+      expect(node.position.y + NODE_HEIGHT).toBeLessThan(frame!.position.y + frame!.data.height);
+    }
+  });
+
+  it('tints a node by its source category, and leaves it untinted without a source', () => {
+    const { nodes } = layoutWorkflowGraph(grouped);
+
+    expect(nodes.find((node) => node.id === 'collect')?.data.category).toBe('collect');
+    expect(nodes.find((node) => node.id === 'approved')?.data.category).toBeNull();
+  });
+
+  it('draws no frame when every authored step compiled to one step', () => {
+    expect(layoutWorkflowGraph(DEFINITION).groups).toEqual([]);
+  });
+});
+
+describe('placeLabels', () => {
+  const node = (id: string, x: number, y: number) =>
+    ({ id, position: { x, y }, data: {} }) as unknown as WorkflowStepNode;
+  const edge = (
+    id: string,
+    points: Array<[number, number]>,
+    label: { at: [number, number]; text: string } | null = null,
+  ) =>
+    ({
+      id,
+      source: 'verify',
+      target: id,
+      data: {
+        points: points.map(([x, y]) => ({ x, y })),
+        labelPosition: label === null ? null : { x: label.at[0], y: label.at[1] },
+        label: label?.text ?? '',
+        condition: label?.text ?? '',
+        displayLabel: label?.text ?? '',
+        dashed: false,
+      },
+    }) as unknown as WorkflowGraphEdge;
+
+  it('moves a label seeded on a sibling edge along its own edge until the box is clear', () => {
+    const nodes = [node('verify', 0, 0), node('resend', 200, 300), node('rejected', 0, 600)];
+    const sibling = edge('rejected', [
+      [70, 60],
+      [70, 600],
+    ]);
+    // The label starts on the sibling's vertical line.
+    const labelled = edge(
+      'resend',
+      [
+        [88, 60],
+        [288, 300],
+      ],
+      { at: [80, 80], text: 'rejected · CHALLENGE' },
+    );
+    const [, placed] = placeLabels([sibling, labelled], nodes, new Map());
+    const centre = placed?.data?.labelPosition;
+    const { width } = labelBox('rejected · CHALLENGE');
+
+    expect(centre).not.toBeNull();
+    expect(Math.abs((centre?.x ?? 0) - 70)).toBeGreaterThanOrEqual(width / 2);
   });
 });

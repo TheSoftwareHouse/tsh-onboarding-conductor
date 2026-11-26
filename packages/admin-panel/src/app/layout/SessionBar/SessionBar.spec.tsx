@@ -4,37 +4,31 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionBar } from './SessionBar';
 
-const { mockedIsAuthEnabled, mockedUseMsal } = vi.hoisted(() => ({
+const { mockedIsAuthEnabled, mockedUseSession, mockedSignOut } = vi.hoisted(() => ({
   mockedIsAuthEnabled: vi.fn<() => boolean>(),
-  mockedUseMsal: vi.fn(),
+  mockedUseSession: vi.fn(),
+  mockedSignOut: vi.fn(),
 }));
 
 vi.mock('@/services/auth/auth-config', () => ({
   isAuthEnabled: mockedIsAuthEnabled,
 }));
 
-vi.mock('@azure/msal-react', () => ({
-  useMsal: mockedUseMsal,
+vi.mock('./OrganizationSwitcher/OrganizationSwitcher', () => ({
+  OrganizationSwitcher: () => <div>organization switcher</div>,
 }));
 
-function stubMsal(
-  overrides: { activeAccount?: unknown; accounts?: unknown[]; logoutRedirect?: () => unknown } = {},
-) {
-  const logoutRedirect = vi.fn(overrides.logoutRedirect ?? (() => Promise.resolve()));
-  mockedUseMsal.mockReturnValue({
-    instance: {
-      getActiveAccount: vi.fn(() => overrides.activeAccount ?? null),
-      getAllAccounts: vi.fn(() => overrides.accounts ?? []),
-      logoutRedirect,
-    },
-  });
-
-  return logoutRedirect;
-}
+vi.mock('@/services/auth/auth-client', () => ({
+  authClient: { useSession: mockedUseSession, signOut: mockedSignOut },
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockedIsAuthEnabled.mockReturnValue(true);
+  mockedSignOut.mockResolvedValue({});
+  mockedUseSession.mockReturnValue({
+    data: { user: { name: 'Anna Kowalska', email: 'anna@tsh.io' } },
+  });
 });
 
 afterEach(() => {
@@ -48,47 +42,43 @@ describe('SessionBar', () => {
     const { container } = render(<SessionBar />);
 
     expect(container).toBeEmptyDOMElement();
-    expect(mockedUseMsal).not.toHaveBeenCalled();
+    expect(mockedUseSession).not.toHaveBeenCalled();
   });
 
-  it('renders nothing when no account is known', () => {
-    stubMsal();
+  it('renders nothing without a session', () => {
+    mockedUseSession.mockReturnValue({ data: null });
 
     const { container } = render(<SessionBar />);
 
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('names the signed-in operator', () => {
-    stubMsal({ activeAccount: { name: 'Anna Kowalska', username: 'anna@tsh.io' } });
-
-    render(<SessionBar />);
-
-    expect(screen.getByText('Anna Kowalska')).toBeInTheDocument();
-  });
-
-  it('falls back to the sign-in name when the directory supplies no display name', () => {
-    stubMsal({ activeAccount: { name: undefined, username: 'anna@tsh.io' } });
-
+  it('shows the signed-in operator email and their initials', () => {
     render(<SessionBar />);
 
     expect(screen.getByText('anna@tsh.io')).toBeInTheDocument();
+    expect(screen.getByText('AK')).toBeInTheDocument();
   });
 
-  it('falls back to the first cached account when none is active', () => {
-    stubMsal({ activeAccount: null, accounts: [{ name: 'Cached Operator' }] });
+  it('derives the initials from the email when the user has no display name', () => {
+    mockedUseSession.mockReturnValue({ data: { user: { name: '', email: 'anna@tsh.io' } } });
 
     render(<SessionBar />);
 
-    expect(screen.getByText('Cached Operator')).toBeInTheDocument();
+    expect(screen.getByText('AT')).toBeInTheDocument();
   });
 
-  it('signs the operator out through Entra rather than only clearing local state', async () => {
-    const logoutRedirect = stubMsal({ activeAccount: { name: 'Anna Kowalska' } });
+  it('mounts the organization switcher', () => {
+    render(<SessionBar />);
+
+    expect(screen.getByText('organization switcher')).toBeInTheDocument();
+  });
+
+  it('signs out from the button', async () => {
     render(<SessionBar />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
 
-    expect(logoutRedirect).toHaveBeenCalledTimes(1);
+    expect(mockedSignOut).toHaveBeenCalledTimes(1);
   });
 });

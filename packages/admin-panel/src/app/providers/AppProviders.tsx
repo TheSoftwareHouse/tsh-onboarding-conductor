@@ -7,13 +7,13 @@ export interface AppProvidersProps {
   children: ReactNode;
 }
 
-/** Supplies the application-wide auth client, React Query client and toast region to the tree. */
+/** Supplies the toast region, the React Query client and, under it, the auth mount that guards its cache. */
 export function AppProviders({ children }: AppProvidersProps): ReactElement {
   return (
-    <AuthProvider>
-      <Toaster>
-        <QueryProvider>{children}</QueryProvider>
-      </Toaster>
-    </AuthProvider>
+    <Toaster>
+      <QueryProvider>
+        <AuthProvider>{children}</AuthProvider>
+      </QueryProvider>
+    </Toaster>
   );
 }

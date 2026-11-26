@@ -1,7 +1,8 @@
 import type { ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button/Button';
-import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
+import { LoadFailure } from '@/components/ui/LoadFailure/LoadFailure';
+import { Loader } from '@/components/ui/Loader/Loader';
 import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
 import { JSON_INDENT } from '../../constants/json-indent';
@@ -17,18 +18,11 @@ export function VersionDocument({ workflowId, version }: VersionDocumentProps): 
   const { data: stored, error, refetch } = useQuery(workflowQueries.document(workflowId, version));
 
   if (error !== null) {
-    return (
-      <div className="flex flex-col items-start gap-4 p-8">
-        <StatusRegion>{`Unable to load the document: ${error.message}`}</StatusRegion>
-        <Button variant="secondary" size="md" onClick={() => void refetch()}>
-          Retry
-        </Button>
-      </div>
-    );
+    return <LoadFailure subject="the document" error={error} onRetry={() => void refetch()} />;
   }
 
   if (stored === undefined) {
-    return <StatusRegion className="px-8 py-6">Loading document…</StatusRegion>;
+    return <Loader label="Loading document…" />;
   }
 
   const text = JSON.stringify(stored.document, null, JSON_INDENT);

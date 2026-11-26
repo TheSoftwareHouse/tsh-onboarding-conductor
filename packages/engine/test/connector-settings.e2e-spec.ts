@@ -3,21 +3,9 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
-import {
-  createLocalJWKSet,
-  exportJWK,
-  generateKeyPair,
-  SignJWT,
-  type JWTVerifyGetKey,
-  type KeyLike,
-} from 'jose';
 import { startE2eServer } from './e2e-server';
+import { createOperator, deleteOperators, type Operator } from './admin-session.support';
 
-const TENANT_ID = '55555555-5555-5555-5555-555555555555';
-const AUDIENCE = '66666666-6666-6666-6666-666666666666';
-const KEY_ID = 'connector-settings-signing-key';
-const OPERATOR_OBJECT_ID = '9f3c0000-0000-0000-0000-0000000000cc';
-const OPERATOR_UPN = 'connector.settings@tsh.io';
 const PANEL_ORIGIN = 'http://localhost:5173';
 
 process.env.NODE_ENV = 'test';
@@ -35,13 +23,8 @@ process.env.STORAGE_S3_ACCESS_KEY_ID = 'onboardingdev';
 process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'onboardingdevsecret0123456789';
 process.env.ADMIN_PANEL_ORIGIN = PANEL_ORIGIN;
 process.env.ADMIN_AUTH_ENABLED = 'true';
-process.env.AZURE_TENANT_ID = TENANT_ID;
-process.env.AZURE_API_AUDIENCE = AUDIENCE;
-process.env.ADMIN_REQUIRED_ROLES = 'admin';
 
 import { AppModule } from '../src/app.module';
-import { ADMIN_TOKEN_VERIFIER } from '../src/auth/admin-token-verifier.port';
-import { AzureTokenVerifier, buildEntraIssuer } from '../src/auth/azure-token-verifier';
 
 /** A connector already registered with a `settingsSchema`: one secret field, one plain field. */
 const CONNECTOR_ID = 'sendgrid_email';
@@ -78,24 +61,7 @@ type ConnectorSettingsResponseBody = {
 describe('Connector settings admin API (e2e)', () => {
   let app: NestExpressApplication | undefined;
   let dataSource: DataSource;
-  let privateKey: KeyLike;
-
-  async function signToken(): Promise<string> {
-    return new SignJWT({
-      scp: 'Onboardings.Read',
-      oid: OPERATOR_OBJECT_ID,
-      preferred_username: OPERATOR_UPN,
-      tid: TENANT_ID,
-      roles: ['admin'],
-    })
-      .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
-      .setSubject('operator-subject')
-      .setIssuer(buildEntraIssuer(TENANT_ID))
-      .setAudience(AUDIENCE)
-      .setIssuedAt()
-      .setExpirationTime('5m')
-      .sign(privateKey);
-  }
+  let operator: Operator;
 
   function findSetting(body: ConnectorSettingsResponseBody, key: string): SettingResponse {
     const setting = body.settings.find((candidate) => candidate.key === key);
@@ -109,19 +75,8 @@ describe('Connector settings admin API (e2e)', () => {
   }
 
   beforeAll(async () => {
-    const keyPair = await generateKeyPair('RS256', { extractable: true });
-    privateKey = keyPair.privateKey;
-
-    const publicJwk = await exportJWK(keyPair.publicKey);
-    const getKey: JWTVerifyGetKey = createLocalJWKSet({
-      keys: [{ ...publicJwk, kid: KEY_ID, alg: 'RS256', use: 'sig' }],
-    });
-
-    // The real engine, wired end to end, with only the network call to Entra's JWKS replaced.
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(ADMIN_TOKEN_VERIFIER)
-      .useValue(new AzureTokenVerifier({ tenantId: TENANT_ID, audience: AUDIENCE, getKey }))
-      .compile();
+    // The real engine, wired end to end, with only the sign-in replaced by a session helper.
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
 
     app = moduleRef.createNestApplication<NestExpressApplication>();
     await startE2eServer(app);
@@ -130,33 +85,31 @@ describe('Connector settings admin API (e2e)', () => {
     // Leaves no row behind from a previous run that failed before its own cleanup ran.
     await deleteStoredRow();
     await deleteStoredRow(OTP_CONNECTOR_ID);
+    operator = await createOperator(app!, { platformRole: 'superadmin', twoFactor: true });
   }, 60000);
 
   afterAll(async () => {
     await deleteStoredRow();
     await deleteStoredRow(OTP_CONNECTOR_ID);
+    if (app) await deleteOperators(app);
     await app?.close();
   });
 
-  it('answers 401 for a request carrying no token', async () => {
+  it('answers 401 for a request carrying no session', async () => {
     await request(app!.getHttpServer()).get('/v1/admin/connectors').expect(401);
   });
 
   it('answers 404 for a connector type that is not registered', async () => {
-    const token = await signToken();
-
     await request(app!.getHttpServer())
       .get('/v1/admin/connectors/not_a_real_connector_id')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(404);
   });
 
   it('reports each connector by id alongside the class it belongs to', async () => {
-    const token = await signToken();
-
     const response = await request(app!.getHttpServer())
       .get('/v1/admin/connectors')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(200);
 
     const { connectors } = response.body as { connectors: ConnectorSettingsResponseBody[] };
@@ -177,20 +130,16 @@ describe('Connector settings admin API (e2e)', () => {
   });
 
   it('answers 404 for http_request, which is configured by environment rather than by an operator', async () => {
-    const token = await signToken();
-
     await request(app!.getHttpServer())
       .get('/v1/admin/connectors/http_request')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(404);
   });
 
   it('stamps the class its adapter declares onto the stored row', async () => {
-    const token = await signToken();
-
     await request(app!.getHttpServer())
       .put(`/v1/admin/connectors/${CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .send({ settings: { apiKey: SUBMITTED_API_KEY, from: SUBMITTED_FROM } })
       .expect(200);
 
@@ -206,11 +155,9 @@ describe('Connector settings admin API (e2e)', () => {
   });
 
   it('stores a credential, never returns it, and leaves the key unconfigured on delete', async () => {
-    const token = await signToken();
-
     const putResponse = await request(app!.getHttpServer())
       .put(`/v1/admin/connectors/${CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .send({ settings: { apiKey: SUBMITTED_API_KEY, from: SUBMITTED_FROM } })
       .expect(200);
 
@@ -223,7 +170,7 @@ describe('Connector settings admin API (e2e)', () => {
 
     const getResponse = await request(app!.getHttpServer())
       .get(`/v1/admin/connectors/${CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(200);
 
     const getBody = getResponse.body as ConnectorSettingsResponseBody;
@@ -237,12 +184,12 @@ describe('Connector settings admin API (e2e)', () => {
 
     await request(app!.getHttpServer())
       .delete(`/v1/admin/connectors/${CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(204);
 
     const afterDeleteResponse = await request(app!.getHttpServer())
       .get(`/v1/admin/connectors/${CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(200);
 
     const afterDeleteApiKey = findSetting(
@@ -260,13 +207,12 @@ describe('Connector settings admin API (e2e)', () => {
   });
 
   it('rotates a stored credential against the real database: one row, holding the new value', async () => {
-    const token = await signToken();
     const rotatedApiKey = 'SG.e2e-connector-settings-secret-rotated';
     const rotatedFrom = 'e2e-connector-settings-rotated@example.com';
 
     await request(app!.getHttpServer())
       .put(`/v1/admin/connectors/${CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .send({ settings: { apiKey: SUBMITTED_API_KEY, from: SUBMITTED_FROM } })
       .expect(200);
 
@@ -274,7 +220,7 @@ describe('Connector settings admin API (e2e)', () => {
     // `ON CONFLICT (connector_type) DO UPDATE` rather than the insert path above.
     const rotateResponse = await request(app!.getHttpServer())
       .put(`/v1/admin/connectors/${CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .send({ settings: { apiKey: rotatedApiKey, from: rotatedFrom } })
       .expect(200);
 
@@ -293,12 +239,11 @@ describe('Connector settings admin API (e2e)', () => {
   });
 
   it('PATCHes one non-secret key, leaving the stored secret byte-for-byte unchanged and never returned', async () => {
-    const token = await signToken();
     const patchedFrom = 'e2e-connector-settings-patched@example.com';
 
     const putResponse = await request(app!.getHttpServer())
       .put(`/v1/admin/connectors/${CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .send({ settings: { apiKey: SUBMITTED_API_KEY, from: SUBMITTED_FROM } })
       .expect(200);
 
@@ -306,7 +251,7 @@ describe('Connector settings admin API (e2e)', () => {
     // must not touch it.
     const patchResponse = await request(app!.getHttpServer())
       .patch(`/v1/admin/connectors/${CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .send({ settings: { from: patchedFrom } })
       .expect(200);
 
@@ -318,7 +263,7 @@ describe('Connector settings admin API (e2e)', () => {
 
     const getResponse = await request(app!.getHttpServer())
       .get(`/v1/admin/connectors/${CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .expect(200);
 
     const rows = await dataSource.query<Array<{ settings: Record<string, string> }>>(
@@ -338,11 +283,9 @@ describe('Connector settings admin API (e2e)', () => {
   });
 
   it('does not lose an update when PATCHes for the same connector overlap', async () => {
-    const token = await signToken();
-
     await request(app!.getHttpServer())
       .put(`/v1/admin/connectors/${OTP_CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
+      .set('Cookie', operator.cookie)
       .send({ settings: OTP_SMS_SETTINGS })
       .expect(200);
 
@@ -360,7 +303,7 @@ describe('Connector settings admin API (e2e)', () => {
       Object.entries(updates).map(([key, value]) =>
         request(app!.getHttpServer())
           .patch(`/v1/admin/connectors/${OTP_CONNECTOR_ID}`)
-          .set('Authorization', `Bearer ${token}`)
+          .set('Cookie', operator.cookie)
           .send({ settings: { [key]: value } }),
       ),
     );

@@ -29,9 +29,11 @@ archive with the bump.
   error a service re-throws, as the connector executor does on `propagate` — the route also carries
   `frameworkError(500, …)`: Nest answers those with its own envelope, and a coded `500` alone would
   promise a `code` the route does not always send.
-- **Admin handlers** are marked `@AdminRoute()` (`src/auth/admin-route.decorator.ts`), never a bare
-  `@UseGuards(AzureJwtGuard)` and never `@ApiBearerAuth` by hand: the decorator applies the guard
-  and documents it in one step so the two cannot disagree.
+- **Admin handlers** are marked `@AdminRoute({ resource, action })`
+  (`src/auth/admin-route.decorator.ts`), never a bare `@UseGuards(AdminSessionGuard)` and never an
+  `@ApiSecurity` or `@ApiCookieAuth` by hand: the decorator applies the guard, stores the
+  permission and documents the cookie security scheme and the three auth refusals in one step so the
+  three cannot disagree.
 - **Request DTOs**: every property carries `@ApiProperty` or `@ApiPropertyOptional` beside its
   class-validator decorators, with a `description`, and an `example` where a real value helps.
 - **Response shapes** are classes under the feature's `dto/`, named `*ResponseDto`, every property

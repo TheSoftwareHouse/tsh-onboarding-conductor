@@ -5,13 +5,21 @@ import {
   AccountTree,
   AssignmentTurnedIn,
   Cable,
+  CorporateFare,
+  Group,
+  Lock,
+  ManageAccounts,
   ReceiptLong,
   VpnKey,
   type IconComponent,
 } from '@/components/ui/icons';
+import { AccountPage } from './account/AccountPage';
 import { AuditPage } from './audit/AuditPage';
 import { ConnectorsPage } from './connectors/ConnectorsPage';
 import { EncryptionPage } from './encryption/EncryptionPage';
+import { OrganizationsPage } from './platform/organizations/OrganizationsPage';
+import { UsersPage } from './platform/users/UsersPage';
+import { OrganizationPage } from './organization/OrganizationPage';
 import { OnboardingDetailsPage } from './onboardings/details/OnboardingDetailsPage';
 import { OnboardingsPage } from './onboardings/OnboardingsPage';
 import { WorkflowDetailsPage } from './workflows/details/WorkflowDetailsPage';
@@ -28,6 +36,8 @@ export interface AdminSection {
   icon: IconComponent;
   /** Page rendered inside the admin layout for this path, headed by its own `PageHeader`. */
   Component: ComponentType<AdminPageProps>;
+  /** Listed in the sidebar only for a signed-in `superadmin`; the engine refuses everyone else regardless. */
+  superadminOnly?: boolean;
 }
 
 /**
@@ -69,6 +79,36 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     group: 'Build',
     icon: VpnKey,
     Component: EncryptionPage,
+  },
+  {
+    path: ADMIN_ROUTES.organization.root,
+    label: 'Organization',
+    group: 'Admin',
+    icon: Group,
+    Component: OrganizationPage,
+  },
+  {
+    path: ADMIN_ROUTES.platform.users,
+    label: 'Users',
+    group: 'Admin',
+    icon: ManageAccounts,
+    Component: UsersPage,
+    superadminOnly: true,
+  },
+  {
+    path: ADMIN_ROUTES.platform.organizations,
+    label: 'Organizations',
+    group: 'Admin',
+    icon: CorporateFare,
+    Component: OrganizationsPage,
+    superadminOnly: true,
+  },
+  {
+    path: ADMIN_ROUTES.account.root,
+    label: 'Account',
+    group: 'Account',
+    icon: Lock,
+    Component: AccountPage,
   },
 ];
 

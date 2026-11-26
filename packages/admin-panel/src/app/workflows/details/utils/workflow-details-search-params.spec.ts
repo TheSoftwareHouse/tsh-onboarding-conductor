@@ -4,11 +4,15 @@ import { stripDetailsParams, workflowDetailsSearchParams } from './workflow-deta
 describe('workflowDetailsSearchParams.view', () => {
   const { view } = workflowDetailsSearchParams;
 
-  it.each(['graph', 'json'])('parses %s', (value) => {
+  it.each(['authored', 'compiled', 'json'])('parses %s', (value) => {
     expect(view.parse(value)).toBe(value);
   });
 
-  it.each(['table', '', 'GRAPH'])('parses %j to null', (value) => {
+  it('reads the old ?view=graph as compiled', () => {
+    expect(view.parse('graph')).toBe('compiled');
+  });
+
+  it.each(['table', '', 'GRAPH', 'toString'])('parses %j to null', (value) => {
     expect(view.parse(value)).toBeNull();
   });
 });

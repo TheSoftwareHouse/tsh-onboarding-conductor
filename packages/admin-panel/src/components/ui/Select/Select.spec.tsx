@@ -21,7 +21,7 @@ function Harness({
   onChange = vi.fn(),
   disabled,
 }: {
-  onChange?: (value: Version) => void;
+  onChange?: (value: Version | null) => void;
   disabled?: boolean;
 }): ReactElement {
   const [value, setValue] = useState<Version | null>('2');
@@ -108,5 +108,61 @@ describe('Select', () => {
 
     expect(trigger).toHaveAttribute('data-disabled');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  describe('with anyOptionLabel', () => {
+    it('shows the any-option label while the value is null', () => {
+      render(
+        <Select
+          aria-label="Version"
+          items={ITEMS}
+          value={null}
+          anyOptionLabel="Any version"
+          placeholder="Choose a version"
+          onValueChange={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByRole('combobox', { name: 'Version' })).toHaveTextContent('Any version');
+    });
+
+    it('reports null when the any-option is picked after a value', async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(
+        <Select
+          aria-label="Version"
+          items={ITEMS}
+          value="2"
+          anyOptionLabel="Any version"
+          onValueChange={onChange}
+        />,
+      );
+
+      await user.click(screen.getByRole('combobox', { name: 'Version' }));
+      await user.click(await screen.findByRole('option', { name: 'v3 — draft' }));
+      await user.click(screen.getByRole('combobox', { name: 'Version' }));
+      await user.click(await screen.findByRole('option', { name: 'Any version' }));
+
+      expect(onChange).toHaveBeenNthCalledWith(1, '3');
+      expect(onChange).toHaveBeenNthCalledWith(2, null);
+    });
+  });
+
+  it('passes aria-invalid and aria-describedby to the trigger', () => {
+    render(
+      <Select
+        aria-label="Version"
+        aria-invalid
+        aria-describedby="version-error"
+        items={ITEMS}
+        value="2"
+        onValueChange={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: 'Version' });
+    expect(trigger).toHaveAttribute('aria-invalid', 'true');
+    expect(trigger).toHaveAttribute('aria-describedby', 'version-error');
   });
 });

@@ -825,6 +825,39 @@ describe('AuditService', () => {
       });
     });
 
+    it('writes a better-auth permission refusal with the operator identity and the permission', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logAdminAccess(dataSource, {
+        action: 'auth.permission_missing',
+        actorType: 'operator',
+        actorId: 'user-1',
+        resourceId: '/v1/workflows',
+        metadata: {
+          method: 'POST',
+          email: 'anna@tsh.io',
+          platformRole: null,
+          organizationId: 'org-1',
+          requiredPermission: 'workflow:write',
+          smuggledField: 'should-not-surface',
+        } as never,
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          action: 'auth.permission_missing',
+          entryType: 'rejected',
+          metadata: {
+            method: 'POST',
+            email: 'anna@tsh.io',
+            organizationId: 'org-1',
+            requiredPermission: 'workflow:write',
+          },
+        }),
+      );
+    });
+
     it('leaves the operator fields off a refusal rather than storing empty ones', async () => {
       // A null upn on a denial row would read as though an identity had been established.
       const { sut, repository, manager } = createSut();
@@ -895,6 +928,9 @@ describe('AuditService', () => {
     it.each([
       ['auth.access_granted', 'anonymous'],
       ['auth.role_missing', 'anonymous'],
+      ['auth.permission_missing', 'anonymous'],
+      ['auth.two_factor_required', 'anonymous'],
+      ['auth.session_missing', 'operator'],
       ['auth.token_rejected', 'operator'],
       ['auth.verification_unavailable', 'operator'],
       ['auth.access_unauthenticated', 'operator'],

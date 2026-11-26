@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Req } from '@nestjs/common';
 import { ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AdminRoute } from '../auth/admin-route.decorator';
-import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
+import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/admin-session.guard';
 import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-responses.decorator';
 import { API_TAGS } from '../openapi/openapi.constants';
 import { EncryptionAdminService } from './encryption-admin.service';
@@ -32,7 +32,7 @@ export class EncryptionController {
   constructor(private readonly encryptionAdminService: EncryptionAdminService) {}
 
   @Get()
-  @AdminRoute()
+  @AdminRoute({ resource: 'encryption', action: 'read' })
   @ApiOperation({
     operationId: 'getEncryptionState',
     summary: 'Read the encryption state and key history',
@@ -55,7 +55,7 @@ export class EncryptionController {
   }
 
   @Patch()
-  @AdminRoute()
+  @AdminRoute({ resource: 'encryption', action: 'write' })
   @ApiOperation({
     operationId: 'setEncryptionEnabled',
     summary: 'Turn encryption on or off',
@@ -80,14 +80,14 @@ export class EncryptionController {
   ): Promise<EncryptionStateResponseDto> {
     const view = await this.encryptionAdminService.setEnabled(
       body.enabled,
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
 
     return toEncryptionStateResponse(view);
   }
 
   @Patch('rotation')
-  @AdminRoute()
+  @AdminRoute({ resource: 'encryption', action: 'write' })
   @ApiOperation({
     operationId: 'setEncryptionKeyRotation',
     summary: 'Choose how often the key rotates on its own',
@@ -113,14 +113,14 @@ export class EncryptionController {
   ): Promise<EncryptionStateResponseDto> {
     const view = await this.encryptionAdminService.setRotationInterval(
       body.interval,
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
 
     return toEncryptionStateResponse(view);
   }
 
   @Post('keys')
-  @AdminRoute()
+  @AdminRoute({ resource: 'encryption', action: 'write' })
   @ApiOperation({
     operationId: 'addEncryptionKey',
     summary: 'Rotate the encryption key',
@@ -146,14 +146,14 @@ export class EncryptionController {
   )
   async addKey(@Req() request: AdminAuthenticatedRequest): Promise<EncryptionKeyIdResponseDto> {
     const { id } = await this.encryptionAdminService.addKey(
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
 
     return toEncryptionKeyIdResponse(id);
   }
 
   @Post('reencryption')
-  @AdminRoute()
+  @AdminRoute({ resource: 'encryption', action: 'write' })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     operationId: 'requestEncryptionReencryption',
@@ -179,7 +179,7 @@ export class EncryptionController {
     @Req() request: AdminAuthenticatedRequest,
   ): Promise<EncryptionStateResponseDto> {
     const view = await this.encryptionAdminService.requestReencryption(
-      resolveOperatorId(request.adminTokenClaims),
+      resolveOperatorId(request.adminSession),
     );
 
     return toEncryptionStateResponse(view);

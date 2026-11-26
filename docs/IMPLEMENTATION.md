@@ -611,7 +611,9 @@ author can write — a `custom` step's or `connector-call`'s connectors and tran
 validated against the compiled schema's own definitions before compilation, so a failure the
 compiled schema reports afterwards (`steps[k]…`, indexing compiled steps) can only come from a
 type's `compile` and is restated as `steps[i]`, the authored step whose type produced compiled step
-`k`. The semantic invariants below carry a reason and no path, for either phase.
+`k`. A semantic invariant checked inside one step — its connectors' field mappings, field
+conditions, scoring and transitions — is located at that step (`steps[i]`); one spanning steps
+carries a reason and no path.
 
 **`compileWorkflowReport`** returns the compiled form _and_ each step's resolved shape — type,
 category, the compiled steps it owns (`compiledStepNames`), and per port the arms it leads along, in
@@ -763,8 +765,8 @@ runs it over each scope directory or the paths it is given, and reports the reas
 would report — plus the loader's own duplicate `(id, version)` check. A bare run resolves the user
 scope from `WORKFLOWS_USERS_DIR` exactly as the loader does, and paths that match no file exit `1`
 rather than reading as a pass. It carries none of the engine-level checks, which need a running
-engine. Reasons carry no path to the offending
-declaration; `.claude/skills/creating-workflows/references/startup-failures.md` maps each one back
+engine. A reason names at most the offending step, never the declaration
+inside it; `.claude/skills/creating-workflows/references/startup-failures.md` maps each one back
 to the checks that raise it.
 
 One further startup invariant crosses document boundaries and sits outside that per-document list:
@@ -1190,7 +1192,7 @@ business outcome the operator needs to see in the list and the audit log, not a 
 ### Manual review
 
 `POST /v1/onboardings/:id/review/:action` with `action ∈ {approve, reject, invalid}` fires
-`manual.<action>`. An operator route, behind the admin bearer guard (§11). Same locking and audit discipline; the audit action is
+`manual.<action>`. An operator route, behind the admin session guard (§11), needing `onboarding:review`. Same locking and audit discipline; the audit action is
 `onboarding.manual_review_decision` and carries the trigger. An unsupported action is rejected by
 `UnsupportedManualReviewActionPipe`, which also writes a `rejected_attempt` audit record before
 throwing — so an operator's bad request is still evidence. A manual decision passes the
@@ -1487,7 +1489,7 @@ any `psql` session exposes every connector credential in clear (see decision rec
 0025). There is no cache: every execution re-reads the row, so a credential submitted over the admin API takes
 effect on the next call on every instance without a restart.
 
-Five guarded routes, all behind `AzureJwtGuard`, form the admin surface:
+Five guarded routes, all behind `@AdminRoute(...)` (`connector:read` for the two reads, `connector:write` for the rest), form the admin surface:
 
 | Method | Path                                | Does                                                    |
 | ------ | ----------------------------------- | ------------------------------------------------------- |
@@ -2979,6 +2981,10 @@ enum:
 | `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 400       |
 | `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 401 / 503 |
 | `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 410       |
+| `ADMIN_SESSION_REQUIRED` — an admin route with no valid session (Authentication, below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | 401       |
+| `ADMIN_PERMISSION_MISSING` — an admin route for an operator whose role lacks the route's permission                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 403       |
+| `ADMIN_ORIGIN_REFUSED` — an admin write from a page on an untrusted `Origin` (Authentication, below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | 403       |
+| `AUTH_UNAVAILABLE` — the `auth` schema could not be reached                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | 503       |
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                                                                                                                                                                                                                                                                                    | 503       |
 | `OTP_DELIVERY_FAILED`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 500       |
 
@@ -2998,62 +3004,248 @@ echo a submitted or allowed value, e.g. `@IsIn`) as an instance property outside
 body, for `ApiFailureAuditFilter` to read into the `api.*` audit row (§8). No new code is exposed
 to callers, so the error-code table above gains no `VALIDATION_FAILED` entry.
 
-### Authentication — Microsoft Entra ID on the admin surface
+### Authentication — better-auth on the admin surface
 
-Every route under `/v1/admin/`, the admin onboarding reads (`GET /v1/onboardings`,
-`GET /v1/onboardings/export`, `GET /v1/onboardings/:id`, `GET /v1/onboardings/:id/transitions`) and the
-operator's manual review decision (`POST /v1/onboardings/:id/review/:action`) require a verified Microsoft Entra
-ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`) through
-the `AdminRoute()` decorator (`packages/engine/src/auth/admin-route.decorator.ts`), which applies the
-guard and writes its contract into the OpenAPI document in one step. Every other route — the
-customer-facing onboarding flow and provider webhooks —
-stays open: there is no Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
-`ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only
-`GET`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`) is that
+Operators sign in through better-auth, mounted in the engine
+([0053](decisions/0053-better-auth-for-admin-authentication.md)). The panel signs in with email and
+password, plus a TOTP code for an operator who turned two-factor on, or with Microsoft when it is configured. The session is an
+httpOnly cookie (`better-auth.session_token`, `SameSite=Lax`, `Secure` when `NODE_ENV=production`),
+not a bearer token. Every route under `/v1/admin/`, the operator routes on onboardings (the reads,
+the export, the agreement link, the pending-connector reconcile) and the manual review decision
+(`POST /v1/onboardings/:id/review/:action`) require a session whose operator holds the route's
+permission. Every other route — the customer-facing onboarding flow and provider webhooks — stays
+open: there is no operator identity for an end customer or a provider to hold, so CORS (`main.ts`
+allows exactly `ADMIN_PANEL_ORIGIN`, plus origin-less requests, with `credentials: true`,
+`Content-Type` as the only allowed header and `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`) is that
 surface's only constraint, and it constrains browsers, not clients.
 
-The agreement routes follow the same split. Publishing, listing published versions, reading one
-onboarding's agreements and linking one to it are operator actions marked `@AdminRoute()`;
-`POST /v1/onboardings/:id/agreements/:agreementId/accept` does not, because it serves the end user's
-own onboarding flow, which holds no Entra identity. It is also not gated on the onboarding's
-lifecycle status — an approved customer still has to be able to accept a new version of the terms.
-It is gated on the link already existing: a pair no start, submit, publish or operator link ever
-created is `404 AGREEMENT_NOT_FOUND`. Without that, the unguarded route would be a second way to
-create a link, and anyone holding an onboarding id could attach any published version to it and
-make the next publish of that family notify the client's endpoint.
+**Mount.** `AuthModule.configure()` applies `BetterAuthMiddleware`
+(`packages/engine/src/auth/better-auth/better-auth.middleware.ts`) to `v1/auth/{*path}`, so the
+handler lives at `/v1/auth/*` (every path outside `/v1` is the panel's `index.html`). It needs an
+unparsed body, so `main.ts`'s JSON and urlencoded parsers skip `/v1/auth`, as they skip
+`/v1/webhooks`. Under Nest's middleware Express has already split the path into `baseUrl` and a
+`url` without the query string, and better-call rebuilds the request from those two, so the
+middleware restores `req.url` from `req.originalUrl` (and empties `baseUrl`) before handing over;
+without it every query parameter of a `GET` under `/v1/auth` — the users list's role filter,
+search and paging — is silently dropped. Mounting in the module instead of `main.ts` means the e2e suites, which build the
+app through `Test.createTestingModule`, get it too. With `ADMIN_AUTH_ENABLED=false` no instance and
+no middleware exist. There is no global guard: the library's Nest wrapper registers one, which
+would lock the public flow, so it is not used.
 
-The spec's API-key scheme (`osk_live_…`, argon2id-hashed, scoped) is unbuilt; Entra SSO is what
-shipped instead (`feat: add azure sso for admin panel`).
+**ESM loader rule.** `better-auth` (pinned `1.7.25`) is ESM-only and the engine emits CommonJS, so a
+static `import` or a plain `import()` becomes a `require()` that fails. Exactly one module names the
+specifier, `src/auth/better-auth/load-better-auth.ts`: it loads the package through a dynamic
+`import()` the TypeScript emitter cannot rewrite (the mechanism `file-type` already uses in
+`src/storage/s3-object-storage.service.ts`), with `import type` for the types. Everything else takes
+runtime exports from `loadBetterAuth()` and depends on the `ADMIN_SESSION_VERIFIER` port, so unit
+specs never load the library; `load-better-auth.spec.ts` scans `src/` and fails if a second module
+names it.
+
+**Storage.** better-auth's tables (`user`, `session`, `account`, `verification`, `twoFactor`,
+`organization`, `member`, `invitation`) live in their own Postgres schema, `auth`, created by
+migration `0003_better_auth_schema.ts` with better-auth's own camelCase columns and no TypeORM
+entities. The instance reads them through its own `pg` pool (`search_path=auth`), closed on
+shutdown. `better-auth migrate` is never run, and `advanced.database.validateSchema` is off, so the
+library never diffs or touches the schema at runtime. Engine data carries no organization: an
+organization groups operators and grants permissions, and nothing in a query filters by it.
+
+**Guard.** `@AdminRoute(permission)` (`src/auth/admin-route.decorator.ts`) applies
+`AdminSessionGuard` (`src/auth/admin-session.guard.ts`), stores the permission as metadata and writes
+the cookie security scheme and the three refusals into the OpenAPI document in one step, so the two
+cannot disagree. The guard decides in this order:
+
+1. `ADMIN_AUTH_ENABLED=false`: record `unauthenticated` and let the request through.
+2. No valid session: `401 ADMIN_SESSION_REQUIRED`.
+3. Platform role `superadmin`: granted. Otherwise the member's role in the session's active
+   organization must hold the route's permission; no active organization, or a role without the
+   permission, is `403 ADMIN_PERMISSION_MISSING`.
+4. The `auth` schema unreachable at any step: `503 AUTH_UNAVAILABLE`, so an engine-side fault never
+   sends operators off to sign in again.
+
+**2FA (decision 5).** TOTP is opt-in: each operator turns it on or off for their own account
+(better-auth's `/two-factor/enable`, `/verify-totp` and `/disable`, all behind the password), and no
+route refuses an operator without it. Once it is on, a password sign-in answers `twoFactorRedirect`
+and the session starts only after the code. A user whose only account is `microsoft` has no
+password, so cannot turn it on: the tenant's Conditional Access is their only MFA, and the engine
+neither sees nor checks it. A deployment that enables Microsoft sign-in must require MFA in that
+tenant. The tenant id is a
+concrete GUID, never `common`, `organizations` or `consumers`, and the invitation match uses the
+Microsoft email claim, which is only safe inside one tenant.
+
+**Permissions.** One statement set, `ADMIN_PERMISSION_STATEMENTS`
+(`src/auth/domain/admin-permissions.ts`), is the contract between `@AdminRoute(...)` and the
+organization plugin's access control:
+
+| Resource     | Actions                    |
+| ------------ | -------------------------- |
+| `onboarding` | `read`, `review`, `export` |
+| `workflow`   | `read`, `write`, `publish` |
+| `connector`  | `read`, `write`            |
+| `encryption` | `read`, `write`            |
+| `audit`      | `read`                     |
+| `agreement`  | `read`, `write`            |
+
+| Role                          | Holds                                                                                            |
+| ----------------------------- | ------------------------------------------------------------------------------------------------ |
+| Organization `owner`, `admin` | Every permission above, plus the library's organization and member / invitation management       |
+| Organization `member`         | Every `read`, plus `onboarding:review`; no `write`, `publish` or `export`                        |
+| Platform `superadmin`         | Bypasses the organization check; user management without `impersonate`; may create organizations |
+
+`agreement:write` was added during the build: the first mapping left the two agreement writes
+behind `agreement:read`, which `member` holds. Route to permission, as the `@AdminRoute(` call sites
+state it:
+
+| Permission          | Routes                                                                                                                                                                                 |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboarding:read`   | `GET /v1/onboardings`, `GET /v1/onboardings/:id`, `…/:id/transitions`, `…/:id/agreements`                                                                                              |
+| `onboarding:export` | `GET /v1/onboardings/export`                                                                                                                                                           |
+| `onboarding:review` | `POST /v1/onboardings/:id/review/:action`, `POST /v1/onboardings/:id/pending-connector/reconcile`                                                                                      |
+| `workflow:read`     | `GET /v1/admin/workflows` and its `:workflowId`, `/versions`, `/versions/:version` and `/document` reads, `POST /v1/admin/workflows/compile`, `GET /v1/admin/step-types` and `/schema` |
+| `workflow:write`    | `POST /v1/admin/workflows`, `PUT` / `DELETE …/versions/:version`, `PUT` / `DELETE …/steps/:stepName/connector`                                                                         |
+| `workflow:publish`  | `POST /v1/admin/workflows/:workflowId/versions/:version/publish`                                                                                                                       |
+| `connector:read`    | `GET /v1/admin/connectors`, `GET /v1/admin/connectors/:connectorId`                                                                                                                    |
+| `connector:write`   | `PUT`, `PATCH`, `DELETE /v1/admin/connectors/:connectorId`                                                                                                                             |
+| `encryption:read`   | `GET /v1/admin/encryption`                                                                                                                                                             |
+| `encryption:write`  | `PATCH /v1/admin/encryption`, `PATCH …/rotation`, `POST …/keys`, `POST …/reencryption`                                                                                                 |
+| `audit:read`        | `GET /v1/admin/audit`                                                                                                                                                                  |
+| `agreement:read`    | `GET /v1/admin/agreements`                                                                                                                                                             |
+| `agreement:write`   | `POST /v1/admin/agreements`, `POST /v1/onboardings/:id/agreements`                                                                                                                     |
+
+That is 35 `@AdminRoute(` call sites. The agreement routes follow the same split:
+`POST /v1/onboardings/:id/agreements/:agreementId/accept` carries no `@AdminRoute`, because it serves
+the end user's own onboarding flow. It is also not gated on the onboarding's lifecycle status — an
+approved customer still has to be able to accept a new version of the terms. It is gated on the
+link already existing: a pair no start, submit, publish or operator link ever created is
+`404 AGREEMENT_NOT_FOUND`. Without that, the unguarded route would be a second way to create a link,
+and anyone holding an onboarding id could attach any published version to it and make the next
+publish of that family notify the client's endpoint.
+
+**Invite-only.** `databaseHooks.user.create.before` (`src/auth/better-auth/invite-only.hook.ts`)
+refuses to create a user unless a pending, unexpired invitation exists for that email (matched
+case-insensitively) or the call is server-side — the seed has no HTTP request in the hook context.
+An email sign-up (`/sign-up/email`) must also name that invitation by sending its id as
+`invitationId`: the id travels only in the invitation email, so knowing an invitee's address is not
+enough to register it first and accept the invitation as them. Naming it proves the mailbox, so the
+account is created with `emailVerified: true`. A Microsoft sign-up has no id to send; the provider
+vouches for the address, and any pending invitation for it is enough.
+The admin plugin's `createUser` is refused over HTTP (`/v1/auth/admin/create-user`) unless the email
+has a pending invitation, so accounts stay invite-only; only a server-side call bypasses the rule. It covers email sign-up and Microsoft implicit sign-up. The
+refusal is `403` with the fixed message `Sign-up is by invitation only.`, which does not reveal
+whether an invitation exists. Email sign-up stays technically enabled so an invitee can create a
+password; the panel's `/accept-invitation/:id` page drives it and sends the id from its URL.
+
+**Active organization.** `databaseHooks.session.create.before`
+(`active-organization.hook.ts`) gives a new session the user's oldest `member` row as its
+`activeOrganizationId` when it has none, so a single-organization member reaches admin routes
+without choosing one. The panel's organization switcher (`organization.setActive`) appears only for
+a user in two or more organizations.
+
+**Endpoints outside the guard.** better-auth's own `/v1/auth/admin/*` and `/v1/auth/organization/*`
+endpoints never pass `AdminSessionGuard`. A `hooks.before`
+(`auth-endpoint-guards.hook.ts`) refuses `/admin/set-role`, `/admin/ban-user` and `/admin/remove-user` when the change would
+leave no non-banned superadmin: `403 LAST_SUPERADMIN`. Role changes, bans and invitations made
+through these endpoints are not written to the audit trail; they are visible only in the `auth`
+schema.
+
+**Seed.** `SuperadminSeedService` (`src/auth/superadmin-seed.service.ts`) runs on application
+bootstrap. With `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD` set and no user holding the
+`superadmin` role, it creates one through the admin plugin's `createUser` and logs the email, never
+the password. A second boot finds the superadmin and does nothing. The seeded user is an ordinary
+credential user, with two-factor off until it turns it on.
+
+**Mail.** `AuthMailer` (`src/auth/auth-mailer.ts`) sends the invitation and the password-reset
+link through `nodemailer` on `AUTH_SMTP_URL` and `AUTH_MAIL_FROM`; locally that is MailHog. It is
+not a connector. The invitation links to `<origin>/accept-invitation/<invitation id>`, where the
+origin is the one the inviter's request came from when that is `ADMIN_PANEL_ORIGIN` (a panel served
+apart from the engine, such as `pnpm dev`), and `BETTER_AUTH_URL` otherwise
+(`src/auth/better-auth/invitation-link.ts`); an untrusted `Origin` never reaches the link. The reset
+mail is not awaited, so response time does not reveal which addresses exist; a failed send is
+logged as `AUTH_PASSWORD_RESET_MAIL_FAILED` with the user id.
 
 Configuration (`.env.dist` documents each inline): `ADMIN_AUTH_ENABLED` (default `true`; `false` is
-a local-only escape hatch the engine refuses at startup once `NODE_ENV=production`),
-`ADMIN_SSO_PROVIDER` (`azure` is the only implemented value — see `docs/EXTENDING.md` to add
-another), `AZURE_TENANT_ID` / `AZURE_API_AUDIENCE` (required and validated at startup once auth is
-enabled), and `ADMIN_REQUIRED_ROLES` (comma-separated Entra app-role allowlist, default `admin`,
-matched case-insensitively against the token's `roles` claim).
+a local-only escape hatch the engine refuses at startup once `NODE_ENV=production`). With it on,
+startup fails by name unless `BETTER_AUTH_SECRET` (at least 32 characters), `BETTER_AUTH_URL` (the
+engine's absolute http(s) URL, the base for cookies and redirects), `AUTH_SMTP_URL` and
+`AUTH_MAIL_FROM` are set. `AUTH_SUPERADMIN_EMAIL` / `AUTH_SUPERADMIN_PASSWORD` are optional, both or
+neither. `AUTH_MICROSOFT_CLIENT_ID`, `AUTH_MICROSOFT_CLIENT_SECRET` and `AUTH_MICROSOFT_TENANT_ID`
+are optional, all or none, and the tenant must be a GUID; the redirect URI to register is
+`<BETTER_AUTH_URL>/v1/auth/callback/microsoft`. The pair and the triple are validated even while
+auth is off. The secrets never reach the panel: `/config.js` carries only
+`VITE_AUTH_MICROSOFT_ENABLED`, derived from the triple, beside `VITE_AUTH_ENABLED`. The Entra-era
+variables — the SSO provider switch, the Azure tenant and audience pair, the required-roles
+allowlist and the panel's `VITE_AZURE_*` family — no longer exist.
 
 The manual review route predated admin sign-in and was open until 2026-11-01; it is now marked
-`@AdminRoute()` like every other operator action. The OpenAPI document tags it on its own
-(`Admin: manual review`) because it is a decision, not a read of admin data. Its
-`onboarding.manual_review_decision` audit row is still written as the `engine` actor; the guard's own
-`auth.*` row names the operator who called.
+`@AdminRoute({ resource: 'onboarding', action: 'review' })` like every other operator action. The
+OpenAPI document tags it on its own (`Admin: manual review`) because it is a decision, not a read of
+admin data. Its `onboarding.manual_review_decision` audit row is still written as the `engine`
+actor; the guard's own `auth.*` row names the operator who called.
 
 A request to a guarded route is refused as:
 
-| Status                  | When                                                                                                                              |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| 401 Unauthorized        | No bearer token, or the token fails signature/issuer/audience/expiry verification                                                 |
-| 403 Forbidden           | The token verifies but carries none of `ADMIN_REQUIRED_ROLES` — re-authenticating cannot fix this                                 |
-| 503 Service Unavailable | Entra's signing key set could not be reached, so the token was never judged — distinguishes an engine-side fault from a bad token |
+| Status                  | Code                       | When                                                                                                                                                                                                                                                                                                                  |
+| ----------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 403 Forbidden           | `ADMIN_ORIGIN_REFUSED`     | A write (not GET, HEAD or OPTIONS) whose `Origin` is neither `ADMIN_PANEL_ORIGIN` nor the engine's own (`BETTER_AUTH_URL`); checked before the session, so a forged same-site form post carrying the `SameSite=Lax` cookie is refused. A request without `Origin` is not a browser's and goes on to the session check |
+| 401 Unauthorized        | `ADMIN_SESSION_REQUIRED`   | No cookie, or the session is expired or revoked                                                                                                                                                                                                                                                                       |
+| 403 Forbidden           | `ADMIN_PERMISSION_MISSING` | The role holds no such permission, or the session has no active organization; signing in again cannot fix it                                                                                                                                                                                                          |
+| 503 Service Unavailable | `AUTH_UNAVAILABLE`         | The `auth` schema could not be reached, so the session was never judged                                                                                                                                                                                                                                               |
 
 Every decision on these routes, granted or refused, is written to the admin access audit trail
 (`packages/engine/src/auth/admin-access-audit.port.ts`), so it answers who read admin data, not only
-who was turned away. The write is best effort and is not awaited before the response, so a database
-outage is reported as `AUTH_AUDIT_WRITE_FAILED` on the engine's own logger instead of taking the
-admin endpoints down with it. That leaves writes still running once the response has gone out, so
-`AzureJwtGuard.onModuleDestroy` waits for the outstanding ones; Nest runs it before the hook that
+who was turned away:
+
+| Audit action                    | Written when                                                  |
+| ------------------------------- | ------------------------------------------------------------- |
+| `auth.access_granted`           | The route was allowed                                         |
+| `auth.origin_refused`           | A write from an untrusted `Origin`; metadata carries `origin` |
+| `auth.session_missing`          | No valid session (replaces `auth.token_rejected`)             |
+| `auth.two_factor_required`      | Legacy: written while TOTP was mandatory, no longer written   |
+| `auth.permission_missing`       | The role lacks the permission (replaces `auth.role_missing`)  |
+| `auth.verification_unavailable` | The auth store was unreachable                                |
+| `auth.access_unauthenticated`   | `ADMIN_AUTH_ENABLED=false` let the request through            |
+
+The row's `actorId` is the operator's user id and its metadata carries `method`, `email`,
+`platformRole`, `organizationId` and, for a refusal, `requiredPermission` (`connector:write`). It
+replaces the Entra identity (`objectId`, `userPrincipalName`, `tenantId`, `roles`); rows written
+before better-auth keep that shape and the panel's actor cell still renders them. The write is best
+effort and is not awaited before the response, so a database outage is reported as
+`AUTH_AUDIT_WRITE_FAILED` on the engine's own logger instead of taking the admin endpoints down with
+it. That leaves writes still running once the response has gone out, so
+`AdminSessionGuard.onModuleDestroy` waits for the outstanding ones; Nest runs it before the hook that
 destroys the data source, so a restart records the requests it was serving rather than dropping
 them.
+
+**In the panel.** `src/services/auth/auth-client.ts` is the one better-auth client (`baseURL`
+`<engine>/v1/auth`, credentials included, with the two-factor, organization and admin client
+plugins); `src/services/api/http-client.ts` sends the cookie and no `Authorization` header.
+`AuthGate` renders the sign-in screen (`SignInPage`: email and password, "Sign in with Microsoft"
+only when `VITE_AUTH_MICROSOFT_ENABLED` is true, a forgot-password request), the TOTP challenge
+(`TwoFactorChallenge`, with a backup-code fallback and "trust this device") for an operator who
+turned two-factor on. `/account` (the `Account` sidebar group) shows the signed-in operator's
+two-factor state and turns it on (`TwoFactorSetup`: password, QR code plus the secret as text,
+first code, backup codes shown once) or off (`DisableTwoFactorForm`: password). An operator without a
+password account (Microsoft only) sees why the setting is not theirs to change.
+`/reset-password` takes the mailed link and `/accept-invitation/:id` (outside the gate) lets an
+invitee sign up with a name and password, accept, and continue to the panel. The `Admin` sidebar
+group holds `/organization` (members, role changes, removal, pending invitations, invite form) for
+the active organization, and, for `platformRole === 'superadmin'` only, `/platform/users` (search,
+platform role, ban and unban, revoke sessions, temporary password) and `/platform/organizations`
+(create one, with the creator as its owner). The organizations page lists only the organizations
+the signed-in superadmin belongs to. The panel does not hide actions a role cannot perform: it
+reacts to the `403`. With `VITE_AUTH_ENABLED=false` the gate renders the panel directly.
+
+Two writes refresh more than their own list. Creating an organization makes the creator its owner
+and changes what every admin read may return, so `createOrganization` awaits the invalidation of
+every query (`awaits: [[]]`). The client refreshes the session on its own after the two-factor,
+organization-create, set-active and accept-invitation calls, but not after the admin plugin's
+`setRole`; `setUserRole` therefore emits `$sessionSignal` itself, so a superadmin who changes their
+own platform role sees the sidebar change without reloading.
+
+Out of scope, so not built: data tenancy, impersonation, passkeys, audit rows for writes through
+better-auth's own endpoints, permission-aware UI, per-request session caching, shared-storage rate
+limiting across replicas (better-auth's default is per process), `/v1/auth/*` in the OpenAPI
+document, machine-to-machine access to admin routes (a BFF that used Entra client credentials has no
+replacement yet), and a forced password change for the seeded superadmin.
 
 ### The OpenAPI document
 
@@ -3121,7 +3313,7 @@ hook, so nothing reaches for the network. That is what lets `openapi-document.sp
 `pnpm test`: it rebuilds the document and asserts it equals the committed file, then checks
 completeness — every one of the 33 routes present, unique `operationId`s, a summary and exactly
 one declared tag per operation, one success response with a schema (or a `204`), every path
-parameter declared, the bearer requirement on every `Admin:` operation and on nothing else, no
+parameter declared, the cookie security requirement on every `Admin:` operation and on nothing else, no
 dangling `$ref`, every property typed or deliberately described, and no `nullable` left. What it
 cannot see is a response property that was never decorated; that rests on review.
 `test/openapi.e2e-spec.ts` checks that the served JSON equals the committed file and that no UI is
@@ -3132,11 +3324,13 @@ rendering is the only one, and the drift test compares the parsed documents.
 
 ## 12. Admin panel
 
-`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod, nuqs. Three sections, built from
+`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod, nuqs. Sections built from
 `ADMIN_SECTIONS` in `src/app/navigation.tsx`: **Onboardings**, a filterable, read-only list
 served from `GET /v1/onboardings` with a details page per onboarding and an Export CSV download; **Logs**, a
 filterable, read-only view of the audit trail (§8); and **Connectors**, which writes connector
-settings. **Workflows** also writes, but only drafts (Workflows, below).
+settings. **Workflows** also writes, but only drafts (Workflows, below). An **Admin** group adds
+**Organization** for everyone and, for a superadmin only, **Users** and **Organizations**, and an **Account** group holds the signed-in operator's
+two-factor setting (see Authentication, §11).
 
 Every engine read and write fails with one class, `ApiError` (`src/services/api/api-error.ts`),
 registered as TanStack Query's `defaultError`
@@ -3187,6 +3381,26 @@ outlined at weight 300, imported one SVG per glyph through `vite-plugin-svgr`: t
 cost a 4 MB variable woff2 for a handful of glyphs, and the design's Google Fonts link is ruled out
 by the same no-CDN rule as the webfonts in
 `src/app/fonts.css`.
+
+Every read's loading, failure and empty state goes through the state kit in `src/components/ui/`
+([0052](decisions/0052-admin-panel-state-kit.md)), never a bare `StatusRegion` line. `Loader` is a
+spinner, `block` (32 px, centred in its container) or `inline` beside a visible label; it fades in
+after 150 ms and has no minimum display time, and its label is announced at once. `EmptyState`
+(`empty`, `noMatch`) and `ErrorState` (`error`, `notFound`, `denied`) draw one `page` or `section`
+layout through the private `StateLayout`; `page` is centred on both axes in a flex-column container
+and has an `h2` title, `section` is a bordered in-flow row with an `h3`. `EmptyState` and `ErrorState`'s `notFound`
+are `role="status"`, the other `ErrorState` kinds `role="alert"`, so one live region announces each state. `LoadFailure` maps an `ApiError` onto an `ErrorState`: 403 is
+`denied` ("No access to …"), 404 is `notFound` when the caller gives its copy, everything else,
+a 401 included, is `error` ("Unable to load …") with **Retry** when `onRetry` is passed. A table
+keeps its column headers in every state: `TableResults` takes a `state` that renders under them in
+place of the rows and the footer (count and pager), so the footer appears only with rows. Headers,
+tabs and filters stay on screen while a page loads, and the filters are disabled. Only a part
+fetched separately has its own state: the activity log a `section`, a workflow version's tab content a `page` that fills the tab; data fetched together loads as one Loader. Connectors and Encryption show a block `Loader` or
+a `LoadFailure` page with Retry, and their header summary renders only once loaded; an empty
+adapter list is an `EmptyState` page, an empty key list an `EmptyState` section. Workflow details
+shows only the id in its header while the versions list loads, then a block `Loader`, a `notFound`
+page with a **Back to workflows** link, or a `LoadFailure` page; a version that does not exist or a
+workflow with no published version is a `page` message. `section` is only for a part nested in a page whose other parts stay usable.
 
 The Onboardings section is five bands: the header, a status tab strip, the filter panel, the
 scrolling table, and a footer carrying the live status line and the pager. Status is a strip of
@@ -3252,20 +3466,24 @@ single key's parser can express — `occurredFrom <= occurredTo` — is plain Ty
 `filter-audit-events.ts`, read two ways: `findOccurredWindowError` gives `AuditPage` the message it
 shows inline and refuses to Apply on, and `toAuditEventQueryFilters` drops a window it refuses back
 to absent, so a URL stating a backwards one narrows nothing by it while every other criterion still
-applies. Onboardings has no cross-field rule, only three single-control predicates —
-`isRequestableWorkflowVersion`, `isRequestableConnectorId` and `isRequestableParkedBefore` — folded
+applies. Onboardings has no cross-field rule, only two single-control predicates —
+`isRequestableConnectorId` and `isRequestableParkedBefore` — folded
 by `findDraftError` into the one refused field and message `OnboardingsPage` blocks Apply on and
-the panel's single message element (`#onboarding-filters-error`) describes; each shares its
-validity check (`isValidWorkflowVersion`, `isValidConnectorId`, `toIsoInstant`) with the URL's own
+the panel's single message element (`#onboarding-filters-error`) describes; the workflow version is
+not among them, since its picker cannot produce a malformed one, though the URL parser still rejects
+one a hand-edited link carries. Each shares its
+validity check (`isValidConnectorId`, `toIsoInstant`) with the URL's own
 parser for that key, so a control and the URL cannot disagree about what is requestable. Absence has one representation throughout,
 `null`: a criterion the URL omits, states blank, or states unparseably reads as `null` and stays
 `null` into the axios `params`, which drops it — axios would send `''` as a bare `key=`, so blank
 has to resolve to absent at the boundary rather than be filtered out downstream. Zod plays no part
 in either section's filter path, only in response-payload validation under `api/*.ts`. See
 `docs/decisions/0018-nuqs-for-admin-panel-search-params.md`. `NuqsAdapter` (from
-`nuqs/adapters/react-router/v8`) is mounted in `src/app/App.tsx` inside `BrowserRouter`, wrapping
-`Routes`, not in `AppProviders` — the adapter reads react-router's own hooks, which
-`AppProviders`, rendered above the router, cannot give it.
+`nuqs/adapters/react-router/v8`) is mounted in `src/app/App.tsx` as the data router's root route
+element, wrapping an `<Outlet />`, not in `AppProviders` — the adapter reads react-router's own
+hooks, which `AppProviders`, rendered above the router, cannot give it. The router is built with
+`createBrowserRouter` inside a component under `AuthGate`, so pages can call `useBlocker`
+(`docs/decisions/0050-admin-panel-data-router.md`).
 
 The page header carries the design's **Export CSV** button: an outline button with a download icon
 calls `GET /v1/onboardings/export` with the applied filters (never the draft, and without
@@ -3274,7 +3492,7 @@ once a list fetch has succeeded — hidden while the list is loading or after it
 is labelled with that list's `pagination.total` (`Export 41 as CSV`), which is the export's row
 count for the same criteria. It is disabled while a request is in flight, while a draft filter
 is refused (`findDraftError`) and when the total is zero, and reads `Exporting…` meanwhile. The download goes through axios as a blob (`fetchAdminOnboardingsCsv`,
-`useOnboardingsExport`) because a navigation could not carry the Entra bearer token; a failure is an
+`useOnboardingsExport`) so a failure is an
 `Export failed` toast, and since a broken connection rejects the request, no truncated file is ever
 saved. The panel names the file itself, `onboardings-<yyyy-MM-ddTHH-mm>.csv` in local time (`toDateTimeLocalValue`, `:` swapped for `-`), and does
 not read `Content-Disposition`.
@@ -3283,9 +3501,23 @@ Two things the design draws are deliberately absent, each for want of an endpoin
 column of masked contact details and per-status counts on the inactive tabs. A third, the "Started"
 date range, is absent because `ListAdminOnboardingsQueryDto` accepts no date
 criteria — `createdAt` is returned and is the query's primary sort key, but nothing filters on it.
-Workflow and version stay free-text inputs rather than the design's dropdowns — turning them into
-one is out of this change's scope, even though `GET /v1/admin/workflows` (§12, below) now exists to
-populate one. The `workflowId` parser is shared rather than duplicated: it moved to
+Workflow and version are pickers, not free text. **Workflow** is a `Combobox` fed by
+`GET /v1/admin/workflows` (`workflowQueries.listPages`), searched as the operator types (debounced
+300 ms, trimmed, cut to the engine's 100-character `search` limit) and loading the next page on
+scroll; families with only drafts are left out, since no onboarding can run on a draft. **Workflow
+version** is a `SelectFilterField` of the workflow's non-draft versions, newest first, labelled
+`v<n> — <status>` so a retired version stays pickable, from `workflowQueries.versions`. It is
+disabled until a workflow is picked and while its versions load — unless a version is already
+drafted, so its any-option can always clear it — and picking another or clearing the
+workflow clears the drafted version in the same update (`OnboardingsPage`'s `updateFilter`). A
+workflow id the loaded pages do not hold — a link, or a workflow further down the list — is looked
+up by exact id so it shows its name, and otherwise shows as the raw id, so the control always
+reflects the committed filter. A version the select has no option for — a version-only link, a
+draft, or a failed versions request — is added as `v<n>` for the same reason. Both pickers read through `useWorkflowFilterOptions`, which
+`OnboardingFilters` calls. A failed list shows "Could not load workflows." in the combobox; failed
+versions leave the select reading **Versions unavailable**, disabled unless a drafted version still
+needs clearing. A pick is still a draft until
+Apply, and `useDebouncedValue` moved to `src/lib/` because two routes now use it. The `workflowId` parser is shared rather than duplicated: it moved to
 `src/lib/onboarding-search-params.ts`, the same module the Workflows page's In progress link
 serializes with ([0032](decisions/0032-admin-workflows-list.md)).
 
@@ -3344,13 +3576,15 @@ value formatter in `src/lib/audit-metadata.ts`, which the Logs table's `AuditMet
 from too. The status
 chip is shared the same way rather than by a second tone map: `OnboardingStatusChip` moved out of
 the list's table row into `app/onboardings/components/`, and the details header renders it at
-`size="status"`. The page's status line (`StatusRegion`, inside the header band) reports only what
-is
-happening to the page and what could not be read — loading, a failed read, an id matching
-nothing — and renders not at all once the page is read: what the page holds, each band states
-itself, including the caveat that the trail was truncated, which is the "Path taken" caption
-rather than a status line of its own. A review decision's outcome is a toast (Toasts, below); the
-status line never carries it. There is no Collected-data
+`size="status"`. The header band has no status line: the breadcrumb, the id and Reload stay on screen,
+and the body shows a block `Loader` ("Loading onboarding…"), a `LoadFailure` page with Retry, or
+an `ErrorState` `notFound` ("Onboarding not found") with a **Back to onboardings** link when the id
+matches nothing. `useAdminOnboardingDetails` returns the `ApiError` itself. The activity log
+loads and fails on its own: an inline `Loader` ("Loading activity…"), a `LoadFailure` section
+whose body adds "The rest of this onboarding is up to date." with Retry, and an `EmptyState`
+section ("No activity yet"). What the page holds, each band states
+itself, including the caveat that the trail was truncated, which is the "Path taken" caption.
+A review decision's outcome is a toast (Toasts, below). There is no Collected-data
 tab: `GET /v1/onboardings/{id}` returns the record without its collected data, so the design's PII
 sections have nothing to read from. The page draws no workflow graph; `WorkflowGraph` now lives in
 `src/app/workflows/details/` and renders on the workflow details page (Workflows, below).
@@ -3438,7 +3672,7 @@ Reload both refetch, which is how an operator brings it current.
 The Logs page carries its own list of absences, again each for want of a parameter the audit
 endpoint does not accept: **Export** (the audit endpoint has no export route, unlike
 `GET /v1/onboardings/export`); **Workflow** and **Version** (`ListAuditQueryDto` declares neither `workflowId` nor
-`workflowVersion` — unlike Onboardings, where the two stay free-text inputs, the audit endpoint has
+`workflowVersion` — unlike Onboardings, where the two are pickers, the audit endpoint has
 no criterion of any kind for either, so both are omitted outright); **Persona / applicant** (no
 applicant projection anywhere in the engine, the same call as the Onboardings applicant column);
 the **Outcome** column (reasoned above: no field on `AuditEvent`, and the design's values are
@@ -3459,10 +3693,11 @@ from the URL when `VITE_NODE_ENV` is `production`, since that engine never loads
 unpublished draft**); `search`, `scope`, `hasDraft` and `page` are committed to the URL by
 `useWorkflowsFilters`, the section's own nuqs call. The page size is fixed at 20 with no page-size
 field and no `limit` param, unlike Onboardings and Logs. Applying an unchanged filter set does not
-refetch; Reload calls `refetch()` explicitly. The status line reads "Showing {from}–{to} of {total}
-workflows.", narrows to "No workflows match "{search}"." or "No workflows match these filters."
-under a search or any other applied criterion, and "No workflows loaded." with nothing applied at
-all.
+refetch; Reload calls `refetch()` explicitly. With rows the footer reads "Showing {from}–{to} of
+{total} workflows."; otherwise the table's `state` shows a block `Loader`, a `LoadFailure` with
+Retry, `EmptyState` `empty` ("No workflows yet", with a **New draft** action), or `noMatch`
+("No workflows match "{search}"" under a search, "No workflows match these filters" under any
+other criterion) with **Reset filters**.
 
 A row's **Workflow** cell links the mono `workflowId` to the details placeholder, with `name`
 underneath when the family has one; **Scope** is plain mono text; **Serving** reads a mono "vN" or a muted "Not
@@ -3482,12 +3717,18 @@ highest `published` version. Without `?version=`, a family with no published ver
 does not hold, or no `?version=` with nothing published or drafted, replaces the tabs with "Version N does not exist." or
 "This workflow has no published version." and keeps the picker; neither tab renders, and no pinned definition or document
 is read. A list served from cache that lacks the pinned version is re-read once first, since a
-version may have been published elsewhere since; the page shows its loading state meanwhile. A 404 on the definition read itself, the list being stale, gives the same message inside the Graph tab. A
+version may have been published elsewhere since; the page shows its loading state meanwhile. A 404 on the definition read itself, the list being stale, gives the same message inside the Compiled graph tab. A
 `retired` version is listed and selectable. `version`, `step` and `view` live in the URL (nuqs, `history: 'replace'`, `shallow: false`); an
 unknown `step` falls back to the definition's `initialStep`, and switching version clears `step`
-and `view`, so every version opens on its initial step and its default tab. `?view=graph|json` picks
-the tab (`VersionTabs`, Base UI `Tabs`, Graph | JSON); a published or retired version defaults to
-Graph and a draft to JSON, and any other value falls back to that default. Under the title, a "View onboardings →" line, the
+and `view`, so every version opens on its initial step and its default tab. `?view=authored|compiled|json`
+picks the tab (`VersionTabs`, Base UI `Tabs`: "Authored graph", "Compiled graph", "JSON"); a published
+or retired version defaults to `compiled` and a draft to `authored`. The former `?view=graph` is an alias
+for `compiled`, so old links still open the compiled graph; any other value falls back to the default.
+The "Authored graph" tab of a published or retired version is `VersionCanvas`, the same `AuthoredCanvas`
+read-only, over `workflowQueries.document`, fetched once the tab mounts. The header (`WorkflowDetailsHeader`) puts the breadcrumb
+and the title, which wraps, on the left, and under the title a line with the version's status chip, the editor's note and the
+onboardings link; on the right the version picker sits above the `actions` row, which wraps onto further rows when the title
+column reaches its minimum width rather than dropping under the title. On that line, a "View onboardings →" link, the
 onboarding details header's Workflow line mirrored, links to `/onboardings?workflowId=<id>` through
 the same shared serializer — the workflow only, never the shown version, and only once the versions
 have loaded. It is hidden on a draft, which cannot start an onboarding. It sits there rather than among the header's controls, which the design reserves for the
@@ -3495,9 +3736,22 @@ picker and Edit as draft. The graph, with the
 inspector, is `VersionGraph`, which draws `WorkflowGraph` under `src/app/workflows/details/components/` (dagre, top to bottom), with selection
 controlled by intercepting React Flow's node `select` changes. `WorkflowZoomControls` (zoom out, zoom level, zoom in,
 Fit) float in a React Flow `Panel` at the canvas's top right, so the draft graph has them too and the stats band above
-holds only the counts. Every edge except a plain, unguarded `success` carries a label
+holds only the counts. When one authored step compiled to several steps, the compiled graph draws a dashed
+frame around them (`WorkflowGroupNode`), tinted by the step type's category and labelled
+`<step> · <type>`; the frames come from each compiled step's `source`, and a workflow with none lays
+out as before. The inspector names the same source under the step's name, as `From <step> · <type>`, with no friendly type label. Every edge except a plain, unguarded `success` carries a label
 (the condition, the `manual.*` action, the status with its reasons, or `<status> · fallback`),
-capped at 22 characters and expanded in place on hover or focus while kept inside the canvas; the
+capped at 22 characters and expanded in place on hover or focus while kept inside the canvas.
+Edges are routed like the Authored graph's: dagre ranks every step, loops included, and each rank
+becomes a top-aligned row. Each step's edges leave from exits spread along its bottom, ordered by
+where each edge heads so they never cross there, and `routeLines` in `edge-routing.ts` routes them.
+An edge that skips rows, loops included, keeps to the column dagre threaded it down (`columnXs`),
+slid past a step in its way and never shared with another line; a loop with no clear column
+climbs an outer lane. Each label is boxed and sits on its own edge, at the first spot along it
+clear of steps, other labels and other lines (`placeLabels`). A pair joined both ways is two
+edges. Only a loop back, an edge to a step at or above its source, is dashed, as on the Authored
+graph; an edge's status shows in its label, not its stroke. Each gap is `RANK_GAP` plus a label height per labelled edge
+leaving the row above it (`RowSpacing`), so only a gap with labels grows. The
 selected node is drawn with an outline, so its content never shifts. From the `xl` breakpoint the
 graph and inspector sit side by side and only the inspector scrolls; below it they stack and the
 area scrolls as a whole. On the JSON tab of a published or retired version, `VersionDocument`
@@ -3506,8 +3760,7 @@ the stored document in a read-only `JsonEditor` (`components/JsonEditor.tsx`, sh
 editor; read-only is CodeMirror's `EditorState.readOnly`, so Backspace and Delete change nothing), with
 a **Copy JSON** button that toasts "JSON copied." or the clipboard's failure, including a missing
 `navigator.clipboard` outside a secure context. While the unpinned
-definition is still loading the JSON tab shows "Loading version…", and a failure of that read the Graph tab's failure
-with Retry. App-wide, the `--font-display` and `--font-body` stacks in
+definition is still loading the JSON tab shows a block `Loader` ("Loading version…"), and a failure of that read shows a `LoadFailure` page with Retry, as on the Compiled graph tab. App-wide, the `--font-display` and `--font-body` stacks in
 `tailwind.css` name `Inter Tight Variable` ahead of `Inter Tight`, the family the self-hosted
 variable font registers. The inspector beside it shows the selected step's fields,
 connectors (identity and field mapping) and outgoing transitions. The inspector omits connector
@@ -3575,9 +3828,10 @@ defaults to the latest published one, else the latest retired (`defaultForkVersi
 version reads `workflowQueries.document(id, v)` and prefills the form; choosing the
 selected one again, or leaving Fork for Empty and coming back, keeps the operator's edits; coming back from a read upload clears the upload and prefills the source again. A `users` family keeps its ID and takes Version `max + 1` over every listed
 version of any status (`nextWorkflowVersion`); a `built-in` or `fixtures` family gets an empty
-ID, the hint "Built-in workflows are copied under a new ID." and Version 1, since a
-new ID is a new family. Name comes from the document, and editing the ID never changes the
-Version. A hint, "Changing the ID creates a new workflow.", sits in the ID field's hint slot for a `users` source.
+ID, the hint "Built-in workflows are copied under a new ID, with their connector source keys
+renamed." and Version 1, since a new ID is a new family. Name comes from the document, and editing
+the ID never changes the Version. A hint, "Changing the ID creates a new workflow and renames its
+connector source keys.", sits in the ID field's hint slot for a `users` source.
 While a chosen source's reads load, including the lookup of a preselected family, the identity fields and Create are disabled and the combobox shows its loading row; a late document never prefills while another source is chosen. A failed read shows a
 `StatusRegion` with Retry. The **draft-exists guard** fires when the trimmed ID equals the
 source's and its versions list holds a draft: a notice band (`role="status"`) above the ID row reads "This
@@ -3585,7 +3839,12 @@ workflow already has draft v{N}. Open it, or change the ID to create a new workf
 it" linking to `/workflows/<id>?version=N`; the footer's primary action becomes **Open draft v{N}**
 (a link to the same path), Create is disabled and outlined; the engine's
 `409 WORKFLOW_DRAFT_EXISTS` toast stays as the fallback. The schema's `fork` arm posts
-`{ ...fork.document, id, version, name? }` and rejects a form with no source ("Choose a workflow
+`{ ...fork.document, id, version, name? }`. Under a new ID it first renames the `sourceKey` the engine reads —
+`config.sourceKey` of a `kyc-identity-verification` step, and `config.sourceKey` of each connector and
+its `fallback` entries on a `custom` or `connector-call` step and on a `notify` step's `connector` (`renameSourceKeys`) — to one derived from that ID — `my-flow` → `my_flow`, then `my_flow_2`
+for a second distinct key — since only one workflow id may own a key and the copy would otherwise
+fail its first publish with `409 WORKFLOW_SOURCE_KEY_CONFLICT`; steps that shared a key still share
+one, and a fork under the same ID keeps its keys. It rejects a form with no source ("Choose a workflow
 and a version."). All three sources validate through one
 `zod` schema, `utils/new-draft-schema.ts`, wired with `zodResolver`
 ([0035](decisions/0035-zod-schemas-for-client-validated-forms.md)): the engine's save
@@ -3609,24 +3868,34 @@ The button still shows when the family has a draft, and the guard covers it.
 The dialog's pickers are Base UI wrappers in `src/components/ui/`
 ([0031](decisions/0031-base-ui-toasts-for-admin-panel-mutation-outcomes.md)), generic and unaware of workflows.
 `Select` is controlled, takes typed `{ value, label }` items and is styled like the native select
-(`h-10`, mono text). `Combobox` is server-driven: the parent owns the input text, the selected
+(`h-10`, mono text by default; `font="text"` switches to body text). `anyOptionLabel` adds a first
+item with value `null`, and `onValueChange` reports `null` only when it is set. The filter panels use
+it too: `SelectFilterField` and `DateTimeRangeField` render it with `font="text"`, and
+`SelectFilterField` passes its `anyOptionLabel` through. `Combobox` is server-driven: the parent owns the input text, the selected
 item and the filtering (`filter={null}`), and it shows loading, error and empty rows.
 
 When the selected version is a `draft` (a pinned `?version=`, or the draft a family with no published
 version opens on), `WorkflowDetailsPage` renders `DraftEditor`
 (`src/app/workflows/details/components/DraftEditor/`) in place of the read-only tabs; it has the same
-Graph | JSON `VersionTabs`, defaulting to JSON, with the JSON panel kept mounted while hidden so the
-editor's undo history survives.
+Authored graph | Compiled graph | JSON `VersionTabs`, defaulting to Authored graph, with the JSON
+panel kept mounted while hidden so the editor's undo history survives.
 The page's `detail` query is disabled while the pinned status is `draft` or still unknown behind a
 loading versions list, so an invalid draft is never compiled for the page. `DraftEditor` reads
-`workflowQueries.document` and handles pending, error with Retry and 404 ("This draft no longer
-exists."). A document whose `status` is no longer `draft` (published or retired after the versions
+`workflowQueries.document` and handles pending ("Loading draft…"), a `LoadFailure` page with Retry and 404 (an `ErrorState` `notFound`
+page, "This draft no longer exists"). A document whose `status` is no longer `draft` (published or retired after the versions
 list was read) opens no editor: it says so and invalidates `workflowQueries.versions`, and the
 refetched list moves the page to the read-only tabs. The text is edited in `JsonEditor`, CodeMirror 6
 (`codemirror` `basicSetup`, `@codemirror/lang-json` with `jsonParseLinter`, `@codemirror/lint`),
 themed from `@theme` variables. The header's `actions` slot holds, for a draft:
 
 - **Discard** resets the text to the last fetched document; it and Save are disabled while clean.
+- **Leaving with unsaved changes** (`UnsavedChangesGuard`, `useBlocker`): a navigation to another
+  path or another `?version=` while dirty opens "Leave without saving?" with **Stay** and
+  **Discard and leave**; a tab or step change is not blocked, nor is the navigation a successful
+  write makes (a save that moves the draft, a delete, a publish), which marks the editor written first;
+  the next edit clears that mark.
+  A navigation while a validate or save is still pending is blocked. While dirty, a reload or tab close
+  gets the browser's `beforeunload` prompt.
 - **Publish**, after Save draft, is `variant="primary"` and disabled while a request is pending,
   and while the buffer is dirty. The engine publishes the stored
   row, so only a saved buffer can be published; while dirty, the header note reads "Unsaved changes ·
@@ -3655,14 +3924,16 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
   both versions lists, navigates with `replace` to the new `?version=`, and removes what no longer
   exists: the old `detail(id, v)`, or the whole old family when the rename emptied it (the engine
   deleted it).
-- **Graph tab** (`DraftGraph`) draws the compiled `workflow` of the shared compile result, with
+- **Authored graph tab** (`DraftCanvas`, over `AuthoredCanvas`) edits the draft's authored document;
+  see "The draft canvas" below.
+- **Compiled graph tab** (`DraftGraph`) draws the compiled `workflow` of the shared compile result, with
   `?step` selecting a step as on a published version. Its inspector is wholly read-only:
   `StepConnectors` gets `readOnly`, so no connector `<select>` or Restore button is
   offered, since a selection binds published versions, never the draft's text; the
   header reads "Read-only here — edit the draft, connectors included, on the JSON tab". It never compiles while typing: when the tab
-  opens with no result held it runs the same compile as Validate, and shows "Compiling…" meanwhile;
-  a syntax error or an engine refusal shows "This draft does not compile. Fix it on the JSON tab."
-  with a Show JSON button, while a failed request (auth, network, 5xx) shows "Unable to compile
+  opens with no result held it runs the same compile as Validate, and shows a block `Loader` ("Compiling…") meanwhile;
+  a syntax error or an engine refusal shows an `ErrorState` page ("The canvas cannot draw this
+  document", the reason, then "Fix it in the JSON tab.") with an **Open JSON tab** button, while a failed request (auth, network, 5xx) shows "Unable to compile
   this draft" with a Retry that drops the held failure and compiles again. The result is shared with Validate, Publish and `ValidationResult`, kept
   only while the text is unchanged, so an edit or Discard clears it and drops a compile still in
   flight. The graph is never stored
@@ -3672,6 +3943,143 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
   other versions, and to `/workflows` otherwise, then removes the deleted `detail(id, v)` — or the
   whole family, when it was the last version — and invalidates the versions list of a family that
   remains.
+
+**The draft canvas**
+([0051](decisions/0051-admin-panel-graph-workflow-editor.md)). `AuthoredCanvas`
+(`details/components/AuthoredCanvas/`, React Flow) draws the authored document and holds no state of
+its own: every edit hands the whole next document to `onChange`. `DraftCanvas` parses the editor's text
+(`parseDocument`), passes `doc`, `readOnly={false}`, `failure` and the undo and redo props, and writes
+each change back as `JSON.stringify(next, null, 2)` into the same text the JSON tab edits, so Save,
+Validate and Discard need nothing new. Text that is not a document shows an ErrorState page titled "The canvas cannot draw this
+document", its body the reason followed by " Fix it in the JSON tab." instead.
+
+- **Mapping.** A node is an authored step, an edge a wired port (`edges.<port>`, or a condition arm
+  or transition). A step's position is `meta.position` (`{ x, y }`, snapped to an 8 px grid);
+  `meta` is carried and never read by the engine. A step with none is placed by the layout, so a
+  hand-written document opens laid out. Once any step has a position, every canvas edit writes one for
+  every step at its shown spot (`pinPositions`), so undo restores a whole layout, never a mix. A
+  hand-written `meta.position` is overwritten when that step is dragged.
+- **Layout.** `canvas-layout.ts` ranks steps with dagre and re-places each rank under the ports that
+  lead to it; `edge-routing.ts` routes edges orthogonally, with retry loops on the right; an edge that turns
+  early comes down at whichever slot on its target crosses the fewest other lines. The
+  toolbar's **Auto-arrange** lays out again and, when the document has positions, writes the new
+  layout to every step's `meta.position`.
+- **Editing.** The palette lists every registered step type by category (click or drag to add).
+  A clicked step goes under the selected one, or mid-pane, and the canvas pans only when it lands
+  out of view; a dropped step stays where it was dropped, and a drop never pans. Dragging from a port wires it, the step panel and each port's `Select` rewire it, and Backspace or
+  Delete removes a step or edge; a `custom` step's transitions are its ports, so the panel's Ports
+  band adds, removes, reorders and edits them (status, `when`, a rejection's `reason`, `webhook`,
+  target) and its settings form leaves `transitions` out (`StepPanel/CustomTransitions.tsx`); deleting a step also drops the `agreements` that name it. A
+  composable type dropped on a collect step, or picked in its "Include a section" select, becomes a
+  section; each type appears once per step, the step's own type included. Node
+  summaries show the terminal outcome, the connector id, or the status and field count, and a
+  `scores: risk, trust` line when the step has scoring rules. Undo and redo (`useEditHistory`, up to 100 whole-text versions, edits
+  within 500 ms merged) are in the toolbar and on Cmd/Ctrl+Z (redo: Shift+Z or Y). From the
+  keyboard, Enter or Space on a focused step opens its inspector, and the arrow keys move the
+  selected step, written to `meta.position` once the key is released.
+- **Inspector forms.** `SchemaForm` generates each step type's config form from the authored JSON
+  Schema (`utils/config-schema.ts`) and writes into the document. They do not use react-hook-form,
+  an exception to 0019 for the canvas only. A field's `validation` gets its own editor per field
+  type (`SchemaForm/FieldValidation/`).
+  - **Boolean:** a choice between any value, must be true and must be false.
+  - **Text, number and date:** allowed values are "pick one of" (`oneOf`) or "pick several of"
+    (`manyOf`), never both.
+  - **Number:** each bound has an inclusive toggle, which switches between `minimum` and
+    `exclusiveMinimum` (and the same for maximum).
+  - **File:** the size is entered in MB. Image width and height show only while every content type
+    is an image; they are dropped when a non-image type is left (on blur) or the last image type is
+    removed, never while a type is being typed.
+
+  A connector binding's `id` is a select over the engine's connectors of the binding's type: its
+  own `type`, else the slot's `defaultType`, else the slot's only type
+  (`SchemaForm/connector-binding.ts`). Fallback entries are narrowed to the primary's type, since
+  the compile refuses any other, and their own `type` shows only when it disagrees. Changing the
+  primary's resolved type drops every `id` in the chain, because an adapter has exactly one type.
+
+  Each map entry, such as a form's field, is a card headed by its editable name. A rename keeps
+  the entry's position and refuses an empty or duplicate name. Renaming a field of a step's own
+  `config.fields` is one undoable edit (`renameField`) that also rewrites every reference to it —
+  `fieldMapping` sources included — unless another step stores a field of the same name
+  (built-in, declared or included; a step that does not compile falls back to its declared
+  fields), when only the key changes and the card says "References not updated: another step has
+  a field with this name". An `http-call`'s `{{payload.<key>}}` placeholders name payload keys,
+  not fields, so a rename never rewrites the request: a placeholder left reading a field that no
+  longer exists shows as the step's problem ("payload `<key>` reads missing field `<field>`").
+
+  An `http-call` step's `request` and `response` are only `{ type: 'object' }` in ddl-schema, so
+  the panel substitutes its own schema for them (`utils/http-request-schema.ts`, mirroring the
+  engine's `http-request-config.ts`). Headers, query and an object body are then edited as key–value
+  rows; a body that is an array or a single value keeps the plain JSON editor. Settings whose name
+  does not explain them carry one line of help, all written in `constants/config-hints.ts` and
+  keyed by owner (step config, connector declaration or field descriptor), step type and key.
+
+  A setting that fails its type's schema gets a red one-line reason under its control, with
+  `aria-invalid` and `aria-describedby` on the control. `utils/check-config.ts` checks the config
+  against the same JSON Schema the form is drawn from, without `ajv`: `required`, `type`, `enum`,
+  `minLength`, `minimum`/`maximum`, `pattern`, `minItems`, `uniqueItems`, nested objects, arrays and
+  maps. The reasons are short ("Required", "Must be 100–30000", "Not one of the allowed values"),
+  and each failure is keyed by its path in the config (`request.url`, `docs[1].type`). The step's
+  problem list names those settings, as `invalid config: channel (Not one of the allowed values)`;
+  a config that fails only a rule `parseConfig` holds in code, such as a decision's duplicate
+  branches, keeps the bare `invalid config: <CODE>`.
+
+- **Scoring rules.** A step's own `scoring` rules (see "Scoring") are edited in a Scoring section
+  of its inspector (`StepPanel/ScoringSection.tsx`), on every step type that takes them: not
+  `terminal` or `risk-score`, which `acceptsScoring` reads from the type's `resolveScoringStepKey`.
+  A rule is a score `Select` over the root-declared scores, a non-zero whole `add` (negative
+  allowed; anything else is flagged and not written) and an optional `when` in the condition
+  editor, which offers no score leaf there. While the workflow declares no score the section is one
+  line pointing to Workflow settings. Every change is one undoable edit (`setScoringRules`, or
+  `setConfigScoringRules` for a custom step's `config.scoring`), and
+  removing the last rule removes the `scoring` key. A `custom` step keeps its own rules in
+  `config.scoring`, so the section lists those first (then any step-level ones), adds new rules
+  there, and the type's settings form leaves its `scoring` list out. A rule naming a score that is
+  no longer declared stays, shown as "(not declared)", and the step lists "scoring names undeclared
+  score".
+- **Names in conditions and settings.** `projectDocument` also returns `contents`: every field a
+  step stores, once, with its type and the steps that store it (connector callback fields such as
+  `kycOutcome` included; a step that does not compile offers its declared fields, untyped), and
+  every root-declared score with its bounds. `AuthoredCanvas` provides it to both inspectors
+  through `WorkflowContentsContext` (`workflow-contents.ts`), because the controls that read it sit
+  at the bottom of recursive trees (`SchemaForm` → `ObjectForm`/`ArrayForm`/`MapForm`/`VariantForm`,
+  and `ConditionEditor` → `ConditionList`). A condition's score is a `Select` over the declared
+  scores, starting on the first; one naming an undeclared score shows "(not declared)" and is
+  marked invalid. A condition's field, and a setting that names a field (`recipientField`), is an
+  `Autocomplete` (`components/ui/Autocomplete`) that suggests the stored fields but keeps any text,
+  since a transition reads the onboarding's data from earlier steps as well as its own.
+- **Agreements.** The root `agreements` (see "Agreements") are picked, not typed. The engine
+  accepts any stored boolean of the step's compiled entry step as an agreement's field, but the
+  panel offers only consents: on a typed step the booleans a `consents` section builds (the step's
+  own type or an `include`), on a `custom` step every stored boolean, since the panel cannot tell a
+  hand-written consent from any other flag. The projection lists those as `agreementFields`, plus
+  any stored boolean an agreement already names, so an agreement written in JSON on another field
+  stays visible and removable. A step with such fields gets an Agreements section in its inspector
+  (`Agreements/StepAgreements.tsx`): a "Track `<field>` as agreement" checkbox per field, which adds
+  an entry with a key derived from the field name (`termsAccepted` → `terms-accepted`) and shows
+  its key box. Workflow settings lists every agreement (`Agreements/AgreementList.tsx`) with a key
+  box, a step `Select` over the steps that offer a field (and the agreement's own step) and a field
+  `Select` over that step's fields; changing the step picks its first field. A key is checked as the normalizer checks it (`^[a-z0-9][a-z0-9-]*$`, unique;
+  restated in `utils/agreements.ts`), and a bad one keeps its reason under the box and is not
+  written. An agreement whose field the step no longer stores stays, with a remove button, and the
+  step lists `agreement <key>: <field> is not a stored yes/no field` — judged by the engine's rule,
+  not the narrower offer. Removing the last agreement
+  removes the `agreements` key (`setAgreements`).
+- **Ports and fields come from ddl-schema.** `authored-projection.ts` and `compiled-preview.ts`
+  call `tryResolveStep` and `tryCompileStep` from `@tsh/ddl-schema/step-types`, per step and in the
+  browser, so one broken step blanks only its own preview. The authored JSON Schema comes from
+  `@tsh/ddl-schema/workflow-schema` (`getWorkflowJsonSchema`).
+- **Problems.** The status box lists every step with problems, each issue in full, and the step
+  panel repeats the selected step's issues above its sections. Problems no step owns — an
+  `initial` or an agreement naming a missing step — head the list as "Workflow settings", which
+  opens that panel. The last Validate failure's
+  `steps[i]` path is resolved to a step name (`find-failed-step.ts`) and the node is marked.
+
+The panel imports three ddl-schema subpaths — `workflow-contract`, `step-types`, `workflow-schema` —
+and nothing else from ddl-schema or `@tsh/engine`; an ESLint `no-restricted-imports` rule in
+`packages/admin-panel/eslint.config.js` enforces it. Each of the three reaches no `ajv`;
+`packages/shared/ddl-schema/src/runtime-free-subpaths.spec.ts` checks every subpath except the
+root and `workflow-validator`. `step-types/step-compile.ts` holds the compiler's per-step part
+and is called by both `workflow.compiler.ts` and the panel.
 
 Each write is its own hook — `hooks/useValidateDraft.ts`, `useSaveDraft.ts`, `useDeleteDraft.ts`,
 `usePublishDraft.ts` and `useCreateWorkflowDraft.ts` on the list — that spreads a `workflowMutations` factory
@@ -3795,6 +4203,17 @@ Decisions worth keeping:
   a two-click confirm: choosing a schedule is not itself the destructive act, and the sentence
   under it says when the rotation it causes falls due — at once, when the chosen interval is
   shorter than the active key's current age.
+- **The cache belongs to one session.** `SessionCacheGuard` (mounted by `AuthProvider` under
+  `QueryProvider`, while sign-in is on) reads the scope of every cached read — the operator, their
+  platform role and the active organization — from better-auth's session. When the session ends
+  (sign-out, expiry, revocation, a sign-out broadcast from another tab) it calls
+  `queryClient.clear()`; when the scope changes (another operator, a role change, an organization
+  switch) it calls `resetQueries()` and notifies better-auth's `$listOrg`, which better-auth itself
+  refreshes only after an organization is created, updated or deleted. A `401` from any read or
+  write reaches `handleUnauthorized` (`src/services/auth/session-cache.ts`) through the query and
+  mutation caches' `onError`: it removes the inactive queries and re-reads the session, and if that
+  session is gone the gate shows the sign-in form and the guard clears the rest. Without this the
+  no-refetch-on-mount rule above would show the next operator the previous one's rows.
 - **Zod-validated, explicitly projected responses.** `projectAdminOnboardingSummary` copies exactly
   the lifecycle-safe fields and drops everything else, so a future engine field (notably `context`)
   cannot reach the browser by accident.
@@ -3827,7 +4246,11 @@ Decisions worth keeping:
   spawned as its own CLI — resolved from `@playwright/test` and run with the Node executable
   already running the harness — rather than through the package manager, because
   `node $npm_execpath exec playwright` assumes the package manager is a JavaScript file and a
-  standalone pnpm (`@pnpm/exe`) is a native binary.
+  standalone pnpm (`@pnpm/exe`) is a native binary. The fixture also stands in for better-auth's
+  cookie session: its accounts (an operator, a viewer without the admin permission, one still to
+  enrol in two-factor, and `switcher@example.com` in two organizations, whose second sees only one
+  onboarding) let `admin-session-cache.spec.ts` prove that no cached read outlives the session,
+  operator or organization it was fetched for.
 
 - **Configuration is read at runtime, not baked in at build time.** Vite inlines
   `import.meta.env.VITE_*` when the panel is built, which would otherwise mean one image per
@@ -3836,7 +4259,7 @@ Decisions worth keeping:
   string so an unset variable falls through rather than shadowing the build-time one. In the
   container, the engine serves `/config.js` itself, rendering `window.__ENV__` from its own
   configuration on every request (`packages/engine/src/admin-panel/admin-panel-runtime-config.ts`),
-  so the same image serves any engine URL or SSO config a deployment's Compose `environment:` block
+  so the same image serves any engine URL or sign-in config a deployment's Compose `environment:` block
   gives it, and a `.env` change takes effect on restart with no rebuild. Values are embedded with
   `JSON.stringify`, so nothing in a configured value can break out of the object literal. A key
   that is unset, empty or blank is omitted rather than written as `""`, because `readRuntimeEnv()`
@@ -3853,10 +4276,13 @@ Decisions worth keeping:
   `src/api/onboardings/admin-onboardings.ts` holds the five statuses the engine emits, and
   the Zod response enum, the filter normalizer's guard, the status tab strip and the row chip all
   read it. The label map is typed `Record<AdminOnboardingStatus, string>`, so adding a status fails
-  the build rather than leaving that status unfilterable or unlabelled. The panel keeps its own copy rather than
-  importing `WORKFLOW_STATUSES` from `@tsh/ddl-schema`: it has no workspace dependency on the
-  engine itself and reaches it over HTTP only. The two `.cjs` e2e harness files carry a
+  the build rather than leaving that status unfilterable or unlabelled. The panel keeps its own copy for now rather than
+  importing `WORKFLOW_STATUSES` from `@tsh/ddl-schema`; moving it to an import under the new rule
+  is a pending follow-up (ADR 0051). The two `.cjs` e2e harness files carry a
   third copy for the same reason — they are plain CommonJS and cannot import the TypeScript module.
+
+- **Some domain lists are imported, not copied.** The panel may import `step-types` and
+  `workflow-schema` as well (ADR 0051); the draft canvas does (see "The draft canvas").
 
 - **Connector capabilities are imported, not copied.** `CONNECTOR_TYPES` is the one domain list the
   panel does _not_ restate: `src/app/connectors/types/connector.ts` imports it from
@@ -3895,8 +4321,8 @@ Decisions worth keeping:
   Base UI's real timer: it pauses on hover, on focus and when the window loses focus, and a toast
   reappearing from behind the 3-toast limit resumes from its remaining time rather than a fresh
   bar; under reduced motion the bar is a static full bar. **Not a toast:** loading, a fetch error
-  and the connector count line (or, on the Encryption page, `summarize(state)`) stay in their
-  `StatusRegion`; a rejected connector setting stays inline under its field. The Connectors header
+  and an empty read go through the state kit (above); the connector count line (or, on the Encryption page,
+  `summarize(state)`) stays in its `StatusRegion`, shown once loaded; a rejected connector setting stays inline under its field. The Connectors header
   and the details page header no longer show a write's outcome as text — `ConnectorsPage`'s former
   `actionMessage` and the details page's `reviewError` status branch are gone, not merely unused;
   the Encryption page's own `actionMessage` is gone the same way.

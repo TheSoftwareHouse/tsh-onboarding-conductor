@@ -39,6 +39,34 @@ export default tseslint.config(
     },
   },
   {
+    files: ['src/**/*.{ts,tsx}'],
+    rules: {
+      // Only the ddl-schema subpaths free of `ajv` may reach the browser bundle.
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@tsh/ddl-schema',
+              message: 'The root pulls `ajv` into the bundle; import a browser-safe subpath.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['@tsh/engine', '@tsh/engine/*'],
+              message: 'The panel talks to the engine over HTTP, never through its code.',
+            },
+            {
+              regex: '^@tsh/ddl-schema/(?!(workflow-contract|step-types|workflow-schema)$)',
+              message:
+                'Only ddl-schema/workflow-contract, step-types and workflow-schema are browser-safe.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.cjs'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',

@@ -100,10 +100,16 @@ export type WebhookAction = (typeof WEBHOOK_ACTIONS)[number];
  */
 export const ADMIN_ACCESS_ACTIONS = [
   'auth.access_granted',
-  'auth.token_rejected',
-  'auth.role_missing',
+  'auth.origin_refused',
+  'auth.session_missing',
+  'auth.permission_missing',
   'auth.verification_unavailable',
   'auth.access_unauthenticated',
+  // Outcomes of the retired bearer-token guard. No longer written, kept so rows already in the trail still list and render.
+  'auth.token_rejected',
+  'auth.role_missing',
+  // Written while TOTP was mandatory; it is now opt-in, so no admin route refuses for it.
+  'auth.two_factor_required',
 ] as const;
 
 export type AdminAccessAction = (typeof ADMIN_ACCESS_ACTIONS)[number];
@@ -302,6 +308,10 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
 
   // Admin access decisions.
   'auth.access_granted': 'success',
+  'auth.origin_refused': 'rejected',
+  'auth.session_missing': 'rejected',
+  'auth.two_factor_required': 'rejected',
+  'auth.permission_missing': 'rejected',
   'auth.token_rejected': 'rejected',
   'auth.role_missing': 'rejected',
   'auth.verification_unavailable': 'failed',
@@ -485,6 +495,14 @@ export const ADMIN_ACCESS_UNKNOWN_ACTOR = 'unknown';
 
 export type AdminAccessAuditMetadata = {
   method: string;
+  email?: string | null;
+  platformRole?: string | null;
+  organizationId?: string | null;
+  /** The `resource:action` the route demanded, on a `permission_missing` row. */
+  requiredPermission?: string;
+  /** The page's origin, on an `origin_refused` row. */
+  origin?: string;
+  // Keys of the retired bearer-token guard, present only on rows written before better-auth.
   tenantId?: string | null;
   userPrincipalName?: string | null;
   grantedRoles?: readonly string[];

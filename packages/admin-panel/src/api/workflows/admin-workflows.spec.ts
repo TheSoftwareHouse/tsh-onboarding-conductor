@@ -280,7 +280,7 @@ describe('fetchAdminWorkflows', () => {
       await expectApiError(
         fetchAdminWorkflows(defaultQueryFilters()),
         'request-failed',
-        'Your account is signed in but is not assigned a role that may view workflows.',
+        'Your role in the active organization does not allow viewing workflows.',
       );
     });
   });

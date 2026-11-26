@@ -1,41 +1,79 @@
 import type { ReactElement } from 'react';
 import { Select as BaseSelect } from '@base-ui/react/select';
+import type { InputFont } from '@/components/ui/Input/Input';
 import { cn } from '@/lib/cn';
+import { tv } from '@/lib/tv';
+
+const select = tv({
+  slots: {
+    trigger:
+      'flex h-10 w-full items-center justify-between gap-2 rounded-none border border-border-strong bg-tsh-white px-3 text-left text-tsh-black enabled:hover:border-tsh-black disabled:bg-bg-subtle disabled:text-fg-disabled aria-invalid:border-tsh-red',
+    item: 'flex cursor-default items-center px-3 py-2 text-tsh-black outline-none data-highlighted:bg-bg-subtle data-selected:bg-bg-alt',
+  },
+  variants: {
+    font: {
+      text: { trigger: 'text-body-sm', item: 'text-body-sm' },
+      mono: { trigger: 'font-mono text-mono', item: 'font-mono text-mono' },
+    },
+  },
+});
 
 export interface SelectItem<Value extends string> {
   value: Value;
   label: string;
 }
 
-export interface SelectProps<Value extends string> {
+/** `null` reaches `onValueChange` only when `anyOptionLabel` adds the item that carries it. */
+type SelectChangeProps<Value extends string> =
+  | { anyOptionLabel?: undefined; onValueChange: (value: Value) => void }
+  | {
+      /** Adds a first item with value `null` and this label. */
+      anyOptionLabel: string;
+      onValueChange: (value: Value | null) => void;
+    };
+
+export type SelectProps<Value extends string> = SelectChangeProps<Value> & {
   items: readonly SelectItem<Value>[];
   /** `null` shows the placeholder. */
   value: Value | null;
-  onValueChange: (value: Value) => void;
+  /** Defaults to `mono`, the New draft dialog's look. */
+  font?: InputFont;
   /** Names the control when no visible label points at `id`. */
   'aria-label'?: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: boolean;
   id?: string;
   name?: string;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
-}
+};
+
+/** The trigger's look, shared with other select-styled triggers. */
+export const selectTriggerClassName = select({ font: 'mono' }).trigger();
 
 /** Controlled Base UI select, styled like the panel's native select (`h-10`, mono text). */
 export function Select<Value extends string>({
   items,
   value,
-  onValueChange,
+  font = 'mono',
   placeholder = 'Choose an option',
   className,
   ...rest
 }: SelectProps<Value>): ReactElement {
+  const { trigger, item: itemClass } = select({ font });
+  const allItems: readonly { value: Value | null; label: string }[] =
+    rest.anyOptionLabel === undefined
+      ? items
+      : [{ value: null, label: rest.anyOptionLabel }, ...items];
+
   return (
     <BaseSelect.Root
-      items={items}
+      items={allItems}
       value={value}
       onValueChange={(next) => {
-        if (next !== null) onValueChange(next);
+        if (rest.anyOptionLabel !== undefined) rest.onValueChange(next);
+        else if (next !== null) rest.onValueChange(next);
       }}
       id={rest.id}
       name={rest.name}
@@ -43,10 +81,9 @@ export function Select<Value extends string>({
     >
       <BaseSelect.Trigger
         aria-label={rest['aria-label']}
-        className={cn(
-          'flex h-10 w-full items-center justify-between gap-2 rounded-none border border-border-strong bg-tsh-white px-3 text-left font-mono text-mono text-tsh-black enabled:hover:border-tsh-black disabled:bg-bg-subtle disabled:text-fg-disabled',
-          className,
-        )}
+        aria-describedby={rest['aria-describedby']}
+        aria-invalid={rest['aria-invalid']}
+        className={cn(trigger(), className)}
       >
         <BaseSelect.Value
           placeholder={placeholder}
@@ -61,12 +98,8 @@ export function Select<Value extends string>({
       <BaseSelect.Portal>
         <BaseSelect.Positioner sideOffset={4} alignItemWithTrigger={false} className="z-50">
           <BaseSelect.Popup className="max-h-(--available-height) min-w-(--anchor-width) overflow-y-auto border border-border-strong bg-tsh-white py-1 outline-none">
-            {items.map((item) => (
-              <BaseSelect.Item
-                key={item.value}
-                value={item.value}
-                className="flex cursor-default items-center px-3 py-2 font-mono text-mono text-tsh-black outline-none data-highlighted:bg-bg-subtle data-selected:bg-bg-alt"
-              >
+            {allItems.map((item) => (
+              <BaseSelect.Item key={item.value ?? ''} value={item.value} className={itemClass()}>
                 <BaseSelect.ItemText>{item.label}</BaseSelect.ItemText>
               </BaseSelect.Item>
             ))}

@@ -1,6 +1,8 @@
 import { useCallback } from 'react';
 import { useQueryStates } from 'nuqs';
+import { useLocation, useNavigate } from 'react-router';
 import {
+  serializeDetailsSearch,
   workflowDetailsSearchParams,
   type WorkflowView,
 } from '../utils/workflow-details-search-params';
@@ -22,10 +24,17 @@ export function useWorkflowDetailsSearchParams(): UseWorkflowDetailsSearchParams
     shallow: false,
   });
 
-  // A new version always opens on its initial step and its default view.
+  const navigate = useNavigate();
+  const { search } = useLocation();
+
+  // Via the router so the draft's unsaved-changes guard can block it; nuqs swaps its state first and unmounts the guard.
   const setVersion = useCallback(
-    (next: number): void => void setState({ version: next, step: null, view: null }),
-    [setState],
+    (next: number): void =>
+      void navigate(
+        { search: serializeDetailsSearch(search, { version: next, step: null, view: null }) },
+        { replace: true },
+      ),
+    [navigate, search],
   );
   const setStep = useCallback((next: string): void => void setState({ step: next }), [setState]);
   const setView = useCallback(

@@ -1,8 +1,9 @@
 import type { ReactElement, ReactNode } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
+import { handleUnauthorized } from '@/services/auth/session-cache';
 import { createQueryClient } from '@/services/query-client/create-query-client';
 
-const queryClient = createQueryClient();
+const queryClient = createQueryClient({ onUnauthorized: handleUnauthorized });
 
 export interface QueryProviderProps {
   children: ReactNode;

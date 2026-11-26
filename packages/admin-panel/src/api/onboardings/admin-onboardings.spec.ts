@@ -328,19 +328,19 @@ describe('fetchAdminOnboardings', () => {
       await expectFetchError(
         fetchAdminOnboardings(defaultQueryFilters()),
         'request-failed',
-        'Your account is signed in but is not assigned a role that may view onboardings.',
+        'Your role in the active organization does not allow viewing onboardings.',
       );
     });
 
     it('tells the operator to retry for a 503, since their session is not the problem', async () => {
-      // The engine answers 503 when it cannot reach Entra to check the token. Signing in again
+      // The engine answers 503 when the sign-in service is unavailable. Signing in again
       // would not help, so the message must not send the operator down that path.
       rejectWithStatus(503);
 
       await expectFetchError(
         fetchAdminOnboardings(defaultQueryFilters()),
         'request-failed',
-        'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.',
+        'The sign-in service is unavailable right now. This is not a problem with your account — try again shortly.',
       );
     });
   });

@@ -15,7 +15,7 @@ export class StepTypesController {
   constructor(private readonly workflowCompilationService: WorkflowCompilationService) {}
 
   @Get()
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'read' })
   @ApiOperation({
     operationId: 'listStepTypes',
     summary: 'List step types',
@@ -30,7 +30,7 @@ export class StepTypesController {
   }
 
   @Get('schema')
-  @AdminRoute()
+  @AdminRoute({ resource: 'workflow', action: 'read' })
   @ApiOperation({
     operationId: 'getWorkflowSchema',
     summary: 'Read the workflow JSON Schema',

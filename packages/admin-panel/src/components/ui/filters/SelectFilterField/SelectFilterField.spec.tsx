@@ -29,16 +29,38 @@ describe('SelectFilterField', () => {
       />,
     );
 
-    const select = screen.getByLabelText('Status');
-    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveTextContent('All');
+    await userEvent.click(screen.getByRole('combobox', { name: 'Status' }));
+    expect((await screen.findAllByRole('option')).map((option) => option.textContent)).toEqual([
       'All',
       'Approved',
       'Rejected',
     ]);
 
-    await userEvent.selectOptions(select, 'rejected');
+    await userEvent.click(await screen.findByRole('option', { name: 'Rejected' }));
 
     expect(onChange).toHaveBeenLastCalledWith('rejected');
+  });
+
+  it('reports an empty value when the option that disables the criterion is picked', async () => {
+    const onChange = vi.fn();
+    render(
+      <SelectFilterField
+        id="status-filter"
+        name="status"
+        label="Status"
+        value="rejected"
+        options={OPTIONS}
+        disabled={false}
+        anyOptionLabel="All"
+        onChange={onChange}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'Status' }));
+    await userEvent.click(await screen.findByRole('option', { name: 'All' }));
+
+    expect(onChange).toHaveBeenLastCalledWith('');
   });
 
   it('shows the value the caller holds as the chosen option', () => {
@@ -55,10 +77,10 @@ describe('SelectFilterField', () => {
       />,
     );
 
-    expect(screen.getByLabelText('Status')).toHaveValue('rejected');
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveTextContent('Rejected');
   });
 
-  it('omits the disabling option for a select that always narrows', () => {
+  it('omits the disabling option for a select that always narrows', async () => {
     render(
       <SelectFilterField
         id="status-filter"
@@ -71,7 +93,9 @@ describe('SelectFilterField', () => {
       />,
     );
 
-    expect(screen.getAllByRole('option')).toHaveLength(2);
+    await userEvent.click(screen.getByRole('combobox', { name: 'Status' }));
+
+    expect(await screen.findAllByRole('option')).toHaveLength(2);
   });
 });
 

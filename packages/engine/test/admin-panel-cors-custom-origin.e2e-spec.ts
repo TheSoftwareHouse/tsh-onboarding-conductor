@@ -5,7 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { startE2eServer } from './e2e-server';
 
-// This suite sends no Entra ID token; admin auth has its own e2e spec.
+// This suite sends no admin session; admin auth has its own e2e spec.
 process.env.ADMIN_AUTH_ENABLED = 'false';
 process.env.PORT = '3002';
 process.env.ADMIN_PANEL_ORIGIN = 'http://admin.example:8080';
@@ -68,6 +68,8 @@ describe('Admin panel CORS with custom configured origin (e2e)', () => {
     expect(response.headers['access-control-allow-origin']).toBe('http://admin.example:8080');
     expect(response.headers['access-control-allow-methods']).toContain('GET');
     expect(response.headers['access-control-allow-methods']).toContain('OPTIONS');
+    expect(response.headers['access-control-allow-methods']).toContain('POST');
+    expect(response.headers['access-control-allow-credentials']).toBe('true');
   });
 
   it('rejects the default localhost origin when a custom origin is configured', async () => {

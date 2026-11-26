@@ -4,9 +4,10 @@ React 19 + Vite operator UI. Talks to `@tsh/engine` over HTTP only and has no wo
 dependency on the engine, so anything the panel needs from the engine's domain (statuses,
 projected fields) is declared again here, deliberately.
 
-The one exception is `@tsh/ddl-schema/workflow-contract`, imported for `CONNECTOR_TYPES`. That
-subpath is plain constants and types; the package root would pull `ajv` into the browser bundle.
-Import that subpath only, never `@tsh/ddl-schema` itself.
+The exception is `@tsh/ddl-schema`'s browser-safe subpaths: `workflow-contract`, `step-types` and
+`workflow-schema`. They carry no `ajv`, which the root and every other path would pull into the
+bundle. ESLint (`no-restricted-imports`) forbids `@tsh/engine`, the root and any other deep path
+(ADR 0051).
 
 `docs/IMPLEMENTATION.md` §12 (repo root) covers this package's design decisions in full — no
 automatic refetching, Zod-projected responses, the fixture-driven e2e harness, search-param
@@ -39,8 +40,37 @@ audit trail by lives in a shared tier too, never restated: the endpoint is `ADMI
 in `src/api/audit/audit-events.ts`, `src/lib/audit-metadata.ts` formats a metadata value, and
 `src/lib/audit-actions.ts` flags a failure action.
 
-`NuqsAdapter` sits **inside** `BrowserRouter` in `src/app/App.tsx`, not in `AppProviders`, which
-renders above the router. Any future router-context provider belongs below `BrowserRouter` too.
+The router is a data router (`createBrowserRouter`, ADR 0050), so a page can call `useBlocker`.
+`NuqsAdapter` is the root route's element in `src/app/App.tsx`, not in `AppProviders`, which
+renders above the router; any future router-context provider goes there too. A spec rendering a
+page that calls `useBlocker` builds a `createBrowserRouter` too, and disposes it in `afterEach`.
+
+## Graph editor
+
+The draft editor's Authored graph tab edits the draft's authored document on a canvas
+(`src/app/workflows/details/components/AuthoredCanvas/`, ADR 0051).
+
+- The document is the single source of truth. `AuthoredCanvas` keeps no copy: every edit hands the
+  whole next document to `onChange`, and undo and redo step through whole-text versions.
+- Inspector forms (`SchemaForm`) are generated from each step type's JSON Schema and write straight
+  into the document, outside react-hook-form. Do not add RHF state beside it.
+- A step's position lives in its `meta.position`. Once one step has it, every canvas edit writes it
+  for all steps (`pinPositions`), and Auto-arrange rewrites them all.
+- Ports and stored fields come from `@tsh/ddl-schema/step-types`, never from a panel-side copy of the
+  compile.
+- Anything a condition or setting can name (stored fields, declared scores) comes from
+  `projectDocument`'s `contents`, read deep in the forms through `useWorkflowContents()`. Panels one level
+  under the canvas take the projection as props instead.
+- Inspector copy and controls follow one set of rules. ALL CAPS (`caps-tiny`) only for section and panel
+  titles and the AND / OR between conditions; labels inside a section are Capitalized. Add, delete and clear go through
+  `AuthoredCanvas/EntryActions.tsx`: `AddButton` (`+ Add <thing>`), `DeleteButton` (red trash, removes a list
+  entry) and `ClearButton` (×, unsets an optional setting). Three containers, one meaning each: a list
+  entry (added, deleted, reordered) is an `EntryCard` — white, bordered, its `EntryTitle` row set off by a
+  hairline (a short card such as a scoring rule or an agreement has no title row, and never a numbered one); a group (a fixed named set of settings, such as Validation or a nested object) is a `FieldRow`
+  with `group`, drawn on a `bg-subtle` panel when outermost and indented by a left rule inside another group; a condition keeps
+  its yellow rule. An empty value reads "Not set". Four text tiers inside a
+  section: section title (`caps-tiny`), card title (`EntryTitle`, mono), group title (14px sans), field label (`meta`, medium, `fg-1`), and
+  everything secondary — hints, counts, "Go to", "Not set" — plain `meta`.
 
 ## Styling
 
@@ -103,6 +133,12 @@ A domain is one or more fetch/write modules plus exactly one `<domain>Queries` f
   the write deleted, once the editor unmounts (`useRemoveVersionOnUnmount`), never while it is
   still mounted.
 - This tier never imports from `src/app/` (ADR 0022).
+- The cache is scoped to the session: `SessionCacheGuard` clears it when the session ends and resets
+  it when the operator, platform role or active organization changes; a 401 reaches
+  `handleUnauthorized` through `createQueryClient`'s `onUnauthorized`. Never invalidate or clear the
+  whole cache on an auth change yourself — a new auth action that changes the session must signal
+  better-auth's `$sessionSignal`, and the guard does the rest.
+- A read's loading, failure and empty states go through `Loader` / `EmptyState` / `ErrorState` / `LoadFailure` (ADR 0052), never a bare `StatusRegion`.
 
 ## Structure
 
@@ -114,7 +150,7 @@ A nested route nests as a folder named for what it shows: `/onboardings/:onboard
 `src/app/onboardings/details/`.
 
 Outside the routes: `src/components/ui/` (shared components), `src/services/` (external
-boundaries — `auth/` wraps MSAL, `api/` wraps axios), `src/api/<domain>/`, and `src/config/`,
+boundaries — `auth/` wraps the better-auth client, `api/` wraps axios), `src/api/<domain>/`, and `src/config/`,
 `src/constants/`, `src/lib/`. `src/app/providers/` and `src/app/layout/` are the app shell. The
 shell mounts no header: **every page renders its own `PageHeader`**.
 

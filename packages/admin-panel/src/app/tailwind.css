@@ -161,6 +161,9 @@
 
   /* The workflow graph's current-step ring, so `animate-node-pulse` resolves. */
   --animate-node-pulse: node-pulse 1.8s ease-out infinite;
+
+  /* The loader's fade-in, delayed so a fast load never shows it. */
+  --animate-loader-reveal: loader-reveal 150ms linear 150ms both;
 }
 
 /* The toast progress bar's fill, shrinking over the timeout each toast sets via `--toast-timeout`. */
@@ -171,6 +174,17 @@
 
   to {
     width: 0%;
+  }
+}
+
+/* Opacity only, so the loader's status text is never held back. */
+@keyframes loader-reveal {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
   }
 }
 
