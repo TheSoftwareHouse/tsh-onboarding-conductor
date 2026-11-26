@@ -1,3 +1,4 @@
+import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import {
   paginateQueryBuilder,
@@ -5,6 +6,7 @@ import {
   type PaginatedResult,
   type PaginationWindow,
 } from '../pagination';
+import { OrganizationsRepository } from '../organizations/organizations.repository';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { type AgreementType } from './agreement.types';
 import { AgreementEntity } from './entity/agreement.entity';
@@ -52,7 +54,10 @@ function toAgreementVersion(
  * versions. Every method takes the caller's `EntityManager`, so a publish that also writes links
  * and audit rows keeps all of it in one transaction.
  */
+@Injectable()
 export class AgreementsRepository {
+  constructor(private readonly organizationsRepository: OrganizationsRepository) {}
+
   /**
    * Publishes the next version of a family: `1` when the family is new, `MAX(version) + 1`
    * otherwise. The family row is inserted only when `key` is new — an existing one is left
@@ -80,11 +85,13 @@ export class AgreementsRepository {
     key: string,
     type: AgreementType,
   ): Promise<AgreementVersionEntity> {
+    const organizationId = await this.organizationsRepository.getDefaultId(manager);
+
     await manager.query(
-      `INSERT INTO agreements (id, key, type)
-       VALUES ($1::uuid, $2::varchar, $3::varchar)
+      `INSERT INTO agreements (id, key, type, organization_id)
+       VALUES ($1::uuid, $2::varchar, $3::varchar, $4::text)
        ON CONFLICT ON CONSTRAINT uq_agreements_key DO NOTHING`,
-      [generateUuidV7(), key, type],
+      [generateUuidV7(), key, type, organizationId],
     );
 
     const [{ id: agreementId, type: storedType }] = await manager.query<

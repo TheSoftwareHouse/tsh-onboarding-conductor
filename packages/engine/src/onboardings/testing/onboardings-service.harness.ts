@@ -14,6 +14,7 @@ import { Workflow, WorkflowEvaluationResult } from '../../workflows/domain/workf
 import { WorkflowEntity } from '../../workflows/entity/workflow.entity';
 import { WorkflowVersionEntity } from '../../workflows/entity/workflow-version.entity';
 import { WorkflowRegistryService } from '../../workflows/workflow-registry.service';
+import { OrganizationsRepository } from '../../organizations/organizations.repository';
 import { WebhookService } from '../../webhook/webhook.service';
 import { OnboardingAgreementEntity } from '../entity/onboarding-agreement.entity';
 import { OnboardingEntity } from '../entity/onboarding.entity';
@@ -27,6 +28,7 @@ import { OnboardingsService } from '../onboardings.service';
 export const manager = {} as EntityManager;
 
 export const DEFAULT_WORKFLOW_VERSION_ID = '01912345-6789-7abc-8def-00000000f001';
+export const DEFAULT_ORGANIZATION_ID = 'org_default';
 const DEFAULT_WORKFLOW_ID = '01912345-6789-7abc-8def-00000000f000';
 
 /** The `workflowVersion` relation `createOnboarding` loads, as a joined read would. */
@@ -289,6 +291,10 @@ export const createHarness = (options: HarnessOptions = {}) => {
     }),
   } as unknown as OnboardingAgreementsRepository;
 
+  const organizationsRepository = {
+    getDefaultId: jest.fn().mockResolvedValue(DEFAULT_ORGANIZATION_ID),
+  } as unknown as OrganizationsRepository;
+
   return {
     service: new OnboardingsService(
       dataSource,
@@ -298,6 +304,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
       auditService,
       agreementsService,
       onboardingAgreementsRepository,
+      organizationsRepository,
     ),
     dataSource,
     transaction,
@@ -309,5 +316,6 @@ export const createHarness = (options: HarnessOptions = {}) => {
     auditService,
     agreementsService,
     onboardingAgreementsRepository,
+    organizationsRepository,
   };
 };

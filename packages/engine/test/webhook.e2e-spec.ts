@@ -191,6 +191,7 @@ describe('WebhookService delivery integration', () => {
     await dataSource().query(
       `INSERT INTO onboardings (
          id,
+         organization_id,
          workflow_version_id,
          status,
          current_step,
@@ -199,7 +200,7 @@ describe('WebhookService delivery integration', () => {
          created_at,
          updated_at,
          completed_at
-       ) VALUES ($1, (
+       ) VALUES ($1, (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1), (
          SELECT wv.workflow_version_id FROM workflow_versions wv
          JOIN workflows w ON w.workflow_id = wv.workflow_id
          WHERE w.key = $2 AND wv.version = $3

@@ -274,7 +274,7 @@ describe('Workflow store (e2e)', () => {
   it('refuses to boot when a users file claims a family stored under another scope', async () => {
     const claimPath = path.join(usersDir, 'claims-stored.workflow.json');
     await dataSource.query(
-      `INSERT INTO workflows (workflow_id, key, scope) VALUES (gen_random_uuid(), $1, 'built-in')`,
+      `INSERT INTO workflows (workflow_id, key, scope, organization_id) VALUES (gen_random_uuid(), $1, 'built-in', (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1))`,
       [FOREIGN_WORKFLOW_ID],
     );
     writeFileSync(

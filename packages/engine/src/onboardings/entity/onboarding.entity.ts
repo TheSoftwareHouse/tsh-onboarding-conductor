@@ -16,6 +16,7 @@ import {
 } from '../../agreements/agreement.types';
 import { type ConnectorRejectionReason } from '../../connectors/ports/connector-execution.port';
 import type { ConnectorPendingExecution } from '../../connectors/ports/connector-execution-result';
+import { OrganizationEntity } from '../../organizations/entity/organization.entity';
 import { WorkflowVersionEntity } from '../../workflows/entity/workflow-version.entity';
 import { OnboardingAgreementEntity } from './onboarding-agreement.entity';
 import { createEncryptedJsonTransformer } from '../../encryption/encrypted-json.transformer';
@@ -37,6 +38,16 @@ export class OnboardingEntity {
 
   @PrimaryColumn({ type: 'uuid' })
   id!: string;
+
+  @Column({ name: 'organization_id', type: 'text' })
+  organizationId!: string;
+
+  @ManyToOne(() => OrganizationEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({
+    name: 'organization_id',
+    foreignKeyConstraintName: 'fk_onboardings_organization',
+  })
+  organization!: OrganizationEntity;
 
   @Column({ name: 'workflow_version_id', type: 'uuid' })
   workflowVersionId!: string;

@@ -9,6 +9,7 @@ export type AdminOnboardingFilters = Omit<ListAdminOnboardingsQueryDto, 'page' |
 
 export interface InitialOnboardingData {
   id: string;
+  organizationId: string;
   workflowVersionId: string;
   status: OnboardingEntity['status'];
   currentStep: string | null;

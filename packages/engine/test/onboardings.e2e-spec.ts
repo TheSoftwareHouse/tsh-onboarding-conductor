@@ -25,6 +25,7 @@ import {
 import { AgreementsService } from '../src/agreements/agreements.service';
 import { OnboardingAgreementsRepository } from '../src/onboardings/onboarding-agreements.repository';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
+import { OrganizationsRepository } from '../src/organizations/organizations.repository';
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
 import { AuditService } from '../src/audit/audit.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
@@ -440,8 +441,8 @@ describe('OnboardingsController (e2e)', () => {
       // just this one. The always-seeded `base`/1 workflow's own definition is reused verbatim;
       // its internal `id`/`version` are never cross-checked against the row's parent name.
       await dataSource.query(
-        `INSERT INTO workflows (workflow_id, key, scope)
-         VALUES (gen_random_uuid(), $1, 'fixtures')
+        `INSERT INTO workflows (workflow_id, key, scope, organization_id)
+         VALUES (gen_random_uuid(), $1, 'fixtures', (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1))
          ON CONFLICT (key) DO NOTHING`,
         [fixture.workflowId],
       );
@@ -461,6 +462,7 @@ describe('OnboardingsController (e2e)', () => {
       await dataSource.query(
         `INSERT INTO onboardings (
           id,
+          organization_id,
           workflow_version_id,
           status,
           current_step,
@@ -469,7 +471,7 @@ describe('OnboardingsController (e2e)', () => {
           created_at,
           updated_at,
           completed_at
-        ) VALUES ($1, (
+        ) VALUES ($1, (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1), (
           SELECT wv.workflow_version_id FROM workflow_versions wv
           JOIN workflows w ON w.workflow_id = wv.workflow_id
           WHERE w.key = $2 AND wv.version = $3
@@ -3648,6 +3650,7 @@ describe('OnboardingsController (e2e)', () => {
       getApp().get(AuditService),
       getApp().get(AgreementsService),
       getApp().get(OnboardingAgreementsRepository),
+      getApp().get(OrganizationsRepository),
     );
 
     await expect(
@@ -3819,6 +3822,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0001_initial_schema_1735689600000' },
       { name: '0002_create_otp_challenges_2053382400000' },
       { name: '0003_better_auth_schema_2056060800000' },
+      { name: '0004_organization_ownership_2056147200000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3870,6 +3874,13 @@ describe('OnboardingsController (e2e)', () => {
         column_name: 'id',
         data_type: 'uuid',
         udt_name: 'uuid',
+        is_nullable: 'NO',
+        column_default: null,
+      },
+      {
+        column_name: 'organization_id',
+        data_type: 'text',
+        udt_name: 'text',
         is_nullable: 'NO',
         column_default: null,
       },
@@ -3976,6 +3987,7 @@ describe('OnboardingsController (e2e)', () => {
         'idx_onboardings_plaintext_context',
         'idx_onboardings_in_progress_version',
         'idx_onboardings_created_at_id',
+        'idx_onboardings_organization',
       ]),
     );
     expect(indexesByName.get('onboardings_pkey')).toContain('UNIQUE INDEX onboardings_pkey');
@@ -4045,6 +4057,7 @@ describe('OnboardingsController (e2e)', () => {
         dataSource.query(
           `INSERT INTO onboardings (
             id,
+            organization_id,
             workflow_version_id,
             status,
             current_step,
@@ -4054,7 +4067,7 @@ describe('OnboardingsController (e2e)', () => {
             updated_at,
             completed_at,
             rejection_reason
-          ) VALUES ($1, (
+          ) VALUES ($1, (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1), (
             SELECT wv.workflow_version_id FROM workflow_versions wv
             JOIN workflows w ON w.workflow_id = wv.workflow_id
             WHERE w.key = $2 AND wv.version = $3
@@ -4079,6 +4092,7 @@ describe('OnboardingsController (e2e)', () => {
         dataSource.query(
           `INSERT INTO onboardings (
             id,
+            organization_id,
             workflow_version_id,
             status,
             current_step,
@@ -4088,7 +4102,7 @@ describe('OnboardingsController (e2e)', () => {
             updated_at,
             completed_at,
             rejection_reason
-          ) VALUES ($1, (
+          ) VALUES ($1, (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1), (
             SELECT wv.workflow_version_id FROM workflow_versions wv
             JOIN workflows w ON w.workflow_id = wv.workflow_id
             WHERE w.key = $2 AND wv.version = $3
@@ -4113,6 +4127,7 @@ describe('OnboardingsController (e2e)', () => {
         dataSource.query(
           `INSERT INTO onboardings (
             id,
+            organization_id,
             workflow_version_id,
             status,
             current_step,
@@ -4122,7 +4137,7 @@ describe('OnboardingsController (e2e)', () => {
             updated_at,
             completed_at,
             rejection_reason
-          ) VALUES ($1, (
+          ) VALUES ($1, (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1), (
             SELECT wv.workflow_version_id FROM workflow_versions wv
             JOIN workflows w ON w.workflow_id = wv.workflow_id
             WHERE w.key = $2 AND wv.version = $3
@@ -4147,6 +4162,7 @@ describe('OnboardingsController (e2e)', () => {
         dataSource.query(
           `INSERT INTO onboardings (
             id,
+            organization_id,
             workflow_version_id,
             status,
             current_step,
@@ -4156,7 +4172,7 @@ describe('OnboardingsController (e2e)', () => {
             updated_at,
             completed_at,
             rejection_reason
-          ) VALUES ($1, (
+          ) VALUES ($1, (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1), (
             SELECT wv.workflow_version_id FROM workflow_versions wv
             JOIN workflows w ON w.workflow_id = wv.workflow_id
             WHERE w.key = $2 AND wv.version = $3

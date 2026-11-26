@@ -4,6 +4,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { ConnectorsModule } from '../connectors/connectors.module';
+import { OrganizationsModule } from '../organizations/organizations.module';
 import { WorkflowConnectorSelectionEntity } from './entity/workflow-connector-selection.entity';
 import { WorkflowEntity } from './entity/workflow.entity';
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
@@ -22,6 +23,7 @@ import { WorkflowsController } from './workflows.controller';
     ConfigModule,
     forwardRef(() => ConnectorsModule),
     AuditModule,
+    OrganizationsModule,
     forwardRef(() => AuthModule),
     TypeOrmModule.forFeature([
       WorkflowEntity,

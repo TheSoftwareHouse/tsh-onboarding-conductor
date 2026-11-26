@@ -8,6 +8,7 @@ import {
   PrimaryColumn,
 } from 'typeorm';
 import { type AgreementType } from '../agreement.types';
+import { OrganizationEntity } from '../../organizations/entity/organization.entity';
 import { WorkflowEntity } from '../../workflows/entity/workflow.entity';
 import { AgreementVersionEntity } from './agreement-version.entity';
 
@@ -34,6 +35,16 @@ export class AgreementEntity {
 
   @Column({ type: 'varchar', length: 64 })
   type!: AgreementType;
+
+  @Column({ name: 'organization_id', type: 'text' })
+  organizationId!: string;
+
+  @ManyToOne(() => OrganizationEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({
+    name: 'organization_id',
+    foreignKeyConstraintName: 'fk_agreements_organization',
+  })
+  organization!: OrganizationEntity;
 
   @Column({ name: 'workflow_id', type: 'uuid', nullable: true })
   workflowId!: string | null;

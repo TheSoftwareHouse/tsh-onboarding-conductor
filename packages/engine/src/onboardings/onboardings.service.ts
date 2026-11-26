@@ -36,6 +36,7 @@ import { AuditService, RejectedAttemptOutcome } from '../audit/audit.service';
 import type { AuditOnboardingSnapshot } from '../audit/audit.types';
 import { markAuditRecorded } from '../audit/audit-recorded.marker';
 import { toPaginatedMeta } from '../pagination';
+import { OrganizationsRepository } from '../organizations/organizations.repository';
 import { OnboardingAgreementsRepository } from './onboarding-agreements.repository';
 import { OnboardingsRepository } from './onboardings.repository';
 import type { Workflow } from '../workflows/domain/workflow';
@@ -81,6 +82,7 @@ export class OnboardingsService {
     private readonly auditService: AuditService,
     private readonly agreementsService: AgreementsService,
     private readonly onboardingAgreementsRepository: OnboardingAgreementsRepository,
+    private readonly organizationsRepository: OrganizationsRepository,
   ) {}
 
   async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponseDto> {
@@ -100,8 +102,11 @@ export class OnboardingsService {
         workflow.getDeclaredAgreementKeys(),
       );
 
+      const organizationId = await this.organizationsRepository.getDefaultId(manager);
+
       const createdOnboarding = await this.onboardingsRepository.createInitial(manager, {
         id: onboardingId,
+        organizationId,
         workflowVersionId: versionId,
         status: initialState.status,
         currentStep: initialState.currentStep,

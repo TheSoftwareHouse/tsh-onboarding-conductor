@@ -1,4 +1,14 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+import { OrganizationEntity } from '../../organizations/entity/organization.entity';
 import type { WorkflowScope } from '../workflow-scope';
 
 /**
@@ -37,6 +47,16 @@ export class WorkflowEntity {
 
   @Column({ type: 'varchar', length: 32 })
   scope!: WorkflowScope;
+
+  @Column({ name: 'organization_id', type: 'text' })
+  organizationId!: string;
+
+  @ManyToOne(() => OrganizationEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({
+    name: 'organization_id',
+    foreignKeyConstraintName: 'fk_workflows_organization',
+  })
+  organization!: OrganizationEntity;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
