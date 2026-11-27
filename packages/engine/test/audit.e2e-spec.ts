@@ -154,6 +154,7 @@ const seedAcceptedSubmitOnboarding = async (): Promise<string> => {
   await dataSource().query(
     `INSERT INTO onboardings (
       id,
+      organization_id,
       workflow_version_id,
       status,
       current_step,
@@ -162,7 +163,7 @@ const seedAcceptedSubmitOnboarding = async (): Promise<string> => {
       created_at,
       updated_at,
       completed_at
-    ) VALUES ($1, ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+    ) VALUES ($1, (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1), ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
     [
       onboardingId,
       'base',
@@ -185,6 +186,7 @@ const seedManualReviewOnboarding = async (): Promise<string> => {
   await dataSource().query(
     `INSERT INTO onboardings (
       id,
+      organization_id,
       workflow_version_id,
       status,
       current_step,
@@ -193,7 +195,7 @@ const seedManualReviewOnboarding = async (): Promise<string> => {
       created_at,
       updated_at,
       completed_at
-    ) VALUES ($1, ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+    ) VALUES ($1, (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1), ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
     [
       onboardingId,
       'manual-review',
@@ -216,6 +218,7 @@ const seedCallbackOnboarding = async (): Promise<string> => {
   await dataSource().query(
     `INSERT INTO onboardings (
       id,
+      organization_id,
       workflow_version_id,
       status,
       current_step,
@@ -224,7 +227,7 @@ const seedCallbackOnboarding = async (): Promise<string> => {
       created_at,
       updated_at,
       completed_at
-    ) VALUES ($1, ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+    ) VALUES ($1, (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1), ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
     [onboardingId, 'base', 1, 'awaiting_user', 'collect_email', JSON.stringify({}), null, null],
   );
 

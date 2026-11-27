@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
+import { OrganizationsModule } from '../organizations/organizations.module';
 import { OnboardingAgreementStatusView } from '../onboardings/entity/onboarding-agreement-status.view';
 import { OnboardingAgreementEntity } from '../onboardings/entity/onboarding-agreement.entity';
 import { OnboardingAgreementsRepository } from '../onboardings/onboarding-agreements.repository';
@@ -17,6 +18,7 @@ import { AgreementVersionEntity } from './entity/agreement-version.entity';
   imports: [
     AuditModule,
     AuthModule,
+    OrganizationsModule,
     WorkflowsModule,
     // The publish fan-out notifies through the webhook module, which reaches back into the
     // onboardings module, which reaches here. Every side of that ring defers the same way.

@@ -14,6 +14,7 @@ import {
   createListAdminOnboardingsQuery,
   createOnboarding,
   manager,
+  DEFAULT_ORGANIZATION_ID,
   DEFAULT_WORKFLOW_VERSION_ID,
 } from './testing/onboardings-service.harness';
 import type { ConnectorExecutionAuditProjection } from './onboardings.service';
@@ -292,6 +293,7 @@ describe('OnboardingsService', () => {
       manager,
       expect.objectContaining({
         id: response.onboardingId,
+        organizationId: DEFAULT_ORGANIZATION_ID,
         workflowVersionId: DEFAULT_WORKFLOW_VERSION_ID,
         status: 'awaiting_user',
         currentStep: 'capture_alias',

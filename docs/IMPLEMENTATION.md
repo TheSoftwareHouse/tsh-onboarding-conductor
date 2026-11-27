@@ -2511,16 +2511,16 @@ so a version is a row rather than half of a composite key — decision record
 
 | Table                           | Purpose                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`                   | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, `pending_connector` jsonb (nullable, plain — the connector the onboarding is parked on awaiting a callback, §5), expires_at, completed_at, rejection_reason, timestamps                                                                                                                 |
+| `onboardings`                   | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, `pending_connector` jsonb (nullable, plain — the connector the onboarding is parked on awaiting a callback, §5), expires_at, completed_at, rejection_reason, timestamps, `organization_id` (NOT NULL FK to `auth."organization"`, `ON DELETE RESTRICT`)                                 |
 | `onboarding_documents`          | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                                                                                         |
 | `client_webhook_outbox`         | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                                                                                  |
 | `audit_log`                     | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                                                                               |
 | `otp_challenges`                | one live code per `(onboarding_id, channel)` (`UNIQUE`): `code_hash` (hex SHA-256 of salt and code — never the code), `code_salt`, `expires_at`, `attempts`, `send_count`, timestamps; `onboarding_id` FK `fk_otp_challenges_onboarding` `ON DELETE CASCADE`                                                                                                                                            |
 | `connectors`                    | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                                                                                |
-| `workflows`                     | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below                                                                |
+| `workflows`                     | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below, `organization_id` (same)                                      |
 | `workflow_versions`             | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                                                                               |
 | `workflow_connector_selections` | the operator's connector choice per workflow version and step: composite PK `(workflow_id, version, step_name)`, `version` checked `> 0`, `workflow_id` FK to `workflows` (`ON DELETE CASCADE`, `fk_workflow_connector_selections_workflow`), `connector_id` (checked against `^[a-z0-9_]+$`), `updated_at`, `updated_by`. `step_name` is not a foreign key — it names a step inside the versions' JSON |
-| `agreements`                    | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                                                                                                                            |
+| `agreements`                    | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`, `organization_id` (same)                                                                                                                                                                                                  |
 | `agreement_versions`            | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                                                                                    |
 | `onboarding_agreements`         | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                                                                                        |
 | `encryption_keys`               | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                                                                                    |
@@ -2573,6 +2573,21 @@ migrations glob may export nothing but its class: TypeORM instantiates every exp
 Later migrations continue the sequence as `0002_description.ts`: `0002_create_otp_challenges`
 creates `otp_challenges`, unique on `(onboarding_id, channel)`, then adds its foreign key to
 `onboardings` separately ([0048](decisions/0048-engine-owned-otp-with-channel-adapters.md)).
+
+**Ownership.** `0004_organization_ownership` gives `agreements`, `workflows` and `onboardings` a
+NOT NULL `organization_id`, a foreign key to better-auth's `auth."organization"` with
+`ON DELETE RESTRICT`, so deleting an organization that owns data fails at the database
+([0054](decisions/0054-engine-data-belongs-to-an-organization.md)). Child tables inherit the owner
+through their parent and have no column. The migration seeds one organization, `Default
+organisation` with slug `default`, only when `auth."organization"` is empty; otherwise it adopts the
+oldest and backfills every existing row to it. The default organization is always the oldest by
+`("createdAt", id)`, read through `OrganizationsRepository.getDefaultId` over `OrganizationEntity`.
+Until the current organization exists, the write paths in `workflows.repository`,
+`agreements.repository` and `onboardings.service` set `organization_id` to it. The migration also
+adds a nullable, unused `"parentId"` to `auth."organization"`, a self-reference with
+`ON DELETE RESTRICT`; no route, DTO or panel screen reads or writes it. An insert that omits
+`organization_id` fails on the constraint, so a replica still running the previous version cannot
+insert once the migration has run.
 
 No migration has ever run against a deployed environment, so the incremental history (fifteen
 files, `0001_init` to `0033_add_onboardings_created_at_index`) was folded into this one: it states
@@ -3044,10 +3059,12 @@ names it.
 **Storage.** better-auth's tables (`user`, `session`, `account`, `verification`, `twoFactor`,
 `organization`, `member`, `invitation`) live in their own Postgres schema, `auth`, created by
 migration `0003_better_auth_schema.ts` with better-auth's own camelCase columns and no TypeORM
-entities. The instance reads them through its own `pg` pool (`search_path=auth`), closed on
+entities, except `OrganizationEntity`, a read-only mapping of `auth."organization"` that exists so the
+owner foreign keys have a target entity (§9, decision record
+[0054](decisions/0054-engine-data-belongs-to-an-organization.md)). The instance reads them through its own `pg` pool (`search_path=auth`), closed on
 shutdown. `better-auth migrate` is never run, and `advanced.database.validateSchema` is off, so the
-library never diffs or touches the schema at runtime. Engine data carries no organization: an
-organization groups operators and grants permissions, and nothing in a query filters by it.
+library never diffs or touches the schema at runtime. Agreements, workflows and
+onboardings each belong to an organization (§9); nothing in a query filters by it yet.
 
 **Guard.** `@AdminRoute(permission)` (`src/auth/admin-route.decorator.ts`) applies
 `AdminSessionGuard` (`src/auth/admin-session.guard.ts`), stores the permission as metadata and writes
@@ -3085,11 +3102,11 @@ organization plugin's access control:
 | `audit`      | `read`                     |
 | `agreement`  | `read`, `write`            |
 
-| Role                          | Holds                                                                                            |
-| ----------------------------- | ------------------------------------------------------------------------------------------------ |
-| Organization `owner`, `admin` | Every permission above, plus the library's organization and member / invitation management       |
-| Organization `member`         | Every `read`, plus `onboarding:review`; no `write`, `publish` or `export`                        |
-| Platform `superadmin`         | Bypasses the organization check; user management without `impersonate`; may create organizations |
+| Role                          | Holds                                                                                           |
+| ----------------------------- | ----------------------------------------------------------------------------------------------- |
+| Organization `owner`, `admin` | Every permission above, plus the library's organization and member / invitation management      |
+| Organization `member`         | Every `read`, plus `onboarding:review`; no `write`, `publish` or `export`                       |
+| Platform `superadmin`         | Bypasses the organization check; user management without `impersonate`; creates no organization |
 
 `agreement:write` was added during the build: the first mapping left the two agreement writes
 behind `agreement:read`, which `member` holds. Route to permission, as the `@AdminRoute(` call sites
@@ -3150,8 +3167,20 @@ schema.
 **Seed.** `SuperadminSeedService` (`src/auth/superadmin-seed.service.ts`) runs on application
 bootstrap. With `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD` set and no user holding the
 `superadmin` role, it creates one through the admin plugin's `createUser` and logs the email, never
-the password. A second boot finds the superadmin and does nothing. The seeded user is an ordinary
+the password. A later boot creates no second superadmin, but still makes the seed email's superadmin owner of the default organization when it is not a member (under a Postgres advisory lock, so replicas booting together add one row; a better-auth refusal is logged as a warning). The seeded user is an ordinary
 credential user, with two-factor off until it turns it on.
+
+**One organization.** Nobody creates or deletes an organization ([ADR 0055](decisions/0055-one-organization-in-the-mvp.md)).
+The organization plugin runs with `allowUserToCreateOrganization: false`, so
+`POST /v1/auth/organization/create` answers `403` (`YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_ORGANIZATION`)
+for every user, superadmin included, and with `disableOrganizationDeletion: true`, so
+`POST /v1/auth/organization/delete` answers `404`. Calls with no session, which better-auth treats
+as system actions, are not blocked; the engine makes none. Because the default organization has no
+members otherwise, `SuperadminSeedService.ensureOwnerOfDefaultOrganization` runs wherever the seed
+runs, on every boot: the non-banned superadmin named by `AUTH_SUPERADMIN_EMAIL` becomes an `owner`
+member of the default organization through better-auth's server-side `addMember`, and nothing
+changes when they already are one. That owner invites the operators. A superadmin added later
+through user management is not a member until invited.
 
 **Mail.** `AuthMailer` (`src/auth/auth-mailer.ts`) sends the invitation and the password-reset
 link through `nodemailer` on `AUTH_SMTP_URL` and `AUTH_MAIL_FROM`; locally that is MailHog. It is
@@ -3230,14 +3259,12 @@ invitee sign up with a name and password, accept, and continue to the panel. The
 group holds `/organization` (members, role changes, removal, pending invitations, invite form) for
 the active organization, and, for `platformRole === 'superadmin'` only, `/platform/users` (search,
 platform role, ban and unban, revoke sessions, temporary password) and `/platform/organizations`
-(create one, with the creator as its owner). The organizations page lists only the organizations
-the signed-in superadmin belongs to. The panel does not hide actions a role cannot perform: it
+(a read-only list; the panel has no create form). The organizations page lists only the
+organizations the signed-in superadmin belongs to. The panel does not hide actions a role cannot perform: it
 reacts to the `403`. With `VITE_AUTH_ENABLED=false` the gate renders the panel directly.
 
-Two writes refresh more than their own list. Creating an organization makes the creator its owner
-and changes what every admin read may return, so `createOrganization` awaits the invalidation of
-every query (`awaits: [[]]`). The client refreshes the session on its own after the two-factor,
-organization-create, set-active and accept-invitation calls, but not after the admin plugin's
+One write refreshes more than its own list. The client refreshes the session on its own after the
+two-factor, set-active and accept-invitation calls, but not after the admin plugin's
 `setRole`; `setUserRole` therefore emits `$sessionSignal` itself, so a superadmin who changes their
 own platform role sees the sidebar change without reloading.
 

@@ -1,25 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/api/api-error';
-import {
-  createOrganization,
-  fetchPlatformUsers,
-  fetchSuperadmins,
-  isSuperadmin,
-  setUserRole,
-  slugify,
-} from './platform';
+import { fetchPlatformUsers, fetchSuperadmins, isSuperadmin, setUserRole } from './platform';
 
-const { mockedListUsers, mockedSetRole, mockedCreate, mockedNotify } = vi.hoisted(() => ({
+const { mockedListUsers, mockedSetRole, mockedNotify } = vi.hoisted(() => ({
   mockedNotify: vi.fn(),
   mockedListUsers: vi.fn(),
   mockedSetRole: vi.fn(),
-  mockedCreate: vi.fn(),
 }));
 
 vi.mock('@/services/auth/auth-client', () => ({
   authClient: {
     admin: { listUsers: mockedListUsers, setRole: mockedSetRole },
-    organization: { create: mockedCreate },
     $store: { notify: mockedNotify },
   },
 }));
@@ -81,18 +72,6 @@ describe('platform', () => {
       message: 'At least one active superadmin must remain.',
       status: 403,
     });
-  });
-
-  it('creates an organization under a slug derived from its name', async () => {
-    mockedCreate.mockResolvedValue({ data: { id: 'o-1' }, error: null });
-
-    await createOrganization('Acme Corp, Ltd.');
-
-    expect(mockedCreate).toHaveBeenCalledWith({ name: 'Acme Corp, Ltd.', slug: 'acme-corp-ltd' });
-  });
-
-  it('slugifies to nothing when the name has no letter or digit', () => {
-    expect(slugify('  --  ')).toBe('');
   });
 
   it('recognises a superadmin among several comma-separated roles', () => {

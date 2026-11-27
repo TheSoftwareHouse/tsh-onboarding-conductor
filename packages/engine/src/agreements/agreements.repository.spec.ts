@@ -1,4 +1,5 @@
 import { EntityManager, Repository } from 'typeorm';
+import { OrganizationsRepository } from '../organizations/organizations.repository';
 import { AgreementsRepository } from './agreements.repository';
 import { AgreementEntity } from './entity/agreement.entity';
 import { AgreementVersionEntity } from './entity/agreement-version.entity';
@@ -27,9 +28,14 @@ describe('AgreementsRepository', () => {
       }),
     } as unknown as EntityManager;
 
+    const organizationsRepositoryMock = {
+      getDefaultId: jest.fn().mockResolvedValue('organization-1'),
+    } as unknown as OrganizationsRepository;
+
     return {
-      sut: new AgreementsRepository(),
+      sut: new AgreementsRepository(organizationsRepositoryMock),
       manager,
+      organizationsRepositoryMock,
       agreementRepositoryMock,
       agreementVersionRepositoryMock,
     };
@@ -88,6 +94,16 @@ describe('AgreementsRepository', () => {
 
       const [familyInsertSql] = (harness.manager.query as jest.Mock).mock.calls[0];
       expect(familyInsertSql).toContain('INSERT INTO agreements');
+      expect(familyInsertSql).toContain('organization_id');
+      expect(harness.organizationsRepositoryMock.getDefaultId).toHaveBeenCalledWith(
+        harness.manager,
+      );
+      expect((harness.manager.query as jest.Mock).mock.calls[0][1]).toEqual([
+        expect.any(String),
+        'eu-b2c-terms',
+        'terms_and_conditions',
+        'organization-1',
+      ]);
       expect(familyInsertSql).toContain('ON CONFLICT ON CONSTRAINT uq_agreements_key DO NOTHING');
 
       const [reReadSql, reReadParameters] = (harness.manager.query as jest.Mock).mock.calls[1];

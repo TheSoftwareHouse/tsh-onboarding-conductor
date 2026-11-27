@@ -4,6 +4,7 @@ import { AgreementsModule } from '../agreements/agreements.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { ConnectorsModule } from '../connectors/connectors.module';
+import { OrganizationsModule } from '../organizations/organizations.module';
 import { StorageModule } from '../storage/storage.module';
 import { WebhookModule } from '../webhook/webhook.module';
 import { WorkflowsModule } from '../workflows/workflows.module';
@@ -31,6 +32,7 @@ import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manua
     AuthModule,
     WorkflowsModule,
     ConnectorsModule,
+    OrganizationsModule,
     StorageModule,
     forwardRef(() => WebhookModule),
     TypeOrmModule.forFeature([OnboardingEntity, OnboardingDocumentEntity]),

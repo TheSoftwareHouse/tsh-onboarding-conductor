@@ -1,4 +1,6 @@
+import { Injectable } from '@nestjs/common';
 import { EntityManager, In } from 'typeorm';
+import { OrganizationsRepository } from '../organizations/organizations.repository';
 import { countTotalPages, resolvePaginationWindow, type PaginatedResult } from '../pagination';
 import { generateUuidV7 } from '../utils/uuid.util';
 import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
@@ -140,7 +142,10 @@ const getIdentity = (
   return identity;
 };
 
+@Injectable()
 export class WorkflowsRepository {
+  constructor(private readonly organizationsRepository: OrganizationsRepository) {}
+
   /**
    * Publishes file-sourced revisions into the two tables, in one transaction. The identity row is
    * upserted first, keyed by `key`: a key seen for the first time is given a freshly generated uuid
@@ -522,16 +527,19 @@ export class WorkflowsRepository {
       }
     }
 
+    const organizationId = await this.organizationsRepository.getDefaultId(manager);
+    const organizationIndex = scopeByKey.size * 3 + 1;
     const parameters: unknown[] = [];
     const rows = [...scopeByKey].map(([key, scope]) => {
       const firstIndex = parameters.length + 1;
       parameters.push(generateUuidV7(), key, scope);
 
-      return `($${firstIndex}, $${firstIndex + 1}, $${firstIndex + 2})`;
+      return `($${firstIndex}, $${firstIndex + 1}, $${firstIndex + 2}, $${organizationIndex})`;
     });
+    parameters.push(organizationId);
 
     await manager.query(
-      `INSERT INTO workflows (workflow_id, key, scope)
+      `INSERT INTO workflows (workflow_id, key, scope, organization_id)
        VALUES ${rows.join(', ')}
        ON CONFLICT ON CONSTRAINT uq_workflows_key DO NOTHING`,
       parameters,
@@ -555,13 +563,14 @@ export class WorkflowsRepository {
     key: string,
     name: string | undefined,
   ): Promise<string> {
+    const organizationId = await this.organizationsRepository.getDefaultId(manager);
     // The no-op update row-locks an existing family, so a concurrent delete of it lands first and the insert retries.
     const [family] = await manager.query<Pick<WorkflowIdentityRow, 'workflow_id'>[]>(
-      `INSERT INTO workflows (workflow_id, key, scope, name)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO workflows (workflow_id, key, scope, name, organization_id)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT ON CONSTRAINT uq_workflows_key DO UPDATE SET key = EXCLUDED.key
        RETURNING workflow_id`,
-      [generateUuidV7(), key, DRAFT_FAMILY_SCOPE, name ?? null],
+      [generateUuidV7(), key, DRAFT_FAMILY_SCOPE, name ?? null, organizationId],
     );
 
     return family.workflow_id;

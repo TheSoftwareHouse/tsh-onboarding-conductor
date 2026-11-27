@@ -11,6 +11,11 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ### Added
 
+- Organization ownership — Agreements, workflows and onboardings belong to an organization
+  (`organization_id`, a foreign key to better-auth's `auth."organization"` with `ON DELETE RESTRICT`).
+  Migration `0004` creates a `Default organisation` when none exists, or adopts the oldest, and
+  assigns every existing row to it. New rows go to the oldest organization; no query filters by
+  organization yet. `auth."organization"` gains an unused nullable `"parentId"`.
 - Graph workflow editor — The admin panel's draft editor has an Authored graph tab: add steps from a
   palette, wire ports, edit each step's config in a generated form, drag steps (saved as
   `meta.position`) and undo or redo, saving the same document the JSON tab edits. A stored version
@@ -37,6 +42,16 @@ One product version covers the whole monorepo. Every pull request adds its line 
 
 ### Changed
 
+- **Breaking:** Organizations — No one can create an organization, a superadmin included
+  (`POST /v1/auth/organization/create` answers `403`), and no one can delete one
+  (`POST /v1/auth/organization/delete` answers `404`). The admin panel's create-organization form is
+  gone. Every start where `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD` are set makes that
+  superadmin `owner` of the default organization, so they can invite operators. After upgrading,
+  operators who had removed the pair must set both again for one start; otherwise nobody can invite
+  operators. See [ADR 0055](docs/decisions/0055-one-organization-in-the-mvp.md).
+- **Breaking:** Organization ownership — A direct `INSERT` into `agreements`, `workflows` or
+  `onboardings` now needs `organization_id`. Stop every replica of the previous version before
+  upgrading: once migration `0004` runs, its inserts fail on the `NOT NULL` constraint.
 - Admin panel — The Onboardings Workflow and Workflow version filters are pickers fed by the engine's workflow lists instead of text fields; the version is cleared when the workflow changes.
 - Admin panel — Filter selects (Onboardings, Workflows, Logs) use the panel's own `Select` instead of the browser's native select.
 - **Breaking:** Admin authentication — Operators now sign in through better-auth, built into the

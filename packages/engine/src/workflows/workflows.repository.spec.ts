@@ -1,4 +1,5 @@
 import { EntityManager, In, Repository } from 'typeorm';
+import type { OrganizationsRepository } from '../organizations/organizations.repository';
 import { generateUuidV7 } from '../utils/uuid.util';
 import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
@@ -59,11 +60,16 @@ const createStoredRevision = (
   ...overrides,
 });
 
+const DEFAULT_ORGANIZATION_ID = 'default-organization';
+
 describe('WorkflowsRepository', () => {
   const createHarness = (
     identityRows: WorkflowIdentityRow[] = [],
     storedRevisions: StoredRevisionRow[] = [],
   ) => {
+    const organizationsRepository = {
+      getDefaultId: jest.fn().mockResolvedValue(DEFAULT_ORGANIZATION_ID),
+    } as unknown as jest.Mocked<OrganizationsRepository>;
     const entityRepositoryMock = {
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(null),
@@ -97,7 +103,14 @@ describe('WorkflowsRepository', () => {
     const findSql = (fragment: string): SqlCall | undefined =>
       sqlCalls().find(([sql]) => sql.includes(fragment));
 
-    return { sut: new WorkflowsRepository(), manager, entityRepositoryMock, sqlCalls, findSql };
+    return {
+      sut: new WorkflowsRepository(organizationsRepository),
+      manager,
+      entityRepositoryMock,
+      sqlCalls,
+      findSql,
+      organizationsRepository,
+    };
   };
 
   describe('publishFromFiles', () => {
@@ -139,8 +152,10 @@ describe('WorkflowsRepository', () => {
       const [identities, identityRead, revisionRead, versions] = harness.sqlCalls();
       expect(harness.sqlCalls()).toHaveLength(4);
 
-      expect(identities[0]).toContain('INSERT INTO workflows (workflow_id, key, scope)');
-      expect(identities[0]).toContain('($1, $2, $3), ($4, $5, $6)');
+      expect(identities[0]).toContain(
+        'INSERT INTO workflows (workflow_id, key, scope, organization_id)',
+      );
+      expect(identities[0]).toContain('($1, $2, $3, $7), ($4, $5, $6, $7)');
       expect(identities[0]).toContain('ON CONFLICT ON CONSTRAINT uq_workflows_key DO NOTHING');
       expect(identities[1]).toEqual([
         'candidate-base',
@@ -149,7 +164,9 @@ describe('WorkflowsRepository', () => {
         'candidate-custom',
         'custom',
         'users',
+        DEFAULT_ORGANIZATION_ID,
       ]);
+      expect(harness.organizationsRepository.getDefaultId).toHaveBeenCalledTimes(1);
 
       expect(identityRead[0]).toContain('SELECT workflow_id, key, scope FROM workflows');
       expect(identityRead[1]).toEqual([['base', 'custom']]);
@@ -192,9 +209,14 @@ describe('WorkflowsRepository', () => {
       ]);
 
       const [identities] = harness.sqlCalls();
-      expect(identities[0]).toContain('($1, $2, $3)');
-      expect(identities[0]).not.toContain('$4');
-      expect(identities[1]).toEqual(['candidate-base', 'base', 'fixtures']);
+      expect(identities[0]).toContain('($1, $2, $3, $4)');
+      expect(identities[0]).not.toContain('$5');
+      expect(identities[1]).toEqual([
+        'candidate-base',
+        'base',
+        'fixtures',
+        DEFAULT_ORGANIZATION_ID,
+      ]);
 
       expect(harness.findSql('INSERT INTO workflow_versions')![1]).toEqual([
         'version-base-1',
@@ -499,7 +521,15 @@ describe('WorkflowsRepository', () => {
         'ON CONFLICT ON CONSTRAINT uq_workflows_key DO UPDATE SET key = EXCLUDED.key',
       );
       expect(familySql).toContain('RETURNING workflow_id');
-      expect(familyParameters).toEqual(['new-family', 'flow', 'users', 'Flow']);
+      expect(familySql).toContain('(workflow_id, key, scope, name, organization_id)');
+      expect(familyParameters).toEqual([
+        'new-family',
+        'flow',
+        'users',
+        'Flow',
+        DEFAULT_ORGANIZATION_ID,
+      ]);
+      expect(harness.organizationsRepository.getDefaultId).toHaveBeenCalledTimes(1);
       const [versionSql, versionParameters] = harness.findSql('INSERT INTO workflow_versions')!;
       expect(versionSql).toContain('$5::json');
       expect(versionParameters).toEqual([
@@ -775,7 +805,7 @@ describe('WorkflowsRepository', () => {
       });
       const manager = { query } as unknown as EntityManager;
 
-      return { sut: new WorkflowsRepository(), manager, query };
+      return { sut: new WorkflowsRepository({} as OrganizationsRepository), manager, query };
     };
 
     it('runs the total count and the page query against the same filters', async () => {

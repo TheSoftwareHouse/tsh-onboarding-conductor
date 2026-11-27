@@ -6,7 +6,12 @@ import { Test } from '@nestjs/testing';
 import { Client, type Pool } from 'pg';
 import request from 'supertest';
 import { startE2eServer } from './e2e-server';
-import { createOperator, OPERATOR_EMAIL_DOMAIN, OPERATOR_PASSWORD } from './admin-session.support';
+import {
+  createOperator,
+  OPERATOR_EMAIL_DOMAIN,
+  OPERATOR_PASSWORD,
+  signIn,
+} from './admin-session.support';
 
 const PANEL_ORIGIN = 'http://localhost:5173';
 
@@ -255,6 +260,37 @@ describe('Admin endpoint authentication (e2e)', () => {
       expect(response.headers['set-cookie']).toBeUndefined();
     });
 
+    it('refuses to create an organization, even to a superadmin', async () => {
+      const operator = await createOperator(app, { platformRole: 'superadmin', twoFactor: true });
+      const slug = `refused-${randomUUID()}`;
+
+      await request(app.getHttpServer())
+        .post('/v1/auth/organization/create')
+        .set('Cookie', operator.cookie)
+        .send({ name: 'Second organization', slug })
+        .expect(403);
+
+      const { rowCount } = await pool.query('SELECT 1 FROM auth."organization" WHERE "slug" = $1', [
+        slug,
+      ]);
+      expect(rowCount).toBe(0);
+    });
+
+    it('answers 404 to deleting an organization and leaves it in place', async () => {
+      const operator = await createOperator(app, { organizationRole: 'owner', twoFactor: true });
+
+      await request(app.getHttpServer())
+        .post('/v1/auth/organization/delete')
+        .set('Cookie', operator.cookie)
+        .send({ organizationId: operator.organizationId })
+        .expect(404);
+
+      const { rowCount } = await pool.query('SELECT 1 FROM auth."organization" WHERE "id" = $1', [
+        operator.organizationId,
+      ]);
+      expect(rowCount).toBe(1);
+    });
+
     it('refuses to demote the last superadmin', async () => {
       const operator = await createOperator(app, { platformRole: 'superadmin', twoFactor: true });
 
@@ -361,24 +397,93 @@ describe('Admin endpoint authentication (e2e)', () => {
 
   describe('superadmin seed', () => {
     const seedEmail = `seed-${randomUUID()}@${OPERATOR_EMAIL_DOMAIN}`;
+    const seedConfig = {
+      AUTH_SUPERADMIN_EMAIL: seedEmail,
+      AUTH_SUPERADMIN_PASSWORD: OPERATOR_PASSWORD,
+    };
+    const defaultOrganizationId = `(SELECT "id" FROM auth."organization" ORDER BY "createdAt", "id" LIMIT 1)`;
+
+    const bootSeed = async (): Promise<void> => {
+      const seeded = await bootApp(seedConfig);
+      await seeded.close();
+    };
+
+    const findOwnerRoles = async (): Promise<unknown[]> => {
+      const { rows } = await pool.query(
+        `SELECT m."role" FROM auth."member" m
+           JOIN auth."user" u ON u."id" = m."userId"
+          WHERE u."email" = $1 AND m."organizationId" = ${defaultOrganizationId}`,
+        [seedEmail],
+      );
+
+      return rows;
+    };
 
     it('creates exactly one superadmin across two boots', async () => {
       const keep = await createOperator(app);
 
       await makeOnlySuperadmin(keep.userId);
 
-      for (let boot = 0; boot < 2; boot += 1) {
-        const seeded = await bootApp({
-          AUTH_SUPERADMIN_EMAIL: seedEmail,
-          AUTH_SUPERADMIN_PASSWORD: OPERATOR_PASSWORD,
-        });
-        await seeded.close();
-      }
+      await bootSeed();
+      await bootSeed();
 
       const { rows } = await pool.query(
         `SELECT "email" FROM auth."user" WHERE 'superadmin' = ANY(string_to_array("role", ','))`,
       );
       expect(rows).toEqual([{ email: seedEmail }]);
     }, 90000);
+
+    describe('with the seeded superadmin', () => {
+      beforeAll(async () => {
+        const { rowCount } = await pool.query('SELECT 1 FROM auth."user" WHERE "email" = $1', [
+          seedEmail,
+        ]);
+
+        if (rowCount === 0) {
+          const keep = await createOperator(app);
+
+          await makeOnlySuperadmin(keep.userId);
+        }
+
+        await bootSeed();
+      }, 90000);
+
+      it('makes the seeded superadmin the one owner of the default organization across boots', async () => {
+        await bootSeed();
+
+        expect(await findOwnerRoles()).toEqual([{ role: 'owner' }]);
+      }, 90000);
+
+      it('restores a deleted owner membership with exactly one row on the next boot', async () => {
+        await pool.query(
+          `DELETE FROM auth."member"
+            WHERE "organizationId" = ${defaultOrganizationId}
+              AND "userId" = (SELECT "id" FROM auth."user" WHERE "email" = $1)`,
+          [seedEmail],
+        );
+        expect(await findOwnerRoles()).toEqual([]);
+
+        await bootSeed();
+
+        expect(await findOwnerRoles()).toEqual([{ role: 'owner' }]);
+      }, 90000);
+
+      it('lets the seeded superadmin invite an operator into the default organization', async () => {
+        const cookie = await signIn(app, seedEmail, OPERATOR_PASSWORD);
+        const { rows } = await pool.query(
+          'SELECT "id" FROM auth."organization" ORDER BY "createdAt", "id" LIMIT 1',
+        );
+
+        await request(app.getHttpServer())
+          .post('/v1/auth/organization/invite-member')
+          .set('Cookie', cookie)
+          .send({
+            email: `${randomUUID()}@${OPERATOR_EMAIL_DOMAIN}`,
+            role: 'member',
+            organizationId: rows[0].id,
+          })
+          .expect(200);
+      });
+    });
   });
 });

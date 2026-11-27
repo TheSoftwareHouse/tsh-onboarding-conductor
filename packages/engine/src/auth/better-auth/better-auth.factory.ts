@@ -6,7 +6,6 @@ import {
   ORGANIZATION_ROLE_PERMISSIONS,
   SUPERADMIN_PERMISSIONS,
   SUPERADMIN_ROLE,
-  hasSuperadminRole,
 } from '../domain/admin-permissions';
 import type { AuthMailer } from '../auth-mailer';
 import { findActiveOrganizationId } from './active-organization.hook';
@@ -226,7 +225,9 @@ export async function createBetterAuth(
           ),
         ac: organizationAc,
         roles: organizationRoles,
-        allowUserToCreateOrganization: (user) => hasSuperadminRole(user.role),
+        // One organization in the MVP (ADR 0055): migration 0004 creates it, nobody adds or removes one.
+        allowUserToCreateOrganization: false,
+        disableOrganizationDeletion: true,
       }),
       plugins.admin({
         ac: platformAc,

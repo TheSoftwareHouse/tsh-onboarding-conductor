@@ -450,8 +450,8 @@ describe('Admin workflow drafts (e2e)', () => {
 
     it('refuses to replace or delete a draft an onboarding references', async () => {
       await dataSource.query(
-        `INSERT INTO onboardings (id, workflow_version_id, status, current_step)
-         VALUES (gen_random_uuid(), $1, 'awaiting_user', $2)`,
+        `INSERT INTO onboardings (id, organization_id, workflow_version_id, status, current_step)
+         VALUES (gen_random_uuid(), (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1), $1, 'awaiting_user', $2)`,
         [draftVersionId, MISSING_ONBOARDING_STEP],
       );
 

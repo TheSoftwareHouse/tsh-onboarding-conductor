@@ -41,8 +41,9 @@ it before changing any of those areas; this file only orients within the package
   spec — mock `ADMIN_SESSION_VERIFIER` instead. `load-better-auth.spec.ts` fails on a second
   module naming it.
 - better-auth's tables live in the Postgres schema `auth`, created by migration
-  `0003_better_auth_schema.ts` and never by `better-auth migrate`. They have no entities; a change
-  to them is a new TypeORM migration.
+  `0003_better_auth_schema.ts` and never by `better-auth migrate`. They have no entities, except the
+  read-only `OrganizationEntity` over `auth."organization"` (ADR 0054); a change to them is a new
+  TypeORM migration.
 - Every route and DTO carries `@nestjs/swagger` metadata, and response shapes are decorated
   classes under `dto/` (domain types stay plain; the DTO mirrors them). `.claude/rules/api-docs.md`
   states the conventions; `src/openapi/openapi-document.spec.ts` holds the committed

@@ -380,6 +380,7 @@ describe('OnboardingsRepository', () => {
       const harness = createHarness();
       const data = {
         id: 'onboarding-1',
+        organizationId: 'org_default',
         workflowVersionId: '01912345-6789-7abc-8def-00000000f001',
         status: 'awaiting_user',
         currentStep: 'collect_profile',

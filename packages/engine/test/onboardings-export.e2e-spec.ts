@@ -212,8 +212,9 @@ describe('GET /v1/onboardings/export (e2e)', () => {
     // Created-at values differ by single microseconds and tie in threes, so a cursor that went
     // through a JS `Date` (millisecond precision) would skip or repeat rows at the 5000 boundary.
     const bulk = await dataSource().query<Array<{ id: string }>>(
-      `INSERT INTO onboardings (id, workflow_version_id, status, current_step, context, scores, created_at, updated_at, completed_at)
+      `INSERT INTO onboardings (id, organization_id, workflow_version_id, status, current_step, context, scores, created_at, updated_at, completed_at)
        SELECT gen_random_uuid(),
+              (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1),
               (SELECT wv.workflow_version_id FROM workflow_versions wv
                  JOIN workflows w ON w.workflow_id = wv.workflow_id
                 WHERE w.key = $1 AND wv.version = 1),
@@ -232,8 +233,9 @@ describe('GET /v1/onboardings/export (e2e)', () => {
 
     specialRowId = randomUUID();
     await dataSource().query(
-      `INSERT INTO onboardings (id, workflow_version_id, status, current_step, context, scores, created_at, updated_at)
+      `INSERT INTO onboardings (id, organization_id, workflow_version_id, status, current_step, context, scores, created_at, updated_at)
        VALUES ($1,
+               (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1),
                (SELECT wv.workflow_version_id FROM workflow_versions wv
                   JOIN workflows w ON w.workflow_id = wv.workflow_id
                  WHERE w.key = $2 AND wv.version = 1),
@@ -254,8 +256,9 @@ describe('GET /v1/onboardings/export (e2e)', () => {
 
     // A second workflow, so the header is a union across more than one workflow version.
     await dataSource().query(
-      `INSERT INTO onboardings (id, workflow_version_id, status, current_step, context, created_at, updated_at)
+      `INSERT INTO onboardings (id, organization_id, workflow_version_id, status, current_step, context, created_at, updated_at)
        VALUES ($1,
+               (SELECT id FROM auth."organization" ORDER BY "createdAt", id LIMIT 1),
                (SELECT wv.workflow_version_id FROM workflow_versions wv
                   JOIN workflows w ON w.workflow_id = wv.workflow_id
                  WHERE w.key = $2 AND wv.version = 1),
