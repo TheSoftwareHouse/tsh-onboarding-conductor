@@ -10,6 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import type { Pool } from 'pg';
 import { AuditModule } from '../audit/audit.module';
+import { OrganizationsModule } from '../organizations/organizations.module';
 import {
   ADMIN_SESSION_VERIFIER,
   type AdminSessionVerifierPort,
@@ -29,7 +30,7 @@ const isAdminAuthEnabled = (configService: ConfigService): boolean =>
 @Module({
   // Deferred both ways: the guard records access decisions in the audit log, and the audit
   // endpoint is itself behind the guard.
-  imports: [forwardRef(() => AuditModule)],
+  imports: [forwardRef(() => AuditModule), OrganizationsModule],
   providers: [
     {
       provide: BETTER_AUTH_POOL,

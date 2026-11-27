@@ -29,7 +29,7 @@ Accounts are by invitation only: `POST /v1/auth/sign-up/email` for an address wi
 { "message": "Sign-up is by invitation only." }
 ```
 
-The first account, a superadmin, is created from `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD` on a fresh deployment. A superadmin creates organizations and invites operators into them; the invitation mail carries a link to `/accept-invitation/{invitationId}` on the engine's own origin, where the invitee signs up with a name and a password, or signs in, and accepts. Microsoft sign-in, when the deployment enables it, follows the same invitation rule.
+The first account, a superadmin, is created from `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD` on a fresh deployment. The deployment has one organization, and the superadmin is its owner, so the superadmin invites operators into it; the invitation mail carries a link to `/accept-invitation/{invitationId}` on the engine's own origin, where the invitee signs up with a name and a password, or signs in, and accepts. Microsoft sign-in, when the deployment enables it, follows the same invitation rule.
 
 ### Two-factor authentication
 

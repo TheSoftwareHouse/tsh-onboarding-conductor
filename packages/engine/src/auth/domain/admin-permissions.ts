@@ -47,6 +47,9 @@ export const SUPERADMIN_PERMISSIONS = {
 
 export const SUPERADMIN_ROLE = 'superadmin';
 
+/** The organization role the seeded superadmin holds in the default organization. */
+export const ORGANIZATION_OWNER_ROLE = 'owner';
+
 /** better-auth stores several roles as one comma-separated string (`user,superadmin`). */
 export const hasSuperadminRole = (role: string | string[] | null | undefined): boolean =>
   (Array.isArray(role) ? role : (role ?? '').split(',')).includes(SUPERADMIN_ROLE);

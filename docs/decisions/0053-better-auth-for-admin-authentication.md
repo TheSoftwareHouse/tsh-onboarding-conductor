@@ -4,7 +4,7 @@
 - **Date:** 2026-11-16
 - **Tags:** security, admin-panel, api, persistence, configuration
 - **Supersedes:** —
-- **Superseded by:** [0054](0054-engine-data-belongs-to-an-organization.md), its rule that engine data stays global and, for `auth."organization"` alone, its no-entity exemption
+- **Superseded by:** [0054](0054-engine-data-belongs-to-an-organization.md), its rule that engine data stays global and, for `auth."organization"` alone, its no-entity exemption; [0055](0055-one-organization-in-the-mvp.md), its superadmin's ability to create organizations only
 
 ## Decision
 

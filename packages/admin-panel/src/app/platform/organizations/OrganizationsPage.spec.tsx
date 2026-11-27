@@ -16,9 +16,6 @@ vi.mock('./components/OrganizationsTable/OrganizationsTable', () => ({
     <p>organizations: {organizations.length}</p>
   ),
 }));
-vi.mock('./components/CreateOrganizationForm/CreateOrganizationForm', () => ({
-  CreateOrganizationForm: () => <p>create form</p>,
-}));
 
 function renderPage() {
   return render(
@@ -37,7 +34,7 @@ afterEach(() => {
 });
 
 describe('OrganizationsPage', () => {
-  it('shows the create form and the organizations', async () => {
+  it('shows the organizations', async () => {
     vi.mocked(fetchPlatformOrganizations).mockResolvedValue([
       { id: 'o-1' },
       { id: 'o-2' },
@@ -46,7 +43,6 @@ describe('OrganizationsPage', () => {
     renderPage();
 
     expect(await screen.findByText('organizations: 2')).toBeInTheDocument();
-    expect(screen.getByText('create form')).toBeInTheDocument();
   });
 
   it('reports a failed load', async () => {
@@ -58,7 +54,6 @@ describe('OrganizationsPage', () => {
     expect(alert).toHaveTextContent('Unable to load organizations');
     expect(alert).toHaveTextContent('Boom');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
-    expect(screen.getByText('create form')).toBeInTheDocument();
   });
 
   it('keeps the table and says so when there are no organizations', async () => {

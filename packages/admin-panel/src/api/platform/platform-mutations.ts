@@ -1,7 +1,6 @@
 import { mutationOptions } from '@/services/query-client/mutation-options';
 import {
   banUser,
-  createOrganization,
   revokeUserSessions,
   setUserPassword,
   setUserRole,
@@ -38,13 +37,5 @@ export const platformMutations = {
     mutationOptions({
       mutationFn: (variables: { userId: string; password: string }) =>
         setUserPassword(variables.userId, variables.password),
-    }),
-  createOrganization: () =>
-    mutationOptions({
-      mutationFn: (name: string) => createOrganization(name),
-      // better-auth makes the new organization the session's active one; `SessionCacheGuard` resets
-      // the organization-scoped reads when the session reports it. The platform list is refreshed
-      // here, since it changes whichever organization is active.
-      meta: { awaits: () => [platformQueries.organizations().queryKey] as const },
     }),
 };

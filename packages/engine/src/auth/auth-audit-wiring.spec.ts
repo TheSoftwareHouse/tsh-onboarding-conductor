@@ -7,6 +7,7 @@ import { DataSource } from 'typeorm';
 import { AdminAccessAuditAdapter } from '../audit/admin-access-audit.adapter';
 import { AuditModule } from '../audit/audit.module';
 import { AuditLogEntity } from '../audit/entity/audit-log.entity';
+import { OrganizationEntity } from '../organizations/entity/organization.entity';
 import { ADMIN_ACCESS_AUDIT } from './admin-access-audit.port';
 import { AdminSessionGuard } from './admin-session.guard';
 import { AuthModule } from './auth.module';
@@ -40,6 +41,8 @@ describe('AuthModule and AuditModule wiring', () => {
       ],
     })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
+      .useValue({})
+      .overrideProvider(getRepositoryToken(OrganizationEntity))
       .useValue({})
       .compile();
   }

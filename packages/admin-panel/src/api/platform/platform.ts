@@ -90,19 +90,3 @@ export async function fetchPlatformOrganizations() {
 }
 
 export type PlatformOrganization = Awaited<ReturnType<typeof fetchPlatformOrganizations>>[number];
-
-/** better-auth wants a unique slug as well; the name, lower-cased and hyphenated, is enough for one. */
-export function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-/** The caller becomes the organization's owner, so a superadmin can invite into it straight away. */
-export function createOrganization(name: string) {
-  return unwrap(
-    authClient.organization.create({ name, slug: slugify(name) }),
-    'Unable to create the organization.',
-  );
-}

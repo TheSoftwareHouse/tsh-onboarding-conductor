@@ -3102,11 +3102,11 @@ organization plugin's access control:
 | `audit`      | `read`                     |
 | `agreement`  | `read`, `write`            |
 
-| Role                          | Holds                                                                                            |
-| ----------------------------- | ------------------------------------------------------------------------------------------------ |
-| Organization `owner`, `admin` | Every permission above, plus the library's organization and member / invitation management       |
-| Organization `member`         | Every `read`, plus `onboarding:review`; no `write`, `publish` or `export`                        |
-| Platform `superadmin`         | Bypasses the organization check; user management without `impersonate`; may create organizations |
+| Role                          | Holds                                                                                           |
+| ----------------------------- | ----------------------------------------------------------------------------------------------- |
+| Organization `owner`, `admin` | Every permission above, plus the library's organization and member / invitation management      |
+| Organization `member`         | Every `read`, plus `onboarding:review`; no `write`, `publish` or `export`                       |
+| Platform `superadmin`         | Bypasses the organization check; user management without `impersonate`; creates no organization |
 
 `agreement:write` was added during the build: the first mapping left the two agreement writes
 behind `agreement:read`, which `member` holds. Route to permission, as the `@AdminRoute(` call sites
@@ -3167,8 +3167,20 @@ schema.
 **Seed.** `SuperadminSeedService` (`src/auth/superadmin-seed.service.ts`) runs on application
 bootstrap. With `AUTH_SUPERADMIN_EMAIL` and `AUTH_SUPERADMIN_PASSWORD` set and no user holding the
 `superadmin` role, it creates one through the admin plugin's `createUser` and logs the email, never
-the password. A second boot finds the superadmin and does nothing. The seeded user is an ordinary
+the password. A later boot creates no second superadmin, but still makes the seed email's superadmin owner of the default organization when it is not a member (under a Postgres advisory lock, so replicas booting together add one row; a better-auth refusal is logged as a warning). The seeded user is an ordinary
 credential user, with two-factor off until it turns it on.
+
+**One organization.** Nobody creates or deletes an organization ([ADR 0055](decisions/0055-one-organization-in-the-mvp.md)).
+The organization plugin runs with `allowUserToCreateOrganization: false`, so
+`POST /v1/auth/organization/create` answers `403` (`YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_ORGANIZATION`)
+for every user, superadmin included, and with `disableOrganizationDeletion: true`, so
+`POST /v1/auth/organization/delete` answers `404`. Calls with no session, which better-auth treats
+as system actions, are not blocked; the engine makes none. Because the default organization has no
+members otherwise, `SuperadminSeedService.ensureOwnerOfDefaultOrganization` runs wherever the seed
+runs, on every boot: the non-banned superadmin named by `AUTH_SUPERADMIN_EMAIL` becomes an `owner`
+member of the default organization through better-auth's server-side `addMember`, and nothing
+changes when they already are one. That owner invites the operators. A superadmin added later
+through user management is not a member until invited.
 
 **Mail.** `AuthMailer` (`src/auth/auth-mailer.ts`) sends the invitation and the password-reset
 link through `nodemailer` on `AUTH_SMTP_URL` and `AUTH_MAIL_FROM`; locally that is MailHog. It is
@@ -3247,14 +3259,12 @@ invitee sign up with a name and password, accept, and continue to the panel. The
 group holds `/organization` (members, role changes, removal, pending invitations, invite form) for
 the active organization, and, for `platformRole === 'superadmin'` only, `/platform/users` (search,
 platform role, ban and unban, revoke sessions, temporary password) and `/platform/organizations`
-(create one, with the creator as its owner). The organizations page lists only the organizations
-the signed-in superadmin belongs to. The panel does not hide actions a role cannot perform: it
+(a read-only list; the panel has no create form). The organizations page lists only the
+organizations the signed-in superadmin belongs to. The panel does not hide actions a role cannot perform: it
 reacts to the `403`. With `VITE_AUTH_ENABLED=false` the gate renders the panel directly.
 
-Two writes refresh more than their own list. Creating an organization makes the creator its owner
-and changes what every admin read may return, so `createOrganization` awaits the invalidation of
-every query (`awaits: [[]]`). The client refreshes the session on its own after the two-factor,
-organization-create, set-active and accept-invitation calls, but not after the admin plugin's
+One write refreshes more than its own list. The client refreshes the session on its own after the
+two-factor, set-active and accept-invitation calls, but not after the admin plugin's
 `setRole`; `setUserRole` therefore emits `$sessionSignal` itself, so a superadmin who changes their
 own platform role sees the sidebar change without reloading.
 

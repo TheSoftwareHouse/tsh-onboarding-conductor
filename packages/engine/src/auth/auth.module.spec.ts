@@ -7,6 +7,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { AuditLogEntity } from '../audit/entity/audit-log.entity';
+import { OrganizationEntity } from '../organizations/entity/organization.entity';
 import { ADMIN_SESSION_VERIFIER } from './admin-session-verifier.port';
 import { AuthModule } from './auth.module';
 import { BetterAuthSessionVerifier } from './better-auth/better-auth-session.verifier';
@@ -46,6 +47,8 @@ describe('AuthModule session verifier wiring', () => {
       ],
     })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
+      .useValue({})
+      .overrideProvider(getRepositoryToken(OrganizationEntity))
       .useValue({})
       .compile();
   }
